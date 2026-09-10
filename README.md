@@ -3,6 +3,17 @@
 Software que recebe fotos de um imóvel, costura em panorama 360 e publica um tour
 navegável. Roda inteiro na máquina local, sem depender de Kuula, CloudPano ou internet.
 
+**Repositório:** https://github.com/Jvsrp77/tour-virtual-360 *(privado)*
+
+## Clonar
+
+```bash
+git clone https://github.com/Jvsrp77/tour-virtual-360.git
+```
+
+O modelo de profundidade (94 MB) não vem no repositório. Depois de clonar, rode
+`python baixar_modelo.py` uma vez — sem ele tudo funciona, menos o modo "andar".
+
 ## Como rodar
 
 Dê dois cliques em `iniciar.bat`. O navegador abre sozinho no painel.
