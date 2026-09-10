@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tour Virtual</title>
 <link rel="stylesheet" href="/static/vendor/pannellum.css">
+<script>
+// O imovel vem do proprio endereco (/painel/<id>, /tour/<id>, /andar/<id>).
+// No ZIP exportado nao existe servidor: as variaveis window.__* sao injetadas
+// na exportacao e apontam para os arquivos soltos ao lado da pagina.
+const IMOVEL   = location.pathname.split('/').filter(Boolean)[1] || '';
+const URL_TOUR = window.__TOUR__  || ('/api/imoveis/' + IMOVEL + '/tour');
+const API      = '/api/imoveis/' + IMOVEL;
+const CENAS    = window.__CENAS__ || ('/data/' + IMOVEL + '/scenes/');
+const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
+const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
+</script>
 <script src="/static/vendor/pannellum.js"></script>
 <style>
   :root{ --acento:#e07b39; }
@@ -117,7 +128,7 @@ const $ = id => document.getElementById(id);
 
 async function iniciar(){
   try{
-    tour = await (await fetch('/api/tour')).json();
+    tour = await (await fetch(URL_TOUR)).json();
   }catch(e){
     $('carregando').innerHTML = '<div class="dica-vazio">Não consegui carregar os dados do tour.</div>';
     return;
@@ -154,7 +165,7 @@ function montarCenas(){
   tour.cenas.forEach(c => {
     cenas[c.id] = {
       type: 'equirectangular',
-      panorama: '/data/scenes/' + c.arquivo,
+      panorama: CENAS + c.arquivo,
       haov: c.haov, vaov: c.vaov, vOffset: 0,
       yaw: c.vista_inicial.yaw, pitch: c.vista_inicial.pitch, hfov: c.vista_inicial.hfov,
       compass: c.panorama_completo,
@@ -193,7 +204,7 @@ function montarCenas(){
 function desenharMenu(){
   $('menu').innerHTML = tour.cenas.map(c => `
     <div class="amb ${c.id === atual ? 'ativo' : ''}" onclick="irPara('${c.id}')">
-      <img src="/data/scenes/${c.arquivo}" alt="">
+      <img src="${CENAS}${c.arquivo}" alt="">
       <span>${c.nome}</span>
     </div>`).join('');
 }
@@ -201,7 +212,7 @@ function desenharMenu(){
 function irPara(id){ if (id !== atual) visor.loadScene(id); }
 
 function andarAqui(){
-  location.href = '/andar?cena=' + atual;
+  location.href = URL_ANDAR + '?cena=' + atual;
 }
 
 function atualizarBotaoAndar(){
@@ -233,7 +244,7 @@ async function enviarLead(){
     return;
   }
   try{
-    await fetch('/api/leads', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    await fetch(API + '/leads', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(dados)});
   }catch(e){ /* versao exportada nao tem servidor: segue o baile */ }
   sessionStorage.setItem('lead_ok', '1');

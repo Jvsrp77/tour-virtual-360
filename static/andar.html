@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Caminhar pelo imóvel</title>
+<script>
+// O imovel vem do proprio endereco (/painel/<id>, /tour/<id>, /andar/<id>).
+// No ZIP exportado nao existe servidor: as variaveis window.__* sao injetadas
+// na exportacao e apontam para os arquivos soltos ao lado da pagina.
+const IMOVEL   = location.pathname.split('/').filter(Boolean)[1] || '';
+const URL_TOUR = window.__TOUR__  || ('/api/imoveis/' + IMOVEL + '/tour');
+const API      = '/api/imoveis/' + IMOVEL;
+const CENAS    = window.__CENAS__ || ('/data/' + IMOVEL + '/scenes/');
+const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
+const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
+</script>
 <script src="/static/vendor/three.js"></script>
 <style>
   :root{ --acento:#e07b39; }
@@ -84,7 +95,7 @@
 </div>
 
 <div class="topo-dir">
-  <a class="bt" href="/tour">Voltar ao tour</a>
+  <a class="bt" id="btVoltar" href="#">Voltar ao tour</a>
   <button class="bt primario" onclick="recentrar()">Centralizar</button>
 </div>
 
@@ -128,7 +139,7 @@ function avisar(texto){
 
 async function iniciar(){
   let tour;
-  try { tour = await (await fetch('/api/tour')).json(); }
+  try { tour = await (await fetch(URL_TOUR)).json(); }
   catch(e){ return falhar('Não consegui carregar o tour.'); }
 
   const comProfundidade = tour.cenas.filter(c => c.profundidade);
@@ -245,8 +256,8 @@ async function carregarPonto(p){
   if (p.malha || p.carregando) return;
   p.carregando = true;
   const [textura, prof] = await Promise.all([
-    carregarTextura('/data/scenes/' + p.cena.arquivo),
-    carregarProfundidade('/data/scenes/' + p.cena.profundidade)
+    carregarTextura(CENAS + p.cena.arquivo),
+    carregarProfundidade(CENAS + p.cena.profundidade)
   ]);
 
   const nv = (GRADE_L + 1) * (GRADE_A + 1);
@@ -546,6 +557,7 @@ function animar(){
   desenharMapa();
 }
 
+$('btVoltar').href = URL_VOLTAR;
 iniciar();
 </script>
 </body>

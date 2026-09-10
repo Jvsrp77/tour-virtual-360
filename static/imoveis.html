@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imóveis · Tour Virtual</title>
+<style>
+  :root{
+    --bg:#14161a; --painel:#1c1f25; --painel2:#22262d; --borda:#2e333c;
+    --texto:#e8eaed; --suave:#9aa2ad; --acento:#e07b39; --erro:#d9534f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--texto);
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:14px 26px;
+         background:var(--painel);border-bottom:1px solid var(--borda)}
+  header h1{font-size:16px;margin:0;font-weight:600}
+  header h1 span{color:var(--acento)}
+  .crescer{flex:1}
+  button{font:inherit;cursor:pointer;border-radius:7px;border:1px solid var(--borda);
+         background:var(--painel2);color:var(--texto);padding:9px 14px;transition:.15s}
+  button:hover{border-color:#454c58;background:#2a2f37}
+  button.primario{background:var(--acento);border-color:var(--acento);color:#1a1207;font-weight:600}
+  button.primario:hover{background:#ee8c4b}
+  button.perigo:hover{border-color:var(--erro);color:#ff8a86}
+  input{font:inherit;background:#121418;color:var(--texto);border:1px solid var(--borda);
+        border-radius:7px;padding:10px 12px;width:100%}
+  input:focus{outline:none;border-color:var(--acento)}
+
+  main{max-width:1080px;margin:0 auto;padding:28px 26px 60px}
+  .topo{display:flex;align-items:flex-end;gap:14px;margin-bottom:22px}
+  .topo h2{margin:0;font-size:20px}
+  .topo p{margin:3px 0 0;color:var(--suave);font-size:13px}
+
+  .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(285px,1fr));gap:16px}
+  .cartao{background:var(--painel);border:1px solid var(--borda);border-radius:12px;
+          overflow:hidden;display:flex;flex-direction:column;transition:.15s}
+  .cartao:hover{border-color:#454c58;transform:translateY(-2px)}
+  .cartao .capa{height:140px;background:#0d0f12;background-size:cover;
+                background-position:center;position:relative}
+  .cartao .capa .vazia{display:flex;height:100%;align-items:center;justify-content:center;
+                       color:#4d545e;font-size:12px}
+  .cartao .corpo{padding:14px 15px;flex:1;display:flex;flex-direction:column;gap:3px}
+  .cartao h3{margin:0;font-size:15px;line-height:1.35}
+  .cartao .end{font-size:12px;color:var(--suave)}
+  .cartao .preco{color:var(--acento);font-weight:700;font-size:15px;margin-top:4px}
+  .selos{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+  .selo{font-size:11px;color:var(--suave);border:1px solid var(--borda);
+        border-radius:5px;padding:2px 7px}
+  .selo.destaque{color:var(--acento);border-color:var(--acento)}
+  .acoes{display:flex;gap:7px;padding:0 15px 14px}
+  .acoes button{flex:1;padding:7px 9px;font-size:12.5px}
+
+  .vazio{text-align:center;padding:70px 20px;color:var(--suave)}
+  .vazio b{display:block;color:var(--texto);font-size:17px;margin-bottom:7px}
+
+  dialog{background:var(--painel);color:var(--texto);border:1px solid var(--borda);
+         border-radius:12px;padding:22px;max-width:430px;width:92%}
+  dialog::backdrop{background:rgba(0,0,0,.65)}
+  dialog h3{margin:0 0 6px;font-size:17px}
+  dialog p{margin:0 0 14px;color:var(--suave);font-size:13px}
+  .fechar{display:flex;justify-content:flex-end;margin-top:16px;gap:8px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tour Virtual <span>·</span> Imóveis</h1>
+  <div class="crescer"></div>
+  <button class="primario" onclick="abrirNovo()">+ Novo imóvel</button>
+</header>
+
+<main>
+  <div class="topo">
+    <div>
+      <h2>Seus imóveis</h2>
+      <p id="resumo"></p>
+    </div>
+  </div>
+  <div class="grade" id="grade"></div>
+</main>
+
+<dialog id="dlgNovo">
+  <h3>Novo imóvel</h3>
+  <p>Você pode mudar o título depois, no painel.</p>
+  <input type="text" id="tituloNovo" placeholder="Ex: Casa 3 quartos - Jardim Aurora">
+  <div class="fechar">
+    <button onclick="document.getElementById('dlgNovo').close()">Cancelar</button>
+    <button class="primario" onclick="criar()">Criar</button>
+  </div>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function carregar(){
+  const j = await (await fetch('/api/imoveis')).json();
+  const lista = j.imoveis || [];
+
+  const totalAmb = lista.reduce((s, i) => s + i.ambientes, 0);
+  const totalLeads = lista.reduce((s, i) => s + i.leads, 0);
+  $('resumo').textContent = lista.length
+    ? `${lista.length} imóvel(is) · ${totalAmb} ambiente(s) · ${totalLeads} contato(s) capturado(s)`
+    : '';
+
+  if (!lista.length){
+    $('grade').innerHTML = `<div class="vazio" style="grid-column:1/-1">
+      <b>Nenhum imóvel ainda</b>
+      Crie o primeiro para começar a montar o tour.</div>`;
+    return;
+  }
+
+  $('grade').innerHTML = lista.map(i => `
+    <div class="cartao">
+      <div class="capa" ${i.capa ? `style="background-image:url('/data/${i.id}/scenes/${i.capa}')"` : ''}>
+        ${i.capa ? '' : '<div class="vazia">sem ambiente ainda</div>'}
+      </div>
+      <div class="corpo">
+        <h3>${escapar(i.titulo)}</h3>
+        ${i.endereco ? `<div class="end">${escapar(i.endereco)}</div>` : ''}
+        ${i.preco ? `<div class="preco">${escapar(i.preco)}</div>` : ''}
+        <div class="selos">
+          <span class="selo">${i.ambientes} ambiente(s)</span>
+          ${i.com_profundidade ? `<span class="selo destaque">${i.com_profundidade} com caminhada</span>` : ''}
+          ${i.leads ? `<span class="selo">${i.leads} lead(s)</span>` : ''}
+        </div>
+      </div>
+      <div class="acoes">
+        <button class="primario" onclick="location.href='/painel/${i.id}'">Editar</button>
+        <button onclick="window.open('/tour/${i.id}','_blank')" ${i.ambientes ? '' : 'disabled'}>Ver</button>
+        <button class="perigo" onclick="remover('${i.id}', ${JSON.stringify(i.titulo)})">Excluir</button>
+      </div>
+    </div>`).join('');
+}
+
+const escapar = t => String(t).replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function abrirNovo(){ $('tituloNovo').value = ''; $('dlgNovo').showModal(); $('tituloNovo').focus(); }
+
+async function criar(){
+  const titulo = $('tituloNovo').value.trim();
+  const j = await (await fetch('/api/imoveis', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({titulo})})).json();
+  $('dlgNovo').close();
+  location.href = '/painel/' + j.id;
+}
+
+async function remover(id, titulo){
+  if (!confirm(`Excluir "${titulo}"?\n\nIsso apaga os ambientes, os mapas de profundidade `
+             + `e os contatos capturados deste imóvel. Não tem como desfazer.`)) return;
+  await fetch('/api/imoveis/' + id, {method: 'DELETE'});
+  carregar();
+}
+
+$('tituloNovo').addEventListener('keydown', e => { if (e.key === 'Enter') criar(); });
+carregar();
+</script>
+</body>
+</html>

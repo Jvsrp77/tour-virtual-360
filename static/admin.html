@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Painel · Tour Virtual</title>
 <link rel="stylesheet" href="/static/vendor/pannellum.css">
+<script>
+// O imovel vem do proprio endereco (/painel/<id>, /tour/<id>, /andar/<id>).
+// No ZIP exportado nao existe servidor: as variaveis window.__* sao injetadas
+// na exportacao e apontam para os arquivos soltos ao lado da pagina.
+const IMOVEL   = location.pathname.split('/').filter(Boolean)[1] || '';
+const URL_TOUR = window.__TOUR__  || ('/api/imoveis/' + IMOVEL + '/tour');
+const API      = '/api/imoveis/' + IMOVEL;
+const CENAS    = window.__CENAS__ || ('/data/' + IMOVEL + '/scenes/');
+const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
+const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
+</script>
 <script src="/static/vendor/pannellum.js"></script>
 <style>
   :root{
@@ -91,13 +102,15 @@
 <body>
 
 <header>
-  <h1>Tour Virtual <span>·</span> Painel</h1>
+  <button onclick="location.href='/imoveis'" title="Voltar para a lista de imóveis"
+          style="padding:8px 12px">&larr; Imóveis</button>
+  <h1 id="tituloImovel">Tour Virtual <span>·</span> Painel</h1>
   <div class="crescer"></div>
   <button onclick="abrirGuia()">Guia de captura</button>
   <button onclick="verLeads()">Leads</button>
   <button onclick="copiarEmbed()">Copiar embed</button>
-  <button onclick="location.href='/api/exportar'">Exportar ZIP</button>
-  <button class="primario" onclick="window.open('/tour','_blank')">Ver o tour</button>
+  <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
+  <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
 </header>
 
 <div class="layout">
@@ -158,7 +171,7 @@
         <button onclick="autoPlanta()">Distribuir</button>
       </div>
       <button class="primario" style="width:100%;margin-top:8px"
-              onclick="window.open('/andar','_blank')">Caminhar pelo imóvel</button>
+              onclick="window.open(URL_ANDAR,'_blank')">Caminhar pelo imóvel</button>
     </div>
   </div>
 
@@ -320,8 +333,9 @@ function aviso(texto, tipo){
 function progresso(p){ const b = $('prog'); if (b) b.style.width = p + '%'; }
 
 async function carregar(){
-  tour = await (await fetch('/api/tour')).json();
+  tour = await (await fetch(URL_TOUR)).json();
   $('tTitulo').value    = tour.titulo || '';
+  $('tituloImovel').textContent = tour.titulo || 'Tour Virtual';
   $('tEndereco').value  = tour.endereco || '';
   $('tPreco').value     = tour.preco || '';
   $('tCor').value       = tour.cor || '#e07b39';
@@ -344,7 +358,7 @@ function desenharCenas(){
   }
   alvo.innerHTML = tour.cenas.map(c => `
     <div class="cena ${c.id === cenaAtual ? 'ativa' : ''}" onclick="abrirCena('${c.id}')">
-      <img src="/data/scenes/${c.arquivo}" alt="">
+      <img src="${CENAS}${c.arquivo}" alt="">
       <div class="nome">${c.nome}</div>
       ${c.id === tour.cena_inicial ? '<span class="marca">início</span>' : ''}
     </div>`).join('');
@@ -377,7 +391,7 @@ async function ajustarCobertura(){
   const haov = Math.max(30, Math.min(360, parseFloat($('covHaov').value) || 360));
   const vaov = Math.min(180, haov * (c.altura / c.largura));
   c.haov = haov; c.vaov = vaov; c.panorama_completo = haov >= 359.5;
-  await fetch('/api/cenas/' + c.id, {
+  await fetch(API + '/cenas/' + c.id, {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({haov, vaov})});
   abrirCena(c.id);
@@ -520,7 +534,7 @@ function autoPlanta(){
 async function salvarPlanta(){
   const posicoes = {};
   pontosPlanta().forEach(c => { posicoes[c.id] = c.posicao || {x:0,y:0}; });
-  await fetch('/api/planta', {method:'PUT', headers:{'Content-Type':'application/json'},
+  await fetch(API + '/planta', {method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({posicoes})});
   await carregar();
   aviso('Planta salva. Abra <b>Caminhar pelo imóvel</b> para percorrer os pontos.', 'ok');
@@ -535,10 +549,10 @@ function desenharProfundidade(c){
   }
   if (c.profundidade){
     alvo.innerHTML =
-      `<img src="/data/scenes/${c.previa_profundidade}?t=${Date.now()}"
+      `<img src="${CENAS}${c.previa_profundidade}?t=${Date.now()}"
             style="width:100%;border-radius:7px;margin-bottom:8px">
        <div class="linha">
-         <button class="primario" onclick="window.open('/andar?cena=${c.id}','_blank')">Andar</button>
+         <button class="primario" onclick="window.open(URL_ANDAR + '?cena=${c.id}','_blank')">Andar</button>
          <button onclick="gerarProfundidade()">Refazer</button>
        </div>`;
   } else {
@@ -553,7 +567,7 @@ async function gerarProfundidade(){
   aviso('Calculando a profundidade do ambiente...', 'mira');
   progresso(40);
   try{
-    const r = await fetch('/api/cenas/' + cenaAtual + '/profundidade', {method: 'POST'});
+    const r = await fetch(API + '/cenas/' + cenaAtual + '/profundidade', {method: 'POST'});
     const j = await r.json();
     progresso(100); setTimeout(() => progresso(0), 600);
     if (!j.ok){ aviso(j.erro, 'erro'); botoes.forEach(b => { b.disabled = false; }); return; }
@@ -576,7 +590,7 @@ function montarVisor(c){
 
   visor = pannellum.viewer('visor', {
     type: 'equirectangular',
-    panorama: '/data/scenes/' + c.arquivo,
+    panorama: CENAS + c.arquivo,
     autoLoad: true,
     showZoomCtrl: true,
     showFullscreenCtrl: false,
@@ -675,7 +689,7 @@ async function removerHotspot(id){
 }
 
 async function gravarCena(c){
-  await fetch('/api/cenas/' + c.id, {
+  await fetch(API + '/cenas/' + c.id, {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({nome: c.nome, hotspots: c.hotspots, vista_inicial: c.vista_inicial})
   });
@@ -699,7 +713,7 @@ async function renomear(){
 }
 
 async function definirInicial(){
-  await fetch('/api/tour', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+  await fetch(URL_TOUR, {method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({cena_inicial: cenaAtual})});
   await carregar();
   aviso('Este ambiente passou a ser a abertura do tour.', 'ok');
@@ -707,7 +721,7 @@ async function definirInicial(){
 
 async function excluirCena(){
   if (!confirm('Excluir este ambiente e as setas que apontam para ele?')) return;
-  await fetch('/api/cenas/' + cenaAtual, {method: 'DELETE'});
+  await fetch(API + '/cenas/' + cenaAtual, {method: 'DELETE'});
   cenaAtual = null;
   if (visor){ visor.destroy(); visor = null; }
   $('visor').innerHTML = '<div class="vazio" id="vazio"><b>Nenhum ambiente selecionado</b></div>';
@@ -730,7 +744,7 @@ async function costurar(){
         `não feche a página nem clique de novo.`, 'mira');
   progresso(30);
   try{
-    const r = await fetch('/api/cenas/costurar', {method: 'POST', body: fd});
+    const r = await fetch(API + '/cenas/costurar', {method: 'POST', body: fd});
     const j = await r.json();
     progresso(100); setTimeout(() => progresso(0), 600);
     if (!j.ok){ aviso(j.erro, 'erro'); return; }
@@ -758,7 +772,7 @@ async function importar360(){
   const fd = new FormData();
   for (const f of arquivos) fd.append('fotos', f);
   aviso('Importando...', 'mira'); progresso(40);
-  const r = await fetch('/api/cenas/importar360', {method: 'POST', body: fd});
+  const r = await fetch(API + '/cenas/importar360', {method: 'POST', body: fd});
   const j = await r.json();
   progresso(100); setTimeout(() => progresso(0), 600);
   if (!j.ok){ aviso(j.erro, 'erro'); return; }
@@ -780,7 +794,7 @@ async function importarVarredura(){
   aviso('Convertendo a varredura para 360...', 'mira');
   progresso(40);
   try{
-    const j = await (await fetch('/api/cenas/varredura', {method:'POST', body: fd})).json();
+    const j = await (await fetch(API + '/cenas/varredura', {method:'POST', body: fd})).json();
     progresso(100); setTimeout(() => progresso(0), 600);
     if (!j.ok){ aviso(j.erro, 'erro'); return; }
     $('fotoVarredura').value = ''; $('nomeVarredura').value = '';
@@ -793,7 +807,7 @@ async function importarVarredura(){
 async function gerarDemo(){
   const nome = prompt('Nome do ambiente de teste:', 'Sala de estar');
   if (nome === null) return;
-  const r = await fetch('/api/cenas/demo', {method: 'POST',
+  const r = await fetch(API + '/cenas/demo', {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify({nome})});
   const j = await r.json();
   cenaAtual = j.cena.id;
@@ -802,7 +816,7 @@ async function gerarDemo(){
 }
 
 async function salvarTour(){
-  await fetch('/api/tour', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+  await fetch(URL_TOUR, {method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       titulo: $('tTitulo').value, endereco: $('tEndereco').value,
       preco: $('tPreco').value, cor: $('tCor').value,
@@ -816,14 +830,14 @@ async function salvarTour(){
 
 async function reiniciar(){
   if (!confirm('Isso apaga todos os ambientes e recomeça do zero. Confirma?')) return;
-  await fetch('/api/tour/reiniciar', {method: 'POST'});
+  await fetch(API + '/tour/reiniciar', {method: 'POST'});
   cenaAtual = null;
   if (visor){ visor.destroy(); visor = null; }
   location.reload();
 }
 
 async function copiarEmbed(){
-  const codigo = await (await fetch('/embed')).text();
+  const codigo = await (await fetch(API + '/embed')).text();
   try{ await navigator.clipboard.writeText(codigo); aviso('Código de embed copiado.', 'ok'); }
   catch(e){ prompt('Copie o código:', codigo); }
 }

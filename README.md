@@ -25,8 +25,25 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-- Painel: http://localhost:5000/painel
-- Tour: http://localhost:5000/tour
+Abra **http://localhost:5000/imoveis** — é a lista de imóveis, ponto de entrada do sistema.
+
+## Vários imóveis
+
+Cada imóvel é uma pasta isolada em `data/imoveis/<id>/`, com o próprio `tour.json` e as
+próprias cenas. Dois imóveis nunca se misturam, e apagar um não toca no outro.
+
+| Endereço | O que é |
+|---|---|
+| `/imoveis` | Lista, criar e excluir |
+| `/painel/<id>` | Editor daquele imóvel |
+| `/tour/<id>` | Link público para mandar ao cliente |
+| `/andar/<id>` | Modo caminhar |
+
+A API inteira vive sob `/api/imoveis/<id>/...`, num Blueprint do Flask que carrega o
+imóvel no próprio caminho — nenhuma rota precisa recebê-lo como parâmetro.
+
+Quem já tinha o formato antigo (um `data/tour.json` só) não perde nada: na primeira
+subida o servidor migra sozinho para dentro de `data/imoveis/<id>/`.
 
 ## As três formas de criar um ambiente
 
@@ -132,6 +149,11 @@ python baixar_modelo.py
 O botão **Exportar ZIP** gera um pacote com `index.html`, `tour.json`, as imagens e a
 biblioteca do visualizador. Suba numa hospedagem qualquer e o tour funciona sem Python.
 
+As páginas montam os endereços a partir do imóvel na URL. No ZIP não existe servidor,
+então a exportação injeta um bloco de configuração logo após o `<head>` apontando para
+os arquivos ao lado. Tem que ser antes de qualquer script: o cabeçalho das páginas lê
+essas variáveis na primeira linha.
+
 **Atenção:** o ZIP precisa ser servido por HTTP. Abrir o `index.html` com dois cliques
 não funciona — o navegador bloqueia a leitura do `tour.json` via `file://`.
 
@@ -169,9 +191,9 @@ cena_demo.py              gerador de cena 360 sintética
 static/admin.html         painel de administração
 static/viewer.html        visualizador público do tour
 static/vendor/            Pannellum (visualizador 360, local)
-data/scenes/              panorâmicas geradas
+static/imoveis.html       lista de imóveis
+data/imoveis/<id>/        um imóvel: tour.json + scenes/
 data/uploads/             fotos originais
-data/tour.json            estrutura do tour e leads capturados
 fotos_exemplo_costura/    6 fotos sobrepostas para testar a costura
 ```
 

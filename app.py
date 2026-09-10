@@ -12,8 +12,10 @@ import uuid
 import shutil
 import zipfile
 import traceback
-from flask import (Flask, request, jsonify, send_from_directory,
-                   send_file, redirect, Response)
+from datetime import datetime
+
+from flask import (Flask, Blueprint, g, request, jsonify, send_from_directory,
+                   send_file, redirect, Response, abort)
 
 import cv2
 
@@ -24,14 +26,108 @@ import profundidade
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
 PASTA_UPLOADS = os.path.join(PASTA_DADOS, "uploads")
-PASTA_CENAS = os.path.join(PASTA_DADOS, "scenes")
-ARQ_TOUR = os.path.join(PASTA_DADOS, "tour.json")
+PASTA_IMOVEIS = os.path.join(PASTA_DADOS, "imoveis")
 
-for p in (PASTA_DADOS, PASTA_UPLOADS, PASTA_CENAS):
+for p in (PASTA_DADOS, PASTA_UPLOADS, PASTA_IMOVEIS):
     os.makedirs(p, exist_ok=True)
+
+
+# ----------------------------------------------------------------- imoveis
+# Cada imovel e uma pasta isolada, com o proprio tour.json e as proprias cenas.
+# Assim dois imoveis nunca se misturam e apagar um nao mexe no outro.
+
+def pasta_imovel(imovel_id):
+    return os.path.join(PASTA_IMOVEIS, imovel_id)
+
+
+def arq_tour(imovel_id):
+    return os.path.join(pasta_imovel(imovel_id), "tour.json")
+
+
+def pasta_cenas(imovel_id=None):
+    caminho = os.path.join(pasta_imovel(imovel_id or g.imovel), "scenes")
+    os.makedirs(caminho, exist_ok=True)
+    return caminho
+
+
+def imovel_existe(imovel_id):
+    return bool(imovel_id) and os.path.exists(arq_tour(imovel_id))
+
+
+def listar_imoveis():
+    itens = []
+    for iid in sorted(os.listdir(PASTA_IMOVEIS)):
+        if not imovel_existe(iid):
+            continue
+        tour = carregar_tour(iid)
+        capa = next((c["arquivo"] for c in tour["cenas"]), None)
+        itens.append({
+            "id": iid,
+            "titulo": tour.get("titulo") or "Imóvel sem título",
+            "endereco": tour.get("endereco", ""),
+            "preco": tour.get("preco", ""),
+            "ambientes": len(tour["cenas"]),
+            "com_profundidade": sum(1 for c in tour["cenas"] if c.get("profundidade")),
+            "leads": len(tour.get("leads_capturados", [])),
+            "capa": capa,
+            "criado_em": tour.get("criado_em", ""),
+        })
+    itens.sort(key=lambda i: i["criado_em"], reverse=True)
+    return itens
+
+
+def criar_imovel(titulo):
+    iid = uuid.uuid4().hex[:10]
+    os.makedirs(os.path.join(pasta_imovel(iid), "scenes"), exist_ok=True)
+    tour = json.loads(json.dumps(TOUR_PADRAO))
+    tour["titulo"] = titulo or "Imóvel sem título"
+    tour["criado_em"] = datetime.now().isoformat(timespec="seconds")
+    salvar_tour(tour, iid)
+    return iid
+
+
+def migrar_formato_antigo():
+    """
+    Move o tour unico do formato antigo (data/tour.json + data/scenes) para dentro
+    de data/imoveis/<id>/. Roda uma vez so, na primeira subida apos a atualizacao.
+    """
+    antigo_tour = os.path.join(PASTA_DADOS, "tour.json")
+    antiga_cenas = os.path.join(PASTA_DADOS, "scenes")
+    if not os.path.exists(antigo_tour):
+        return None
+
+    iid = uuid.uuid4().hex[:10]
+    destino = pasta_imovel(iid)
+    os.makedirs(destino, exist_ok=True)
+    shutil.move(antigo_tour, arq_tour(iid))
+    if os.path.exists(antiga_cenas):
+        shutil.move(antiga_cenas, os.path.join(destino, "scenes"))
+    else:
+        os.makedirs(os.path.join(destino, "scenes"), exist_ok=True)
+
+    tour = carregar_tour(iid)
+    tour.setdefault("criado_em", datetime.now().isoformat(timespec="seconds"))
+    salvar_tour(tour, iid)
+    print("  imovel existente migrado para data/imoveis/%s" % iid)
+    return iid
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024   # 300 MB por requisicao
+
+# Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
+# proprio caminho, entao nenhuma rota precisa receber o imovel como parametro.
+api = Blueprint("api", __name__, url_prefix="/api/imoveis/<imovel>")
+
+
+@api.url_value_preprocessor
+def _pegar_imovel(endpoint, valores):
+    g.imovel = valores.pop("imovel", None)
+
+
+@api.before_request
+def _exigir_imovel():
+    if not imovel_existe(g.imovel):
+        return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
 
 TOUR_PADRAO = {
     "titulo": "Imovel sem titulo",
@@ -54,18 +150,21 @@ TOUR_PADRAO = {
 
 # ------------------------------------------------------------------ dados
 
-def carregar_tour():
-    if not os.path.exists(ARQ_TOUR):
+def carregar_tour(imovel_id=None):
+    caminho = arq_tour(imovel_id or g.imovel)
+    if not os.path.exists(caminho):
         return json.loads(json.dumps(TOUR_PADRAO))
-    with open(ARQ_TOUR, "r", encoding="utf-8") as f:
+    with open(caminho, "r", encoding="utf-8") as f:
         tour = json.load(f)
     for chave, valor in TOUR_PADRAO.items():          # completa campos novos
         tour.setdefault(chave, valor)
     return tour
 
 
-def salvar_tour(tour):
-    with open(ARQ_TOUR, "w", encoding="utf-8") as f:
+def salvar_tour(tour, imovel_id=None):
+    caminho = arq_tour(imovel_id or g.imovel)
+    os.makedirs(os.path.dirname(caminho), exist_ok=True)
+    with open(caminho, "w", encoding="utf-8") as f:
         json.dump(tour, f, ensure_ascii=False, indent=2)
 
 
@@ -114,22 +213,63 @@ def montar_cena(nome, arquivo, largura, altura, origem, info=None):
 
 @app.route("/")
 def home():
-    return redirect("/painel")
+    return redirect("/imoveis")
 
 
-@app.route("/painel")
-def painel():
+@app.route("/imoveis")
+def pagina_imoveis():
+    return send_from_directory("static", "imoveis.html")
+
+
+@app.route("/painel/<imovel>")
+def painel(imovel):
+    if not imovel_existe(imovel):
+        return redirect("/imoveis")
     return send_from_directory("static", "admin.html")
 
 
-@app.route("/tour")
-def visualizador():
+@app.route("/tour/<imovel>")
+def visualizador(imovel):
+    if not imovel_existe(imovel):
+        return redirect("/imoveis")
     return send_from_directory("static", "viewer.html")
 
 
-@app.route("/data/scenes/<path:nome>")
-def arquivo_cena(nome):
-    return send_from_directory(PASTA_CENAS, nome)
+@app.route("/andar/<imovel>")
+def andar(imovel):
+    if not imovel_existe(imovel):
+        return redirect("/imoveis")
+    return send_from_directory("static", "andar.html")
+
+
+@app.route("/data/<imovel>/scenes/<path:nome>")
+def arquivo_cena(imovel, nome):
+    if not imovel_existe(imovel):
+        abort(404)
+    return send_from_directory(pasta_cenas(imovel), nome)
+
+
+# --------------------------------------------------------- lista de imoveis
+
+@app.route("/api/imoveis", methods=["GET"])
+def api_listar_imoveis():
+    return jsonify({"ok": True, "imoveis": listar_imoveis()})
+
+
+@app.route("/api/imoveis", methods=["POST"])
+def api_criar_imovel():
+    titulo = (request.get_json(silent=True) or {}).get("titulo", "").strip()
+    iid = criar_imovel(titulo)
+    return jsonify({"ok": True, "id": iid})
+
+
+@app.route("/api/imoveis/<imovel>", methods=["DELETE"])
+def api_remover_imovel(imovel):
+    """Apaga o imovel inteiro: tour, cenas, mapas de profundidade e leads."""
+    if not imovel_existe(imovel):
+        return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
+    shutil.rmtree(pasta_imovel(imovel), ignore_errors=True)
+    return jsonify({"ok": True})
 
 
 @app.route("/data/uploads/<path:nome>")
@@ -139,12 +279,12 @@ def arquivo_upload(nome):
 
 # ------------------------------------------------------------------ api tour
 
-@app.route("/api/tour", methods=["GET"])
+@api.route("/tour", methods=["GET"])
 def api_obter_tour():
     return jsonify(carregar_tour())
 
 
-@app.route("/api/tour", methods=["PUT"])
+@api.route("/tour", methods=["PUT"])
 def api_salvar_tour():
     tour = carregar_tour()
     dados = request.get_json(force=True)
@@ -156,9 +296,9 @@ def api_salvar_tour():
     return jsonify({"ok": True, "tour": tour})
 
 
-@app.route("/api/tour/reiniciar", methods=["POST"])
+@api.route("/tour/reiniciar", methods=["POST"])
 def api_reiniciar():
-    for pasta in (PASTA_CENAS, PASTA_UPLOADS):
+    for pasta in (pasta_cenas(), PASTA_UPLOADS):
         shutil.rmtree(pasta, ignore_errors=True)
         os.makedirs(pasta, exist_ok=True)
     if os.path.exists(ARQ_TOUR):
@@ -168,7 +308,7 @@ def api_reiniciar():
 
 # ------------------------------------------------------------------ api cenas
 
-@app.route("/api/cenas/costurar", methods=["POST"])
+@api.route("/cenas/costurar", methods=["POST"])
 def api_costurar():
     """Recebe N fotos de um mesmo ambiente e costura numa panoramica."""
     arquivos = request.files.getlist("fotos")
@@ -190,7 +330,7 @@ def api_costurar():
             f.save(destino)
             temporarios.append(destino)
 
-        arquivo, largura, altura, info = stitcher.costurar(temporarios, PASTA_CENAS)
+        arquivo, largura, altura, info = stitcher.costurar(temporarios, pasta_cenas())
 
         tour = carregar_tour()
         cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
@@ -221,7 +361,7 @@ def api_costurar():
         return jsonify({"ok": False, "erro": "Erro inesperado: %s" % e}), 500
 
 
-@app.route("/api/cenas/varredura", methods=["POST"])
+@api.route("/cenas/varredura", methods=["POST"])
 def api_importar_varredura():
     """Recebe o panorama do modo Panorama do celular (projecao cilindrica)."""
     arquivos = request.files.getlist("fotos")
@@ -242,7 +382,7 @@ def api_importar_varredura():
             f.save(temp)
 
             arquivo, largura, altura, info = stitcher.importar_varredura(
-                temp, PASTA_CENAS, haov)
+                temp, pasta_cenas(), haov)
             rotulo = nome_base or os.path.splitext(f.filename)[0][:40] or "Ambiente"
             cena = montar_cena(rotulo, arquivo, largura, altura, "varredura", info)
             tour["cenas"].append(cena)
@@ -264,7 +404,7 @@ def api_importar_varredura():
         return jsonify({"ok": False, "erro": str(e)}), 500
 
 
-@app.route("/api/cenas/importar360", methods=["POST"])
+@api.route("/cenas/importar360", methods=["POST"])
 def api_importar_360():
     """Recebe uma foto 360 ja pronta (camera 360 ou app de celular)."""
     arquivos = request.files.getlist("fotos")
@@ -279,7 +419,7 @@ def api_importar_360():
             ext = os.path.splitext(f.filename)[1].lower() or ".jpg"
             temp = os.path.join(PASTA_UPLOADS, "%s%s" % (uuid.uuid4().hex[:10], ext))
             f.save(temp)
-            arquivo, largura, altura = stitcher.importar_equirretangular(temp, PASTA_CENAS)
+            arquivo, largura, altura = stitcher.importar_equirretangular(temp, pasta_cenas())
 
             rotulo = nome_base or os.path.splitext(f.filename)[0][:40] or "Ambiente"
             cena = montar_cena(rotulo, arquivo, largura, altura, "equirretangular")
@@ -299,10 +439,10 @@ def api_importar_360():
         return jsonify({"ok": False, "erro": str(e)}), 500
 
 
-@app.route("/api/cenas/demo", methods=["POST"])
+@api.route("/cenas/demo", methods=["POST"])
 def api_cena_demo():
     rotulo = (request.get_json(silent=True) or {}).get("nome", "AMBIENTE DEMO")
-    arquivo, largura, altura = cena_demo.gerar(PASTA_CENAS, rotulo.upper())
+    arquivo, largura, altura = cena_demo.gerar(pasta_cenas(), rotulo.upper())
     tour = carregar_tour()
     cena = montar_cena(rotulo.title(), arquivo, largura, altura, "demo")
     tour["cenas"].append(cena)
@@ -312,7 +452,7 @@ def api_cena_demo():
     return jsonify({"ok": True, "cena": cena})
 
 
-@app.route("/api/cenas/<cena_id>", methods=["PUT"])
+@api.route("/cenas/<cena_id>", methods=["PUT"])
 def api_atualizar_cena(cena_id):
     tour = carregar_tour()
     cena = achar_cena(tour, cena_id)
@@ -326,7 +466,7 @@ def api_atualizar_cena(cena_id):
     return jsonify({"ok": True, "cena": cena})
 
 
-@app.route("/api/planta", methods=["PUT"])
+@api.route("/planta", methods=["PUT"])
 def api_salvar_planta():
     """
     Grava de uma vez a posicao de todos os pontos de captura, em metros.
@@ -345,7 +485,7 @@ def api_salvar_planta():
     return jsonify({"ok": True, "cenas": tour["cenas"]})
 
 
-@app.route("/api/cenas/<cena_id>", methods=["DELETE"])
+@api.route("/cenas/<cena_id>", methods=["DELETE"])
 def api_remover_cena(cena_id):
     tour = carregar_tour()
     cena = achar_cena(tour, cena_id)
@@ -357,7 +497,7 @@ def api_remover_cena(cena_id):
         nome = cena.get(chave)
         if not nome:
             continue
-        caminho = os.path.join(PASTA_CENAS, nome)
+        caminho = os.path.join(pasta_cenas(), nome)
         if os.path.exists(caminho):
             os.remove(caminho)
 
@@ -373,7 +513,7 @@ def api_remover_cena(cena_id):
     return jsonify({"ok": True})
 
 
-@app.route("/api/cenas/<cena_id>/profundidade", methods=["POST"])
+@api.route("/cenas/<cena_id>/profundidade", methods=["POST"])
 def api_gerar_profundidade(cena_id):
     """Calcula o mapa de profundidade que permite andar dentro da cena."""
     tour = carregar_tour()
@@ -385,14 +525,14 @@ def api_gerar_profundidade(cena_id):
                         "Só dá para andar em cenas com 360 completo. Esta é parcial."}), 422
 
     try:
-        disp, previa = profundidade.gerar(os.path.join(PASTA_CENAS, cena["arquivo"]))
+        disp, previa = profundidade.gerar(os.path.join(pasta_cenas(), cena["arquivo"]))
         nome = "prof_%s.png" % cena_id
-        profundidade.salvar(disp, os.path.join(PASTA_CENAS, nome))
+        profundidade.salvar(disp, os.path.join(pasta_cenas(), nome))
 
         nome_previa = "prev_%s.jpg" % cena_id
         ok, buf = cv2.imencode(".jpg", previa, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok:
-            buf.tofile(os.path.join(PASTA_CENAS, nome_previa))
+            buf.tofile(os.path.join(pasta_cenas(), nome_previa))
 
         cena["profundidade"] = nome
         cena["previa_profundidade"] = nome_previa
@@ -405,12 +545,7 @@ def api_gerar_profundidade(cena_id):
         return jsonify({"ok": False, "erro": "Falha ao gerar profundidade: %s" % e}), 500
 
 
-@app.route("/andar")
-def andar():
-    return send_from_directory("static", "andar.html")
-
-
-@app.route("/api/cenas/ordenar", methods=["POST"])
+@api.route("/cenas/ordenar", methods=["POST"])
 def api_ordenar():
     tour = carregar_tour()
     ordem = request.get_json(force=True).get("ordem", [])
@@ -422,7 +557,7 @@ def api_ordenar():
 
 # ------------------------------------------------------------------ leads
 
-@app.route("/api/leads", methods=["POST"])
+@api.route("/leads", methods=["POST"])
 def api_registrar_lead():
     tour = carregar_tour()
     dados = request.get_json(force=True)
@@ -438,7 +573,7 @@ def api_registrar_lead():
 
 # ------------------------------------------------------------------ exportar
 
-@app.route("/api/exportar", methods=["GET"])
+@api.route("/exportar", methods=["GET"])
 def api_exportar():
     """Empacota o tour como site estatico, pronto para hospedar em qualquer lugar."""
     tour = carregar_tour()
@@ -446,12 +581,19 @@ def api_exportar():
     with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as z:
         publico = {k: v for k, v in tour.items() if k != "leads_capturados"}
         z.writestr("tour.json", json.dumps(publico, ensure_ascii=False, indent=2))
+        # O ZIP nao tem servidor: as paginas leem estes enderecos em vez de montar
+        # os caminhos a partir do imovel. Injetar a configuracao e mais seguro do que
+        # sair trocando pedacos de JavaScript por busca e substituicao.
+        config = ("<script>window.__TOUR__='tour.json';"
+                  "window.__CENAS__='scenes/';"
+                  "window.__ANDAR__='andar.html';"
+                  "window.__VOLTAR__='index.html';</script>")
+
         def para_estatico(html):
-            return (html.replace("/api/tour", "tour.json")
-                        .replace("/data/scenes/", "scenes/")
-                        .replace("/static/vendor/", "vendor/")
-                        .replace("'/andar?cena='", "'andar.html?cena='")
-                        .replace('href="/tour"', 'href="index.html"'))
+            html = html.replace("/static/vendor/", "vendor/")
+            # logo apos <head>: o cabecalho das paginas le estas variaveis, entao a
+            # configuracao precisa vir antes de qualquer script
+            return html.replace("<head>", "<head>\n" + config, 1)
 
         for origem, destino in (("viewer.html", "index.html"),
                                 ("andar.html", "andar.html")):
@@ -468,27 +610,35 @@ def api_exportar():
                 nome = cena.get(chave)
                 if not nome:
                     continue
-                caminho = os.path.join(PASTA_CENAS, nome)
+                caminho = os.path.join(pasta_cenas(), nome)
                 if os.path.exists(caminho):
                     z.write(caminho, "scenes/%s" % nome)
     memoria.seek(0)
+    limpo = "".join(ch if ch.isalnum() or ch in " -_" else "" for ch in tour["titulo"])
+    nome_zip = (limpo.strip().replace(" ", "-").lower() or "tour") + ".zip"
     return send_file(memoria, mimetype="application/zip", as_attachment=True,
-                     download_name="tour-virtual.zip")
+                     download_name=nome_zip)
 
 
-@app.route("/embed")
+@api.route("/embed")
 def api_embed():
     base = request.host_url.rstrip("/")
-    codigo = ('<iframe src="' + base + '/tour" width="100%" height="520" '
-              'frameborder="0" allowfullscreen '
+    codigo = ('<iframe src="' + base + '/tour/' + g.imovel + '" width="100%" '
+              'height="520" frameborder="0" allowfullscreen '
               'allow="vr; gyroscope; accelerometer"></iframe>')
     return Response(codigo, mimetype="text/plain")
 
 
+app.register_blueprint(api)
+
+
 if __name__ == "__main__":
+    migrar_formato_antigo()
+    if not listar_imoveis():
+        criar_imovel("Meu primeiro imóvel")
+        print("  nenhum imovel encontrado: criei um vazio para comecar")
     print("")
     print("  Tour Virtual rodando")
-    print("  Painel:        http://localhost:5000/painel")
-    print("  Visualizador:  http://localhost:5000/tour")
+    print("  Imoveis: http://localhost:5000/imoveis")
     print("")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
