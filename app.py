@@ -309,9 +309,15 @@ def api_remover_cena(cena_id):
     if not cena:
         return jsonify({"ok": False, "erro": "Cena nao encontrada."}), 404
 
-    caminho = os.path.join(PASTA_CENAS, cena["arquivo"])
-    if os.path.exists(caminho):
-        os.remove(caminho)
+    # o panorama e tambem o mapa de profundidade e a previa, senao ficam orfaos
+    for chave in ("arquivo", "profundidade", "previa_profundidade"):
+        nome = cena.get(chave)
+        if not nome:
+            continue
+        caminho = os.path.join(PASTA_CENAS, nome)
+        if os.path.exists(caminho):
+            os.remove(caminho)
+
     tour["cenas"] = [c for c in tour["cenas"] if c["id"] != cena_id]
 
     # limpa hotspots que apontavam para a cena removida
