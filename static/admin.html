@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel · Tour Virtual</title>
+<link rel="stylesheet" href="/static/vendor/pannellum.css">
+<script src="/static/vendor/pannellum.js"></script>
+<style>
+  :root{
+    --bg:#14161a; --painel:#1c1f25; --painel2:#22262d; --borda:#2e333c;
+    --texto:#e8eaed; --suave:#9aa2ad; --acento:#e07b39; --ok:#3fa96b; --erro:#d9534f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--texto);
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:16px;padding:12px 20px;
+         background:var(--painel);border-bottom:1px solid var(--borda)}
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+  header h1 span{color:var(--acento)}
+  .crescer{flex:1}
+  button{font:inherit;cursor:pointer;border-radius:7px;border:1px solid var(--borda);
+         background:var(--painel2);color:var(--texto);padding:8px 13px;transition:.15s}
+  button:hover{border-color:#454c58;background:#2a2f37}
+  button.primario{background:var(--acento);border-color:var(--acento);color:#1a1207;font-weight:600}
+  button.primario:hover{background:#ee8c4b}
+  button.perigo:hover{border-color:var(--erro);color:#ff8a86}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select,textarea{font:inherit;background:#121418;color:var(--texto);
+    border:1px solid var(--borda);border-radius:7px;padding:8px 10px;width:100%}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acento)}
+  label{display:block;font-size:12px;color:var(--suave);margin:12px 0 5px;
+        text-transform:uppercase;letter-spacing:.5px}
+
+  .layout{display:grid;grid-template-columns:300px 1fr 310px;height:calc(100vh - 57px)}
+  .coluna{overflow-y:auto;padding:16px}
+  .coluna.esq{border-right:1px solid var(--borda);background:var(--painel)}
+  .coluna.dir{border-left:1px solid var(--borda);background:var(--painel)}
+  .centro{display:flex;flex-direction:column;background:#0e1013;position:relative}
+
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.7px;color:var(--suave);
+     margin:0 0 10px;font-weight:600}
+  .bloco{margin-bottom:22px}
+
+  .cena{display:flex;gap:10px;align-items:center;padding:7px;border-radius:8px;
+        border:1px solid transparent;cursor:pointer;margin-bottom:6px}
+  .cena:hover{background:var(--painel2)}
+  .cena.ativa{background:var(--painel2);border-color:var(--acento)}
+  .cena img{width:62px;height:34px;object-fit:cover;border-radius:5px;flex-shrink:0;background:#000}
+  .cena .nome{flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cena .marca{font-size:10px;color:var(--acento);border:1px solid var(--acento);
+               border-radius:4px;padding:1px 5px}
+
+  #visor{flex:1;min-height:0;position:relative;background:#000}
+  #visor.mirando{cursor:crosshair}
+  .barra{display:flex;gap:8px;align-items:center;padding:10px 14px;
+         border-top:1px solid var(--borda);background:var(--painel);flex-wrap:wrap}
+  .vazio{display:flex;flex-direction:column;align-items:center;justify-content:center;
+         height:100%;color:var(--suave);text-align:center;padding:40px;gap:14px}
+  .vazio b{color:var(--texto);font-size:16px}
+
+  .aviso{padding:9px 12px;border-radius:7px;font-size:12.5px;margin-bottom:10px;
+         border:1px solid var(--borda);background:var(--painel2)}
+  .aviso.mira{border-color:var(--acento);color:#ffca9a}
+  .aviso.erro{border-color:var(--erro);color:#ffaba8}
+  .aviso.ok{border-color:var(--ok);color:#9bdcb6}
+
+  .hs{display:flex;gap:8px;align-items:center;padding:7px 9px;background:var(--painel2);
+      border-radius:7px;margin-bottom:6px;font-size:12.5px}
+  .hs .crescer{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hs button{padding:3px 7px;font-size:11px}
+
+  .dica{font-size:12px;color:var(--suave);margin-top:6px;line-height:1.5}
+  .linha{display:flex;gap:8px}
+  .linha>*{flex:1}
+  dialog{background:var(--painel);color:var(--texto);border:1px solid var(--borda);
+         border-radius:12px;padding:22px;max-width:560px;width:92%}
+  dialog::backdrop{background:rgba(0,0,0,.65)}
+  dialog h3{margin:0 0 14px;font-size:17px}
+  dialog ol{padding-left:20px;line-height:1.75;font-size:13.5px}
+  dialog ol b{color:var(--acento)}
+  .fechar{display:flex;justify-content:flex-end;margin-top:16px;gap:8px}
+  code{background:#0d0f12;padding:2px 6px;border-radius:4px;font-size:12px;
+       word-break:break-all;display:block;margin-top:6px}
+  .barra-prog{height:3px;background:var(--acento);width:0;transition:width .3s;
+              position:absolute;top:0;left:0;z-index:5}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Tour Virtual <span>·</span> Painel</h1>
+  <div class="crescer"></div>
+  <button onclick="abrirGuia()">Guia de captura</button>
+  <button onclick="verLeads()">Leads</button>
+  <button onclick="copiarEmbed()">Copiar embed</button>
+  <button onclick="location.href='/api/exportar'">Exportar ZIP</button>
+  <button class="primario" onclick="window.open('/tour','_blank')">Ver o tour</button>
+</header>
+
+<div class="layout">
+
+  <!-- ---------------------------------------------------- coluna esquerda -->
+  <div class="coluna esq">
+    <div class="bloco">
+      <h2>1 · Criar ambiente</h2>
+
+      <label>Costurar fotos girando no eixo</label>
+      <input type="text" id="nomeCostura" placeholder="Nome do ambiente (ex: Sala)">
+      <input type="file" id="fotosCostura" multiple accept="image/*" style="margin-top:8px">
+      <button class="primario" style="width:100%;margin-top:8px" onclick="costurar()">
+        Costurar em 360
+      </button>
+      <div class="dica">~12 fotos girando no eixo para o básico.
+        Para teto e chão reais, faça 3 voltas (nivelado, inclinado para cima e para
+        baixo) e envie as ~30 fotos juntas. Veja o <b>Guia de captura</b>.</div>
+
+      <label>Já tenho a foto 360 pronta</label>
+      <input type="file" id="fotos360" multiple accept="image/*">
+      <button style="width:100%;margin-top:8px" onclick="importar360()">
+        Importar equirretangular
+      </button>
+      <div class="dica">Arquivo 2:1 vindo de câmera 360 ou app de celular.</div>
+
+      <label>Sem fotos agora</label>
+      <button style="width:100%" onclick="gerarDemo()">Gerar ambiente de teste</button>
+    </div>
+
+    <div class="bloco">
+      <h2>2 · Ambientes do tour</h2>
+      <div id="listaCenas"></div>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------------- centro/visor -->
+  <div class="centro">
+    <!-- fora do #visor de proposito: o Pannellum limpa o container ao iniciar -->
+    <div class="barra-prog" id="prog"></div>
+    <div id="visor">
+      <div class="vazio" id="vazio">
+        <b>Nenhum ambiente ainda</b>
+        <div>Crie o primeiro ambiente na coluna da esquerda.<br>
+             Se quiser só ver o funcionamento, clique em <i>Gerar ambiente de teste</i>.</div>
+      </div>
+    </div>
+    <div class="barra">
+      <button id="btnSeta" onclick="modoHotspot('cena')">+ Seta de navegação</button>
+      <button id="btnInfo" onclick="modoHotspot('info')">+ Ponto de informação</button>
+      <button onclick="salvarVista()">Definir vista de abertura</button>
+      <div class="crescer"></div>
+      <span id="coords" class="dica"></span>
+    </div>
+  </div>
+
+  <!-- ----------------------------------------------------- coluna direita -->
+  <div class="coluna dir">
+    <div id="msg"></div>
+
+    <div class="bloco" id="painelCena" style="display:none">
+      <h2>Ambiente selecionado</h2>
+      <label>Nome</label>
+      <input type="text" id="nomeCena" onchange="renomear()">
+      <div class="linha" style="margin-top:10px">
+        <button onclick="definirInicial()">Cena de abertura</button>
+        <button class="perigo" onclick="excluirCena()">Excluir</button>
+      </div>
+      <div class="dica" id="infoCena"></div>
+
+      <label>Cobertura horizontal (graus)</label>
+      <div class="linha">
+        <input type="number" id="covHaov" min="30" max="360" step="5">
+        <button onclick="ajustarCobertura()">Aplicar</button>
+      </div>
+      <div class="dica">360 = você deu a volta completa. Se fotografou só parte do cômodo,
+        reduza até as paredes pararem de esticar.</div>
+
+      <h2 style="margin-top:20px">Andar pelo ambiente</h2>
+      <div id="blocoProfundidade"></div>
+      <div class="dica">Calcula a profundidade de cada ponto do panorama para o
+        visitante se deslocar de verdade, com paralaxe. Leva alguns segundos.</div>
+
+      <h2 style="margin-top:20px">Hotspots</h2>
+      <div id="listaHotspots"></div>
+    </div>
+
+    <div class="bloco">
+      <h2>Dados do imóvel</h2>
+      <label>Título</label>
+      <input type="text" id="tTitulo">
+      <label>Endereço</label>
+      <input type="text" id="tEndereco">
+      <label>Preço</label>
+      <input type="text" id="tPreco" placeholder="R$ 000.000">
+      <label>Cor de destaque</label>
+      <input type="color" id="tCor" style="height:38px;padding:3px">
+      <button class="primario" style="width:100%;margin-top:12px" onclick="salvarTour()">
+        Salvar dados
+      </button>
+    </div>
+
+    <div class="bloco">
+      <h2>Captura de lead</h2>
+      <label><input type="checkbox" id="leadAtivo" style="width:auto;margin-right:7px">
+        Pedir contato dentro do tour</label>
+      <label>Chamada</label>
+      <input type="text" id="leadTitulo">
+      <label>Aparece após (segundos)</label>
+      <input type="number" id="leadSegundos" min="5" max="300">
+      <button style="width:100%;margin-top:12px" onclick="salvarTour()">Salvar</button>
+    </div>
+
+    <div class="bloco">
+      <button class="perigo" style="width:100%" onclick="reiniciar()">Apagar tudo</button>
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- modais -->
+<dialog id="dlgDestino">
+  <h3>Para onde essa seta leva?</h3>
+  <select id="selDestino"></select>
+  <label>Texto da seta</label>
+  <input type="text" id="txtDestino" placeholder="Ir para a cozinha">
+  <div class="fechar">
+    <button onclick="document.getElementById('dlgDestino').close()">Cancelar</button>
+    <button class="primario" onclick="confirmarHotspot()">Criar seta</button>
+  </div>
+</dialog>
+
+<dialog id="dlgInfo">
+  <h3>Ponto de informação</h3>
+  <label>Texto que aparece ao passar o mouse</label>
+  <input type="text" id="txtInfo" placeholder="Armários planejados, 3,2m de bancada">
+  <div class="fechar">
+    <button onclick="document.getElementById('dlgInfo').close()">Cancelar</button>
+    <button class="primario" onclick="confirmarInfo()">Criar ponto</button>
+  </div>
+</dialog>
+
+<dialog id="dlgGuia">
+  <h3>Como fotografar para o 360 funcionar</h3>
+
+  <p style="color:#9aa2ad;font-size:13px;margin:0 0 10px">
+    Regra que vale para tudo: você fica <b style="color:#e07b39">parado no mesmo ponto</b>
+    e gira o corpo. Se andar, não existe encaixe possível.</p>
+
+  <h4 style="margin:14px 0 6px;font-size:14px;color:#e07b39">Básico — 1 fileira (~12 fotos)</h4>
+  <ol>
+    <li>Celular <b>na vertical</b>, altura do peito (~150 cm), nivelado.</li>
+    <li>Foto, gire <b>uns 30 graus</b>, foto. Dê a volta inteira e <b>volte ao ponto de partida</b>.</li>
+    <li>O que estava na borda da foto anterior tem que aparecer <b>no meio</b> da próxima.</li>
+    <li>Trave foco e exposição antes de começar, senão cada foto sai com um brilho.</li>
+    <li>Ninguém andando pelo cômodo: pessoa em movimento vira fantasma na emenda.</li>
+  </ol>
+  <p style="color:#9aa2ad;font-size:12.5px;margin:6px 0 0">
+    Resultado: paredes reais; teto e chão preenchidos por aproximação.</p>
+
+  <h4 style="margin:16px 0 6px;font-size:14px;color:#e07b39">Completo — 3 fileiras (~30 fotos)</h4>
+  <ol>
+    <li>Faça a <b>volta do meio</b> exatamente como acima, nivelado.</li>
+    <li>Volte ao início, incline o celular <b>uns 35 graus para cima</b> e dê outra volta
+        inteira — dessa vez pode girar de 40 em 40 graus (9 fotos).</li>
+    <li>Repita inclinando <b>35 graus para baixo</b>, mais uma volta.</li>
+    <li>Envie <b>todas as fotos juntas</b>, das três voltas, num único envio. O sistema
+        descobre sozinho a posição de cada uma.</li>
+  </ol>
+  <p style="color:#9aa2ad;font-size:12.5px;margin:6px 0 0">
+    Resultado: teto e chão reais. A cobertura vertical passa de ~80° para ~150°.
+    Leva cerca de 20 segundos para processar.</p>
+  <div class="fechar"><button class="primario" onclick="document.getElementById('dlgGuia').close()">Entendi</button></div>
+</dialog>
+
+<dialog id="dlgLeads">
+  <h3>Contatos capturados</h3>
+  <div id="corpoLeads"></div>
+  <div class="fechar"><button class="primario" onclick="document.getElementById('dlgLeads').close()">Fechar</button></div>
+</dialog>
+
+<script>
+let tour = null, cenaAtual = null, visor = null;
+let mirando = null, coordClique = null;
+
+const $ = id => document.getElementById(id);
+
+function aviso(texto, tipo){
+  $('msg').innerHTML = texto ? `<div class="aviso ${tipo||''}">${texto}</div>` : '';
+  if (tipo === 'ok') setTimeout(() => { $('msg').innerHTML = ''; }, 4000);
+}
+
+function progresso(p){ const b = $('prog'); if (b) b.style.width = p + '%'; }
+
+async function carregar(){
+  tour = await (await fetch('/api/tour')).json();
+  $('tTitulo').value    = tour.titulo || '';
+  $('tEndereco').value  = tour.endereco || '';
+  $('tPreco').value     = tour.preco || '';
+  $('tCor').value       = tour.cor || '#e07b39';
+  $('leadAtivo').checked  = !!(tour.lead && tour.lead.ativo);
+  $('leadTitulo').value   = (tour.lead && tour.lead.titulo) || '';
+  $('leadSegundos').value = (tour.lead && tour.lead.segundos) || 25;
+  desenharCenas();
+  if (cenaAtual && !tour.cenas.find(c => c.id === cenaAtual)) cenaAtual = null;
+  if (!cenaAtual && tour.cenas.length) cenaAtual = (tour.cena_inicial || tour.cenas[0].id);
+  if (cenaAtual) abrirCena(cenaAtual); else $('painelCena').style.display = 'none';
+}
+
+function desenharCenas(){
+  const alvo = $('listaCenas');
+  if (!tour.cenas.length){
+    alvo.innerHTML = '<div class="dica">Nenhum ambiente criado ainda.</div>';
+    return;
+  }
+  alvo.innerHTML = tour.cenas.map(c => `
+    <div class="cena ${c.id === cenaAtual ? 'ativa' : ''}" onclick="abrirCena('${c.id}')">
+      <img src="/data/scenes/${c.arquivo}" alt="">
+      <div class="nome">${c.nome}</div>
+      ${c.id === tour.cena_inicial ? '<span class="marca">início</span>' : ''}
+    </div>`).join('');
+}
+
+function abrirCena(id){
+  cenaAtual = id;
+  const c = tour.cenas.find(x => x.id === id);
+  if (!c) return;
+  desenharCenas();
+  $('painelCena').style.display = 'block';
+  $('nomeCena').value = c.nome;
+  const cap = c.captura;
+  $('infoCena').innerHTML =
+    `${c.largura}x${c.altura}px · ${c.panorama_completo ? '360 completo' : 'panorama parcial ('+c.haov+'°)'} · origem: ${c.origem}`
+    + (cap ? `<br>Captura: ${cap.fileiras} fileira(s) · `
+           + (cap.volta_fechada ? 'volta fechada'
+                                : `vão de ${cap.maior_buraco}° sem foto`)
+           + ` · lente ${cap.fov_foto}°` : '');
+  $('covHaov').value = Math.round(c.haov);
+  desenharProfundidade(c);
+  desenharHotspots(c);
+  montarVisor(c);
+}
+
+async function ajustarCobertura(){
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  if (!c) return;
+  const haov = Math.max(30, Math.min(360, parseFloat($('covHaov').value) || 360));
+  const vaov = Math.min(180, haov * (c.altura / c.largura));
+  c.haov = haov; c.vaov = vaov; c.panorama_completo = haov >= 359.5;
+  await fetch('/api/cenas/' + c.id, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({haov, vaov})});
+  abrirCena(c.id);
+  aviso(`Cobertura ajustada para ${haov}° na horizontal e ${vaov.toFixed(1)}° na vertical.`, 'ok');
+}
+
+function desenharProfundidade(c){
+  const alvo = $('blocoProfundidade');
+  if (!c.panorama_completo){
+    alvo.innerHTML = '<div class="dica">Disponível apenas para cenas com 360 completo. '
+                   + 'Esta é um panorama parcial.</div>';
+    return;
+  }
+  if (c.profundidade){
+    alvo.innerHTML =
+      `<img src="/data/scenes/${c.previa_profundidade}?t=${Date.now()}"
+            style="width:100%;border-radius:7px;margin-bottom:8px">
+       <div class="linha">
+         <button class="primario" onclick="window.open('/andar?cena=${c.id}','_blank')">Andar</button>
+         <button onclick="gerarProfundidade()">Refazer</button>
+       </div>`;
+  } else {
+    alvo.innerHTML = `<button class="primario" style="width:100%"
+                        onclick="gerarProfundidade()">Gerar profundidade</button>`;
+  }
+}
+
+async function gerarProfundidade(){
+  const botoes = $('blocoProfundidade').querySelectorAll('button');
+  botoes.forEach(b => { b.disabled = true; });
+  aviso('Calculando a profundidade do ambiente...', 'mira');
+  progresso(40);
+  try{
+    const r = await fetch('/api/cenas/' + cenaAtual + '/profundidade', {method: 'POST'});
+    const j = await r.json();
+    progresso(100); setTimeout(() => progresso(0), 600);
+    if (!j.ok){ aviso(j.erro, 'erro'); botoes.forEach(b => { b.disabled = false; }); return; }
+    await carregar();
+    aviso('Profundidade pronta. Clique em <b>Andar</b> para se deslocar pelo ambiente.', 'ok');
+  }catch(e){
+    progresso(0);
+    aviso('Falha ao gerar profundidade: ' + e, 'erro');
+    botoes.forEach(b => { b.disabled = false; });
+  }
+}
+
+function montarVisor(c){
+  // #vazio e #prog vivem dentro/fora do container que o Pannellum limpa ao iniciar,
+  // entao a partir da segunda cena eles podem nao existir mais. Nunca assuma que estao la.
+  const vazio = $('vazio');
+  if (vazio) vazio.style.display = 'none';
+  if (visor){ visor.destroy(); visor = null; }
+  $('visor').innerHTML = '';
+
+  visor = pannellum.viewer('visor', {
+    type: 'equirectangular',
+    panorama: '/data/scenes/' + c.arquivo,
+    autoLoad: true,
+    showZoomCtrl: true,
+    showFullscreenCtrl: false,
+    compass: c.panorama_completo,
+    haov: c.haov, vaov: c.vaov, vOffset: 0,
+    yaw: c.vista_inicial.yaw, pitch: c.vista_inicial.pitch, hfov: c.vista_inicial.hfov,
+    hotSpots: (c.hotspots || []).map(h => ({
+      pitch: h.pitch, yaw: h.yaw,
+      type: h.tipo === 'cena' ? 'info' : 'info',
+      text: h.texto || (h.tipo === 'cena' ? 'Ir para outro ambiente' : 'Informação')
+    }))
+  });
+
+  visor.on('mousedown', ev => {
+    const [pitch, yaw] = visor.mouseEventToCoords(ev);
+    $('coords').textContent = `yaw ${yaw.toFixed(1)}°  ·  pitch ${pitch.toFixed(1)}°`;
+    if (!mirando) return;
+    coordClique = {pitch, yaw};
+    if (mirando === 'cena'){
+      $('selDestino').innerHTML = tour.cenas.filter(x => x.id !== cenaAtual)
+        .map(x => `<option value="${x.id}">${x.nome}</option>`).join('');
+      if (!$('selDestino').innerHTML){
+        aviso('Crie pelo menos dois ambientes para ligar um no outro.', 'erro');
+        pararMira(); return;
+      }
+      $('dlgDestino').showModal();
+    } else {
+      $('dlgInfo').showModal();
+    }
+    pararMira();
+  });
+}
+
+function modoHotspot(tipo){
+  if (!cenaAtual){ aviso('Selecione um ambiente primeiro.', 'erro'); return; }
+  mirando = tipo;
+  $('visor').classList.add('mirando');
+  aviso(tipo === 'cena'
+    ? 'Clique no panorama, em cima da porta ou passagem para onde a seta deve apontar.'
+    : 'Clique no ponto do ambiente que você quer destacar.', 'mira');
+}
+
+function pararMira(){
+  mirando = null;
+  $('visor').classList.remove('mirando');
+  aviso('');
+}
+
+async function confirmarHotspot(){
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  const destino = $('selDestino').value;
+  const alvo = tour.cenas.find(x => x.id === destino);
+  c.hotspots.push({
+    id: Math.random().toString(36).slice(2, 10),
+    tipo: 'cena', destino,
+    texto: $('txtDestino').value.trim() || ('Ir para ' + alvo.nome),
+    pitch: coordClique.pitch, yaw: coordClique.yaw
+  });
+  $('dlgDestino').close(); $('txtDestino').value = '';
+  await gravarCena(c);
+}
+
+async function confirmarInfo(){
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  c.hotspots.push({
+    id: Math.random().toString(36).slice(2, 10),
+    tipo: 'info', destino: null,
+    texto: $('txtInfo').value.trim() || 'Informação',
+    pitch: coordClique.pitch, yaw: coordClique.yaw
+  });
+  $('dlgInfo').close(); $('txtInfo').value = '';
+  await gravarCena(c);
+}
+
+function desenharHotspots(c){
+  const alvo = $('listaHotspots');
+  if (!c.hotspots || !c.hotspots.length){
+    alvo.innerHTML = '<div class="dica">Nenhum hotspot. Use os botões abaixo do visor '
+                   + 'para ligar este ambiente aos outros.</div>';
+    return;
+  }
+  alvo.innerHTML = c.hotspots.map(h => {
+    const destino = h.destino ? (tour.cenas.find(x => x.id === h.destino) || {}).nome : null;
+    return `<div class="hs">
+      <span>${h.tipo === 'cena' ? '➜' : 'ⓘ'}</span>
+      <div class="crescer">${h.texto}${destino ? ' <span style="color:#9aa2ad">→ '+destino+'</span>' : ''}</div>
+      <button class="perigo" onclick="removerHotspot('${h.id}')">×</button>
+    </div>`;
+  }).join('');
+}
+
+async function removerHotspot(id){
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  c.hotspots = c.hotspots.filter(h => h.id !== id);
+  await gravarCena(c);
+}
+
+async function gravarCena(c){
+  await fetch('/api/cenas/' + c.id, {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({nome: c.nome, hotspots: c.hotspots, vista_inicial: c.vista_inicial})
+  });
+  desenharHotspots(c);
+  montarVisor(c);
+}
+
+async function salvarVista(){
+  if (!visor || !cenaAtual) return;
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  c.vista_inicial = {yaw: visor.getYaw(), pitch: visor.getPitch(), hfov: visor.getHfov()};
+  await gravarCena(c);
+  aviso('Vista de abertura salva. O tour vai abrir exatamente neste ângulo.', 'ok');
+}
+
+async function renomear(){
+  const c = tour.cenas.find(x => x.id === cenaAtual);
+  c.nome = $('nomeCena').value.trim() || c.nome;
+  await gravarCena(c);
+  desenharCenas();
+}
+
+async function definirInicial(){
+  await fetch('/api/tour', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cena_inicial: cenaAtual})});
+  await carregar();
+  aviso('Este ambiente passou a ser a abertura do tour.', 'ok');
+}
+
+async function excluirCena(){
+  if (!confirm('Excluir este ambiente e as setas que apontam para ele?')) return;
+  await fetch('/api/cenas/' + cenaAtual, {method: 'DELETE'});
+  cenaAtual = null;
+  if (visor){ visor.destroy(); visor = null; }
+  $('visor').innerHTML = '<div class="vazio" id="vazio"><b>Nenhum ambiente selecionado</b></div>';
+  await carregar();
+}
+
+async function costurar(){
+  const arquivos = $('fotosCostura').files;
+  if (arquivos.length < 2){ aviso('Selecione pelo menos 2 fotos do mesmo cômodo.', 'erro'); return; }
+  const fd = new FormData();
+  fd.append('nome', $('nomeCostura').value.trim() || 'Ambiente');
+  for (const f of arquivos) fd.append('fotos', f);
+
+  // a costura roda na CPU: ~10s para poucas fotos, ~30s para um lote de 15.
+  const estimativa = Math.max(8, Math.round(arquivos.length * 2));
+  const botao = document.querySelector('button[onclick="costurar()"]');
+  if (botao){ botao.disabled = true; botao.textContent = 'Costurando...'; }
+
+  aviso(`Costurando ${arquivos.length} fotos. Leva cerca de ${estimativa} segundos — ` +
+        `não feche a página nem clique de novo.`, 'mira');
+  progresso(30);
+  try{
+    const r = await fetch('/api/cenas/costurar', {method: 'POST', body: fd});
+    const j = await r.json();
+    progresso(100); setTimeout(() => progresso(0), 600);
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    $('fotosCostura').value = ''; $('nomeCostura').value = '';
+    cenaAtual = j.cena.id;
+    await carregar();
+    const cap = j.cena.captura || {};
+    const resumo = `Panorama criado com ${j.fotos_usadas} fotos · `
+      + `${cap.fileiras || 1} fileira(s) · `
+      + (cap.volta_fechada ? 'volta fechada, 360 completo' : 'captura parcial');
+    aviso([resumo].concat(j.avisos || []).join('<br>'),
+          (j.avisos && j.avisos.length) ? 'mira' : 'ok');
+  }catch(e){
+    progresso(0);
+    aviso('O servidor não respondeu. Se isso acontecer com muitas fotos de uma vez, ' +
+          'tente de novo com menos fotos. Detalhe técnico: ' + e, 'erro');
+  }finally{
+    if (botao){ botao.disabled = false; botao.textContent = 'Costurar em 360'; }
+  }
+}
+
+async function importar360(){
+  const arquivos = $('fotos360').files;
+  if (!arquivos.length){ aviso('Selecione ao menos um arquivo.', 'erro'); return; }
+  const fd = new FormData();
+  for (const f of arquivos) fd.append('fotos', f);
+  aviso('Importando...', 'mira'); progresso(40);
+  const r = await fetch('/api/cenas/importar360', {method: 'POST', body: fd});
+  const j = await r.json();
+  progresso(100); setTimeout(() => progresso(0), 600);
+  if (!j.ok){ aviso(j.erro, 'erro'); return; }
+  $('fotos360').value = '';
+  cenaAtual = j.cenas[0].id;
+  await carregar();
+  aviso(j.avisos.length ? j.avisos.join('<br>') : `${j.cenas.length} ambiente(s) importado(s).`,
+        j.avisos.length ? 'erro' : 'ok');
+}
+
+async function gerarDemo(){
+  const nome = prompt('Nome do ambiente de teste:', 'Sala de estar');
+  if (nome === null) return;
+  const r = await fetch('/api/cenas/demo', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({nome})});
+  const j = await r.json();
+  cenaAtual = j.cena.id;
+  await carregar();
+  aviso('Ambiente de teste criado. Arraste no visor para girar 360°.', 'ok');
+}
+
+async function salvarTour(){
+  await fetch('/api/tour', {method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      titulo: $('tTitulo').value, endereco: $('tEndereco').value,
+      preco: $('tPreco').value, cor: $('tCor').value,
+      lead: {ativo: $('leadAtivo').checked, titulo: $('leadTitulo').value,
+             texto: (tour.lead && tour.lead.texto) || '',
+             segundos: parseInt($('leadSegundos').value) || 25}
+    })});
+  await carregar();
+  aviso('Dados salvos.', 'ok');
+}
+
+async function reiniciar(){
+  if (!confirm('Isso apaga todos os ambientes e recomeça do zero. Confirma?')) return;
+  await fetch('/api/tour/reiniciar', {method: 'POST'});
+  cenaAtual = null;
+  if (visor){ visor.destroy(); visor = null; }
+  location.reload();
+}
+
+async function copiarEmbed(){
+  const codigo = await (await fetch('/embed')).text();
+  try{ await navigator.clipboard.writeText(codigo); aviso('Código de embed copiado.', 'ok'); }
+  catch(e){ prompt('Copie o código:', codigo); }
+}
+
+function verLeads(){
+  const leads = tour.leads_capturados || [];
+  $('corpoLeads').innerHTML = leads.length
+    ? leads.map(l => `<div class="hs"><div class="crescer"><b>${l.nome}</b> · ${l.telefone} · ${l.email}</div></div>`).join('')
+    : '<div class="dica">Nenhum contato capturado ainda. Abra o tour e preencha o formulário para testar.</div>';
+  $('dlgLeads').showModal();
+}
+
+function abrirGuia(){ $('dlgGuia').showModal(); }
+
+carregar();
+</script>
+</body>
+</html>

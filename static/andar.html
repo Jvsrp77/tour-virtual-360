@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Andar pelo ambiente</title>
+<script src="/static/vendor/three.js"></script>
+<style>
+  :root{ --acento:#e07b39; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#000;color:#fff;
+    font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  #tela{position:absolute;inset:0}
+  #tela canvas{display:block}
+
+  .painel{position:absolute;top:16px;left:16px;z-index:10;max-width:310px;
+    background:rgba(14,16,20,.86);backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:14px 16px}
+  .painel h1{margin:0 0 3px;font-size:16px}
+  .painel .sub{font-size:12px;color:#a9b0ba;margin-bottom:10px}
+  .painel label{display:block;font-size:11px;color:#a9b0ba;margin:11px 0 4px;
+    text-transform:uppercase;letter-spacing:.5px}
+  .painel input[type=range]{width:100%;accent-color:var(--acento)}
+  .teclas{font-size:12px;color:#a9b0ba;line-height:1.9;margin-top:10px;
+    border-top:1px solid rgba(255,255,255,.1);padding-top:10px}
+  .teclas b{display:inline-block;min-width:52px;background:#22262d;color:#e8eaed;
+    border-radius:5px;padding:1px 7px;font-size:11px;text-align:center;margin-right:6px}
+
+  .topo-dir{position:absolute;top:16px;right:16px;z-index:10;display:flex;gap:8px}
+  .bt{background:rgba(14,16,20,.86);backdrop-filter:blur(12px);color:#fff;
+    border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:9px 13px;
+    cursor:pointer;font:inherit;text-decoration:none}
+  .bt:hover{background:rgba(40,44,52,.95)}
+  .bt.primario{background:var(--acento);color:#1a1207;border-color:var(--acento);font-weight:600}
+
+  .carregando{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    z-index:30;background:#0d0f12;flex-direction:column;gap:14px;text-align:center;padding:30px}
+  .aro{width:38px;height:38px;border:3px solid rgba(255,255,255,.18);
+    border-top-color:var(--acento);border-radius:50%;animation:girar .9s linear infinite}
+  @keyframes girar{to{transform:rotate(360deg)}}
+  .erro{color:#ffaba8;max-width:430px;line-height:1.6}
+
+  .dpad{position:absolute;bottom:18px;right:18px;z-index:10;display:grid;gap:6px;
+    grid-template-columns:repeat(3,50px);grid-template-rows:repeat(2,50px)}
+  .dpad button{background:rgba(14,16,20,.86);border:1px solid rgba(255,255,255,.16);
+    color:#fff;border-radius:9px;font-size:17px;cursor:pointer}
+  .dpad button:active{background:var(--acento);color:#1a1207}
+  .vazio1{grid-column:1}
+</style>
+</head>
+<body>
+
+<div id="tela"></div>
+
+<div class="carregando" id="carregando">
+  <div class="aro"></div>
+  <div id="msgCarregando">Montando a geometria do ambiente...</div>
+</div>
+
+<div class="painel" id="painel" style="display:none">
+  <h1 id="nomeCena"></h1>
+  <div class="sub">Você pode se deslocar dentro do ambiente</div>
+
+  <label>Profundidade do relevo</label>
+  <input type="range" id="forca" min="0" max="100" value="70">
+
+  <label>Alcance do passo</label>
+  <input type="range" id="alcance" min="20" max="200" value="110">
+
+  <div class="teclas">
+    <div><b>W A S D</b> andar</div>
+    <div><b>arrastar</b> olhar em volta</div>
+    <div><b>Q / E</b> abaixar e levantar</div>
+    <div><b>R</b> voltar ao centro</div>
+  </div>
+</div>
+
+<div class="topo-dir">
+  <a class="bt" href="/tour">Voltar ao tour</a>
+  <button class="bt primario" onclick="recentrar()">Centralizar</button>
+</div>
+
+<div class="dpad" id="dpad" style="display:none">
+  <div class="vazio1"></div>
+  <button ontouchstart="tecla('w',1)" ontouchend="tecla('w',0)">▲</button>
+  <div></div>
+  <button ontouchstart="tecla('a',1)" ontouchend="tecla('a',0)">◀</button>
+  <button ontouchstart="tecla('s',1)" ontouchend="tecla('s',0)">▼</button>
+  <button ontouchstart="tecla('d',1)" ontouchend="tecla('d',0)">▶</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+
+let cena3d, camera, renderizador, malha;
+let raiosBase = null, direcoes = null, geometria = null;
+const teclas = {};
+let yaw = 0, pitch = 0, arrastando = false, ultimo = null;
+const posicao = new THREE.Vector3(0, 0, 0);
+
+const GRADE_L = 384, GRADE_A = 192;     // resolução da malha esférica
+
+function falhar(texto){
+  $('carregando').innerHTML = '<div class="erro">' + texto + '</div>';
+}
+
+async function iniciar(){
+  let tour;
+  try { tour = await (await fetch('/api/tour')).json(); }
+  catch(e){ return falhar('Não consegui carregar o tour.'); }
+
+  const pedida = params.get('cena');
+  let cena = pedida ? tour.cenas.find(c => c.id === pedida) : null;
+  if (!cena) cena = tour.cenas.find(c => c.profundidade);
+  if (!cena) return falhar('Nenhum ambiente tem mapa de profundidade ainda. '
+    + 'Abra o painel, selecione o ambiente e clique em <b>Gerar profundidade</b>.');
+  if (!cena.profundidade) return falhar('O ambiente <b>' + cena.nome + '</b> ainda não '
+    + 'tem mapa de profundidade. Gere no painel e volte aqui.');
+
+  $('nomeCena').textContent = cena.nome;
+  document.title = cena.nome + ' · andar';
+
+  try {
+    const [textura, disparidade] = await Promise.all([
+      carregarTextura('/data/scenes/' + cena.arquivo),
+      carregarProfundidade('/data/scenes/' + cena.profundidade)
+    ]);
+    montarCena(textura, disparidade);
+  } catch(e){ return falhar('Falha ao carregar as imagens: ' + e.message); }
+
+  $('carregando').style.display = 'none';
+  $('painel').style.display = 'block';
+  if ('ontouchstart' in window) $('dpad').style.display = 'grid';
+  animar();
+}
+
+function carregarTextura(url){
+  return new Promise((ok, falha) => {
+    new THREE.TextureLoader().load(url, t => {
+      t.flipY = false;                    // a malha usa v=0 no topo da imagem
+      t.colorSpace = THREE.SRGBColorSpace;
+      ok(t);
+    }, undefined, () => falha(new Error('panorama')));
+  });
+}
+
+// O PNG guarda 16 bits repartidos: R e o byte alto, G o byte baixo.
+function carregarProfundidade(url){
+  return new Promise((ok, falha) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const ctx = c.getContext('2d', {willReadFrequently: true});
+      ctx.drawImage(img, 0, 0);
+      const px = ctx.getImageData(0, 0, c.width, c.height).data;
+      const d = new Float32Array(c.width * c.height);
+      for (let i = 0; i < d.length; i++)
+        d[i] = ((px[i*4] << 8) | px[i*4 + 1]) / 65535;
+      ok({dados: d, largura: c.width, altura: c.height});
+    };
+    img.onerror = () => falha(new Error('mapa de profundidade'));
+    img.src = url;
+  });
+}
+
+// disparidade 0..1 (1 = mais perto) -> raio em metros
+function raio(d){ return 1 / (1.542 * d + 0.125); }
+
+function montarCena(textura, prof){
+  cena3d = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.05, 200);
+  renderizador = new THREE.WebGLRenderer({antialias: true});
+  renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderizador.setSize(innerWidth, innerHeight);
+  $('tela').appendChild(renderizador.domElement);
+
+  const nv = (GRADE_L + 1) * (GRADE_A + 1);
+  const posicoes = new Float32Array(nv * 3);
+  const uvs = new Float32Array(nv * 2);
+  direcoes = new Float32Array(nv * 3);
+  raiosBase = new Float32Array(nv);
+
+  let k = 0;
+  for (let j = 0; j <= GRADE_A; j++){
+    const v = j / GRADE_A;
+    const lat = (v - 0.5) * Math.PI;          // -90 no topo, +90 embaixo
+    for (let i = 0; i <= GRADE_L; i++){
+      const u = i / GRADE_L;
+      const lon = (u - 0.5) * 2 * Math.PI;
+
+      // y invertido: no equirretangular +lat aponta para baixo, no three.js +y e para cima
+      const dx = Math.cos(lat) * Math.sin(lon);
+      const dy = -Math.sin(lat);
+      const dz = Math.cos(lat) * Math.cos(lon);
+
+      const px = Math.min(prof.largura - 1, Math.round(u * prof.largura));
+      const py = Math.min(prof.altura - 1, Math.round(v * prof.altura));
+      raiosBase[k] = raio(prof.dados[py * prof.largura + px]);
+
+      direcoes[k*3] = dx; direcoes[k*3+1] = dy; direcoes[k*3+2] = dz;
+      uvs[k*2] = u; uvs[k*2+1] = v;
+      k++;
+    }
+  }
+
+  const indices = [];
+  for (let j = 0; j < GRADE_A; j++){
+    for (let i = 0; i < GRADE_L; i++){
+      const a = j * (GRADE_L + 1) + i, b = a + 1;
+      const c = a + GRADE_L + 1, d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  geometria = new THREE.BufferGeometry();
+  geometria.setAttribute('position', new THREE.BufferAttribute(posicoes, 3));
+  geometria.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geometria.setIndex(indices);
+
+  malha = new THREE.Mesh(geometria, new THREE.MeshBasicMaterial({
+    map: textura, side: THREE.DoubleSide
+  }));
+  cena3d.add(malha);
+
+  aplicarForca();
+  $('forca').addEventListener('input', aplicarForca);
+  ligarControles();
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderizador.setSize(innerWidth, innerHeight);
+  });
+}
+
+// forca 0 = esfera lisa (sem paralaxe), 100 = relevo cheio
+function aplicarForca(){
+  const f = $('forca').value / 100;
+  const pos = geometria.attributes.position.array;
+  for (let k = 0; k < raiosBase.length; k++){
+    const r = 3.0 * (1 - f) + raiosBase[k] * f;
+    pos[k*3]   = direcoes[k*3]   * r;
+    pos[k*3+1] = direcoes[k*3+1] * r;
+    pos[k*3+2] = direcoes[k*3+2] * r;
+  }
+  geometria.attributes.position.needsUpdate = true;
+  geometria.computeBoundingSphere();
+}
+
+function ligarControles(){
+  const alvo = renderizador.domElement;
+  const inicio = e => { arrastando = true; ultimo = ponto(e); };
+  const fim = () => { arrastando = false; };
+  const mover = e => {
+    if (!arrastando) return;
+    const p = ponto(e);
+    yaw   -= (p.x - ultimo.x) * 0.0045;
+    pitch -= (p.y - ultimo.y) * 0.0045;
+    pitch = Math.max(-1.45, Math.min(1.45, pitch));
+    ultimo = p;
+    e.preventDefault();
+  };
+  const ponto = e => e.touches ? {x: e.touches[0].clientX, y: e.touches[0].clientY}
+                               : {x: e.clientX, y: e.clientY};
+  alvo.addEventListener('mousedown', inicio);
+  addEventListener('mouseup', fim);
+  addEventListener('mousemove', mover);
+  alvo.addEventListener('touchstart', inicio, {passive: true});
+  addEventListener('touchend', fim);
+  addEventListener('touchmove', mover, {passive: false});
+
+  addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'r') return recentrar();
+    teclas[e.key.toLowerCase()] = true;
+  });
+  addEventListener('keyup', e => { teclas[e.key.toLowerCase()] = false; });
+}
+
+function tecla(k, v){ teclas[k] = !!v; }
+function recentrar(){ posicao.set(0, 0, 0); }
+
+function animar(){
+  requestAnimationFrame(animar);
+
+  const passo = 0.035;
+  const frente = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+  const lado = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+
+  if (teclas['w'] || teclas['arrowup'])    posicao.addScaledVector(frente, -passo);
+  if (teclas['s'] || teclas['arrowdown'])  posicao.addScaledVector(frente, passo);
+  if (teclas['a'] || teclas['arrowleft'])  posicao.addScaledVector(lado, -passo);
+  if (teclas['d'] || teclas['arrowright']) posicao.addScaledVector(lado, passo);
+  if (teclas['q']) posicao.y -= passo;
+  if (teclas['e']) posicao.y += passo;
+
+  // limita o deslocamento: longe do centro os buracos atras dos moveis aparecem
+  const limite = $('alcance').value / 100;
+  if (posicao.length() > limite) posicao.setLength(limite);
+
+  camera.position.copy(posicao);
+  camera.lookAt(
+    posicao.x + Math.sin(yaw) * Math.cos(pitch),
+    posicao.y + Math.sin(pitch),
+    posicao.z + Math.cos(yaw) * Math.cos(pitch)
+  );
+  renderizador.render(cena3d, camera);
+}
+
+iniciar();
+</script>
+</body>
+</html>

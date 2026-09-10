@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tour Virtual</title>
+<link rel="stylesheet" href="/static/vendor/pannellum.css">
+<script src="/static/vendor/pannellum.js"></script>
+<style>
+  :root{ --acento:#e07b39; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;
+    font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#fff}
+  #pano{position:absolute;inset:0}
+
+  .cartao{position:absolute;top:18px;left:18px;z-index:10;max-width:330px;
+    background:rgba(14,16,20,.86);backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:15px 17px}
+  .cartao h1{margin:0 0 4px;font-size:17px;font-weight:600;line-height:1.3}
+  .cartao .end{font-size:12.5px;color:#a9b0ba}
+  .cartao .preco{margin-top:9px;font-size:19px;font-weight:700;color:var(--acento)}
+
+  .topo-dir{position:absolute;top:18px;right:18px;z-index:10;display:flex;gap:8px}
+  .bt{background:rgba(14,16,20,.86);backdrop-filter:blur(12px);color:#fff;
+    border:1px solid rgba(255,255,255,.14);border-radius:9px;padding:9px 13px;
+    cursor:pointer;font:inherit;transition:.15s}
+  .bt:hover{background:rgba(40,44,52,.95);border-color:rgba(255,255,255,.3)}
+
+  .menu{position:absolute;bottom:0;left:0;right:0;z-index:10;display:flex;gap:9px;
+    padding:14px 16px;overflow-x:auto;
+    background:linear-gradient(transparent,rgba(0,0,0,.78) 55%)}
+  .amb{flex-shrink:0;width:112px;cursor:pointer;border-radius:9px;overflow:hidden;
+    border:2px solid transparent;background:rgba(14,16,20,.8);transition:.15s}
+  .amb:hover{border-color:rgba(255,255,255,.4)}
+  .amb.ativo{border-color:var(--acento)}
+  .amb img{width:100%;height:60px;object-fit:cover;display:block;background:#111}
+  .amb span{display:block;padding:6px 8px;font-size:11.5px;text-align:center;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .carregando{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    z-index:20;background:#0d0f12;flex-direction:column;gap:14px;text-align:center;padding:30px}
+  .aro{width:38px;height:38px;border:3px solid rgba(255,255,255,.18);
+    border-top-color:var(--acento);border-radius:50%;animation:girar .9s linear infinite}
+  @keyframes girar{to{transform:rotate(360deg)}}
+
+  .lead{position:absolute;inset:0;z-index:30;display:none;align-items:center;
+    justify-content:center;background:rgba(0,0,0,.68);backdrop-filter:blur(4px);padding:20px}
+  .lead .caixa{background:#181b21;border:1px solid rgba(255,255,255,.14);border-radius:14px;
+    padding:26px;max-width:390px;width:100%}
+  .lead h2{margin:0 0 6px;font-size:19px}
+  .lead p{margin:0 0 16px;color:#a9b0ba;font-size:13.5px}
+  .lead input{width:100%;margin-bottom:9px;background:#0f1115;color:#fff;
+    border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:10px 12px;font:inherit}
+  .lead input:focus{outline:none;border-color:var(--acento)}
+  .lead .env{width:100%;background:var(--acento);color:#1a1207;border:none;border-radius:8px;
+    padding:11px;font:inherit;font-weight:700;cursor:pointer;margin-top:5px}
+  .lead .pular{width:100%;background:none;color:#8b929c;border:none;padding:9px;
+    font:inherit;cursor:pointer;margin-top:4px}
+
+  /* O Pannellum posiciona o hotspot via transform inline. Por isso a animacao
+     fica no <span> interno: animar transform aqui apagaria o posicionamento. */
+  .pnlm-hotspot-base{cursor:pointer}
+  .seta{width:44px;height:44px;margin:-22px 0 0 -22px}
+  .seta span{display:flex;align-items:center;justify-content:center;
+    width:100%;height:100%;border-radius:50%;font-size:19px;color:#fff;
+    background:rgba(224,123,57,.94);border:2px solid rgba(255,255,255,.9);
+    animation:pulsar 2.2s ease-in-out infinite}
+  .seta:hover span{background:rgba(238,140,75,1)}
+  .ponto{width:26px;height:26px;margin:-13px 0 0 -13px}
+  .ponto span{display:flex;align-items:center;justify-content:center;
+    width:100%;height:100%;border-radius:50%;font-size:14px;font-weight:700;
+    color:#14161a;background:rgba(255,255,255,.94);border:2px solid rgba(0,0,0,.35)}
+  @keyframes pulsar{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(224,123,57,.55)}
+                    50%{transform:scale(1.07);box-shadow:0 0 0 13px rgba(224,123,57,0)}}
+  .dica-vazio{color:#8b929c;max-width:400px;line-height:1.6}
+</style>
+</head>
+<body>
+
+<div id="pano"></div>
+
+<div class="carregando" id="carregando">
+  <div class="aro"></div>
+  <div id="txtCarregando">Carregando o tour...</div>
+</div>
+
+<div class="cartao" id="cartao" style="display:none">
+  <h1 id="vTitulo"></h1>
+  <div class="end" id="vEndereco"></div>
+  <div class="preco" id="vPreco"></div>
+</div>
+
+<div class="topo-dir">
+  <button class="bt" id="btAndar" onclick="andarAqui()" style="display:none"
+          title="Deslocar-se dentro deste ambiente">Andar aqui</button>
+  <button class="bt" onclick="telaCheia()" title="Tela cheia">⛶</button>
+  <button class="bt" onclick="giroscopio()" id="btGiro" title="Girar com o celular">◎</button>
+</div>
+
+<div class="menu" id="menu"></div>
+
+<div class="lead" id="lead">
+  <div class="caixa">
+    <h2 id="lTitulo">Gostou do imóvel?</h2>
+    <p id="lTexto">Deixe seu contato que um corretor fala com você.</p>
+    <input type="text" id="lNome" placeholder="Seu nome">
+    <input type="tel" id="lTelefone" placeholder="Telefone / WhatsApp">
+    <input type="email" id="lEmail" placeholder="E-mail">
+    <button class="env" onclick="enviarLead()">Quero falar com um corretor</button>
+    <button class="pular" onclick="fecharLead()">Continuar vendo o tour</button>
+  </div>
+</div>
+
+<script>
+let tour = null, visor = null, atual = null;
+const $ = id => document.getElementById(id);
+
+async function iniciar(){
+  try{
+    tour = await (await fetch('/api/tour')).json();
+  }catch(e){
+    $('carregando').innerHTML = '<div class="dica-vazio">Não consegui carregar os dados do tour.</div>';
+    return;
+  }
+
+  if (!tour.cenas || !tour.cenas.length){
+    $('carregando').innerHTML =
+      '<div class="dica-vazio"><b>Este tour ainda não tem ambientes.</b><br><br>' +
+      'Abra o painel, crie o primeiro ambiente e volte aqui.</div>';
+    return;
+  }
+
+  document.documentElement.style.setProperty('--acento', tour.cor || '#e07b39');
+  $('vTitulo').textContent   = tour.titulo || '';
+  $('vEndereco').textContent = tour.endereco || '';
+  $('vPreco').textContent    = tour.preco || '';
+  $('cartao').style.display  = 'block';
+  document.title = tour.titulo || 'Tour Virtual';
+
+  montarCenas();
+  desenharMenu();
+  atualizarBotaoAndar();
+
+  if (tour.lead && tour.lead.ativo){
+    $('lTitulo').textContent = tour.lead.titulo || 'Gostou do imóvel?';
+    $('lTexto').textContent  = tour.lead.texto || '';
+    setTimeout(() => { if (!sessionStorage.getItem('lead_ok')) $('lead').style.display = 'flex'; },
+               (tour.lead.segundos || 25) * 1000);
+  }
+}
+
+function montarCenas(){
+  const cenas = {};
+  tour.cenas.forEach(c => {
+    cenas[c.id] = {
+      type: 'equirectangular',
+      panorama: '/data/scenes/' + c.arquivo,
+      haov: c.haov, vaov: c.vaov, vOffset: 0,
+      yaw: c.vista_inicial.yaw, pitch: c.vista_inicial.pitch, hfov: c.vista_inicial.hfov,
+      compass: c.panorama_completo,
+      // cssClass ja aplica o estilo; o tooltip so preenche o conteudo.
+      // Sobrescrever className aqui quebraria o posicionamento do Pannellum.
+      hotSpots: (c.hotspots || []).map(h => h.tipo === 'cena'
+        ? { pitch: h.pitch, yaw: h.yaw, type: 'scene', sceneId: h.destino,
+            cssClass: 'seta', createTooltipArgs: h.texto,
+            createTooltipFunc: (elemento, texto) => {
+              elemento.innerHTML = '<span>&#10148;</span>';
+              elemento.title = texto; } }
+        : { pitch: h.pitch, yaw: h.yaw, type: 'info',
+            cssClass: 'ponto', createTooltipArgs: h.texto,
+            createTooltipFunc: (elemento, texto) => {
+              elemento.innerHTML = '<span>i</span>';
+              elemento.title = texto; } })
+    };
+  });
+
+  const inicial = tour.cena_inicial || tour.cenas[0].id;
+  visor = pannellum.viewer('pano', {
+    default: { firstScene: inicial, sceneFadeDuration: 900, autoLoad: true,
+               showFullscreenCtrl: false, showZoomCtrl: true },
+    scenes: cenas
+  });
+
+  atual = inicial;
+  visor.on('scenechange', id => { atual = id; desenharMenu(); atualizarBotaoAndar(); });
+  visor.on('load', () => { $('carregando').style.display = 'none'; });
+  visor.on('error', msg => {
+    $('carregando').style.display = 'flex';
+    $('carregando').innerHTML = '<div class="dica-vazio">Erro ao carregar a imagem: ' + msg + '</div>';
+  });
+}
+
+function desenharMenu(){
+  $('menu').innerHTML = tour.cenas.map(c => `
+    <div class="amb ${c.id === atual ? 'ativo' : ''}" onclick="irPara('${c.id}')">
+      <img src="/data/scenes/${c.arquivo}" alt="">
+      <span>${c.nome}</span>
+    </div>`).join('');
+}
+
+function irPara(id){ if (id !== atual) visor.loadScene(id); }
+
+function andarAqui(){
+  location.href = '/andar?cena=' + atual;
+}
+
+function atualizarBotaoAndar(){
+  const c = tour.cenas.find(x => x.id === atual);
+  $('btAndar').style.display = (c && c.profundidade) ? 'block' : 'none';
+}
+
+function telaCheia(){
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+function giroscopio(){
+  if (!visor) return;
+  const ligado = visor.isOrientationActive();
+  if (ligado){ visor.stopOrientation(); $('btGiro').style.borderColor = 'rgba(255,255,255,.14)'; }
+  else { visor.startOrientation(); $('btGiro').style.borderColor = 'var(--acento)'; }
+}
+
+async function enviarLead(){
+  const dados = {
+    nome: $('lNome').value.trim(),
+    telefone: $('lTelefone').value.trim(),
+    email: $('lEmail').value.trim(),
+    quando: new Date().toLocaleString('pt-BR')
+  };
+  if (!dados.nome || !(dados.telefone || dados.email)){
+    alert('Preencha seu nome e pelo menos um contato.');
+    return;
+  }
+  try{
+    await fetch('/api/leads', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(dados)});
+  }catch(e){ /* versao exportada nao tem servidor: segue o baile */ }
+  sessionStorage.setItem('lead_ok', '1');
+  $('lead').innerHTML = '<div class="caixa"><h2>Obrigado!</h2>' +
+    '<p>Recebemos seu contato. Um corretor vai falar com você em breve.</p>' +
+    '<button class="env" onclick="fecharLead()">Voltar ao tour</button></div>';
+}
+
+function fecharLead(){
+  sessionStorage.setItem('lead_ok', '1');
+  $('lead').style.display = 'none';
+}
+
+iniciar();
+</script>
+</body>
+</html>
