@@ -73,9 +73,34 @@ Como funciona, já que o modelo de profundidade só entende foto em perspectiva:
 
 Total: cerca de 5 segundos por ambiente, em CPU.
 
-**Limites honestos.** O deslocamento é de ~1 metro, não é caminhar pela casa. Atrás
-dos móveis não existe informação nenhuma — a geometria estica e aparecem borrões se
-você for longe demais. Por isso o alcance é limitado, e há um controle para ajustar.
+## Caminhar pelo imóvel inteiro
+
+Um ponto sozinho dá ~1 metro de deslocamento. Para percorrer a casa toda, o caminho é
+o mesmo da Matterport: **vários pontos de captura encadeados**, e não um modelo 3D da
+casa inteira.
+
+Fotografe de 2 a 3 posições por cômodo, mais uma em cada corredor e porta — pontos a
+cada 1,5 a 2 metros, sempre em linha de visão um do outro. Gere a profundidade de cada
+um. Depois, no painel, arraste os pontos na **planta** para as posições reais.
+
+No modo caminhar, o visitante anda livremente e o sistema troca de ponto sozinho ao
+se aproximar do vizinho, com transição suave. O minimapa mostra onde ele está e para
+onde pode ir.
+
+Três detalhes que fazem isso funcionar:
+
+- **Escala calibrada pelo chão.** Profundidade estimada não tem metro: ela diz o que
+  está perto, não quão perto. O piso logo abaixo da câmera fica a ~1,5 m (altura do
+  peito), e é por ele que a escala é calibrada — sem isso, o passo não teria tamanho.
+- **Colisão pela geometria.** O passo só vale se couber dentro da distância real da
+  parede naquela direção. Sem isso a câmera atravessa a parede e passa a ver a cena
+  por fora.
+- **Só o ponto atual é desenhado.** Cada ponto é uma esfera em volta da câmera; duas
+  visíveis ao mesmo tempo se tapam e a tela fica preta pela metade.
+
+**Limites honestos.** Dentro de cada bolha o alcance segue em ~1 metro, e atrás dos
+móveis não existe informação nenhuma. A transição entre pontos é suave, mas com pontos
+distantes demais (acima de ~3 m) ela volta a parecer teleporte.
 
 Para movimento realmente livre seria reconstrução 3D (Gaussian Splatting), que exige
 refotografar **andando** pelo cômodo: fotos tiradas girando no eixo não têm paralaxe

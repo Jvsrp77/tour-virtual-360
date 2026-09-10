@@ -276,11 +276,30 @@ def api_atualizar_cena(cena_id):
     if not cena:
         return jsonify({"ok": False, "erro": "Cena nao encontrada."}), 404
     dados = request.get_json(force=True)
-    for campo in ("nome", "hotspots", "vista_inicial", "haov", "vaov"):
+    for campo in ("nome", "hotspots", "vista_inicial", "haov", "vaov", "posicao"):
         if campo in dados:
             cena[campo] = dados[campo]
     salvar_tour(tour)
     return jsonify({"ok": True, "cena": cena})
+
+
+@app.route("/api/planta", methods=["PUT"])
+def api_salvar_planta():
+    """
+    Grava de uma vez a posicao de todos os pontos de captura, em metros.
+
+    As posicoes ligam os panoramas num espaco comum: e o que permite ao visitante
+    caminhar de um ponto ao outro em vez de saltar entre fotos soltas.
+    """
+    tour = carregar_tour()
+    posicoes = request.get_json(force=True).get("posicoes", {})
+    for cena in tour["cenas"]:
+        if cena["id"] in posicoes:
+            p = posicoes[cena["id"]]
+            cena["posicao"] = {"x": round(float(p["x"]), 3),
+                               "y": round(float(p["y"]), 3)}
+    salvar_tour(tour)
+    return jsonify({"ok": True, "cenas": tour["cenas"]})
 
 
 @app.route("/api/cenas/<cena_id>", methods=["DELETE"])

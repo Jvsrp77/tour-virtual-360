@@ -84,6 +84,8 @@
        word-break:break-all;display:block;margin-top:6px}
   .barra-prog{height:3px;background:var(--acento);width:0;transition:width .3s;
               position:absolute;top:0;left:0;z-index:5}
+  #planta{width:100%;background:#0d0f12;border:1px solid var(--borda);border-radius:8px;
+          cursor:crosshair;display:block;touch-action:none}
 </style>
 </head>
 <body>
@@ -129,6 +131,20 @@
     <div class="bloco">
       <h2>2 · Ambientes do tour</h2>
       <div id="listaCenas"></div>
+    </div>
+
+    <div class="bloco">
+      <h2>3 · Planta — onde cada ponto fica</h2>
+      <canvas id="planta" height="300"></canvas>
+      <div class="dica" id="dicaPlanta">Arraste os pontos para a posição real deles
+        dentro do imóvel. É isso que liga os panoramas num espaço só e permite
+        caminhar de um ao outro.</div>
+      <div class="linha" style="margin-top:8px">
+        <button onclick="salvarPlanta()">Salvar planta</button>
+        <button onclick="autoPlanta()">Distribuir</button>
+      </div>
+      <button class="primario" style="width:100%;margin-top:8px"
+              onclick="window.open('/andar','_blank')">Caminhar pelo imóvel</button>
     </div>
   </div>
 
@@ -302,6 +318,8 @@ async function carregar(){
   if (cenaAtual && !tour.cenas.find(c => c.id === cenaAtual)) cenaAtual = null;
   if (!cenaAtual && tour.cenas.length) cenaAtual = (tour.cena_inicial || tour.cenas[0].id);
   if (cenaAtual) abrirCena(cenaAtual); else $('painelCena').style.display = 'none';
+  ligarPlanta();
+  desenharPlanta();
 }
 
 function desenharCenas(){
@@ -320,6 +338,7 @@ function desenharCenas(){
 
 function abrirCena(id){
   cenaAtual = id;
+  desenharPlanta();
   const c = tour.cenas.find(x => x.id === id);
   if (!c) return;
   desenharCenas();
@@ -349,6 +368,148 @@ async function ajustarCobertura(){
     body: JSON.stringify({haov, vaov})});
   abrirCena(c.id);
   aviso(`Cobertura ajustada para ${haov}° na horizontal e ${vaov.toFixed(1)}° na vertical.`, 'ok');
+}
+
+// ------------------------------------------------------- editor de planta
+// As posicoes ficam em METROS. O canvas so mostra; o enquadramento e calculado
+// a partir dos proprios pontos, entao nao existe escala para o usuario calibrar.
+let arrastandoPonto = null;
+const METROS_VISIVEIS = 12;      // lado da area desenhada, em metros
+
+function pontosPlanta(){
+  return tour.cenas.filter(c => c.profundidade);
+}
+
+function escalaPlanta(cv){
+  const pts = pontosPlanta();
+  let minX = -1, maxX = 1, minY = -1, maxY = 1;
+  if (pts.length){
+    const xs = pts.map(c => (c.posicao||{x:0}).x), ys = pts.map(c => (c.posicao||{y:0}).y);
+    minX = Math.min(...xs); maxX = Math.max(...xs);
+    minY = Math.min(...ys); maxY = Math.max(...ys);
+  }
+  const cx = (minX+maxX)/2, cy = (minY+maxY)/2;
+  const span = Math.max(METROS_VISIVEIS, (maxX-minX)*1.6, (maxY-minY)*1.6);
+  const k = Math.min(cv.width, cv.height) / span;
+  return {
+    paraTela: (x,y) => [cv.width/2 + (x-cx)*k, cv.height/2 + (y-cy)*k],
+    paraMetros: (px,py) => [(px-cv.width/2)/k + cx, (py-cv.height/2)/k + cy],
+    k
+  };
+}
+
+function desenharPlanta(){
+  const cv = $('planta');
+  if (!cv) return;
+  cv.width = cv.clientWidth;
+  const ctx = cv.getContext('2d');
+  const e = escalaPlanta(cv);
+  const pts = pontosPlanta();
+
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = '#0d0f12'; ctx.fillRect(0,0,cv.width,cv.height);
+
+  // grade de 1 metro
+  ctx.strokeStyle = '#1e232b'; ctx.lineWidth = 1;
+  for (let m = -30; m <= 30; m++){
+    const [gx] = e.paraTela(m, 0), [, gy] = e.paraTela(0, m);
+    ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,cv.height); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(cv.width,gy); ctx.stroke();
+  }
+
+  if (!pts.length){
+    ctx.fillStyle = '#6b7280'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText('Gere a profundidade de um ambiente', cv.width/2, cv.height/2 - 8);
+    ctx.fillText('para ele aparecer aqui', cv.width/2, cv.height/2 + 10);
+    return;
+  }
+
+  // ligacoes entre pontos vizinhos (ate 4 m): e por onde da para caminhar
+  ctx.strokeStyle = '#3a4250'; ctx.lineWidth = 2;
+  for (let i = 0; i < pts.length; i++)
+    for (let j = i+1; j < pts.length; j++){
+      const a = pts[i].posicao||{x:0,y:0}, b = pts[j].posicao||{x:0,y:0};
+      if (Math.hypot(a.x-b.x, a.y-b.y) > 4) continue;
+      const [x1,y1] = e.paraTela(a.x,a.y), [x2,y2] = e.paraTela(b.x,b.y);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+
+  pts.forEach(c => {
+    const pos = c.posicao || {x:0,y:0};
+    const [x,y] = e.paraTela(pos.x, pos.y);
+    const ativo = c.id === cenaAtual;
+    ctx.beginPath(); ctx.arc(x,y,ativo?11:8,0,Math.PI*2);
+    ctx.fillStyle = ativo ? '#e07b39' : '#5b6472'; ctx.fill();
+    ctx.strokeStyle = '#e8eaed'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#c8cdd5'; ctx.font = '11px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(c.nome.slice(0,16), x, y - 15);
+  });
+
+  ctx.fillStyle = '#6b7280'; ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+  ctx.fillText('cada quadrado = 1 metro', 8, cv.height - 8);
+}
+
+function ligarPlanta(){
+  const cv = $('planta');
+  if (!cv || cv.dataset.ligado) return;
+  cv.dataset.ligado = '1';
+
+  const local = ev => {
+    const r = cv.getBoundingClientRect();
+    const t = ev.touches ? ev.touches[0] : ev;
+    return [t.clientX - r.left, t.clientY - r.top];
+  };
+  const achar = (px,py) => {
+    const e = escalaPlanta(cv);
+    return pontosPlanta().find(c => {
+      const pos = c.posicao || {x:0,y:0};
+      const [x,y] = e.paraTela(pos.x,pos.y);
+      return Math.hypot(px-x, py-y) < 16;
+    });
+  };
+  const inicio = ev => {
+    const [px,py] = local(ev);
+    const c = achar(px,py);
+    if (c){ arrastandoPonto = c; cenaAtual = c.id; abrirCena(c.id); ev.preventDefault(); }
+  };
+  const mover = ev => {
+    if (!arrastandoPonto) return;
+    const [px,py] = local(ev);
+    const [mx,my] = escalaPlanta(cv).paraMetros(px,py);
+    arrastandoPonto.posicao = {x: +mx.toFixed(2), y: +my.toFixed(2)};
+    desenharPlanta();
+    ev.preventDefault();
+  };
+  const fim = () => { arrastandoPonto = null; };
+
+  cv.addEventListener('mousedown', inicio);
+  addEventListener('mousemove', mover);
+  addEventListener('mouseup', fim);
+  cv.addEventListener('touchstart', inicio, {passive:false});
+  addEventListener('touchmove', mover, {passive:false});
+  addEventListener('touchend', fim);
+}
+
+function autoPlanta(){
+  // distribui em circulo quando ainda nao existe posicao definida
+  const pts = pontosPlanta();
+  if (!pts.length) return;
+  const raio = Math.max(2, pts.length * 0.45);
+  pts.forEach((c,i) => {
+    const a = (i / pts.length) * Math.PI * 2;
+    c.posicao = {x: +(Math.cos(a)*raio).toFixed(2), y: +(Math.sin(a)*raio).toFixed(2)};
+  });
+  desenharPlanta();
+  aviso('Pontos distribuídos. Arraste cada um para a posição real e salve.', 'mira');
+}
+
+async function salvarPlanta(){
+  const posicoes = {};
+  pontosPlanta().forEach(c => { posicoes[c.id] = c.posicao || {x:0,y:0}; });
+  await fetch('/api/planta', {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({posicoes})});
+  await carregar();
+  aviso('Planta salva. Abra <b>Caminhar pelo imóvel</b> para percorrer os pontos.', 'ok');
 }
 
 function desenharProfundidade(c){

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Andar pelo ambiente</title>
+<title>Caminhar pelo imóvel</title>
 <script src="/static/vendor/three.js"></script>
 <style>
   :root{ --acento:#e07b39; }
@@ -13,16 +13,16 @@
   #tela{position:absolute;inset:0}
   #tela canvas{display:block}
 
-  .painel{position:absolute;top:16px;left:16px;z-index:10;max-width:310px;
+  .painel{position:absolute;top:16px;left:16px;z-index:10;width:280px;
     background:rgba(14,16,20,.86);backdrop-filter:blur(12px);
     border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:14px 16px}
-  .painel h1{margin:0 0 3px;font-size:16px}
-  .painel .sub{font-size:12px;color:#a9b0ba;margin-bottom:10px}
+  .painel h1{margin:0 0 2px;font-size:16px}
+  .painel .sub{font-size:12px;color:#a9b0ba}
   .painel label{display:block;font-size:11px;color:#a9b0ba;margin:11px 0 4px;
     text-transform:uppercase;letter-spacing:.5px}
   .painel input[type=range]{width:100%;accent-color:var(--acento)}
   .teclas{font-size:12px;color:#a9b0ba;line-height:1.9;margin-top:10px;
-    border-top:1px solid rgba(255,255,255,.1);padding-top:10px}
+    border-top:1px solid rgba(255,255,255,.1);padding-top:9px}
   .teclas b{display:inline-block;min-width:52px;background:#22262d;color:#e8eaed;
     border-radius:5px;padding:1px 7px;font-size:11px;text-align:center;margin-right:6px}
 
@@ -33,19 +33,28 @@
   .bt:hover{background:rgba(40,44,52,.95)}
   .bt.primario{background:var(--acento);color:#1a1207;border-color:var(--acento);font-weight:600}
 
+  #mapa{position:absolute;bottom:16px;left:16px;z-index:10;border-radius:11px;
+    background:rgba(14,16,20,.88);border:1px solid rgba(255,255,255,.14);
+    backdrop-filter:blur(12px);cursor:pointer}
+
+  .aviso{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);z-index:11;
+    background:rgba(14,16,20,.9);border:1px solid rgba(224,123,57,.5);color:#ffca9a;
+    padding:8px 15px;border-radius:9px;font-size:12.5px;opacity:0;transition:opacity .3s;
+    pointer-events:none;white-space:nowrap}
+  .aviso.ver{opacity:1}
+
   .carregando{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
     z-index:30;background:#0d0f12;flex-direction:column;gap:14px;text-align:center;padding:30px}
   .aro{width:38px;height:38px;border:3px solid rgba(255,255,255,.18);
     border-top-color:var(--acento);border-radius:50%;animation:girar .9s linear infinite}
   @keyframes girar{to{transform:rotate(360deg)}}
-  .erro{color:#ffaba8;max-width:430px;line-height:1.6}
+  .erro{color:#ffaba8;max-width:440px;line-height:1.6}
 
   .dpad{position:absolute;bottom:18px;right:18px;z-index:10;display:grid;gap:6px;
     grid-template-columns:repeat(3,50px);grid-template-rows:repeat(2,50px)}
   .dpad button{background:rgba(14,16,20,.86);border:1px solid rgba(255,255,255,.16);
     color:#fff;border-radius:9px;font-size:17px;cursor:pointer}
   .dpad button:active{background:var(--acento);color:#1a1207}
-  .vazio1{grid-column:1}
 </style>
 </head>
 <body>
@@ -54,24 +63,23 @@
 
 <div class="carregando" id="carregando">
   <div class="aro"></div>
-  <div id="msgCarregando">Montando a geometria do ambiente...</div>
+  <div id="msgCarregando">Montando a geometria do imóvel...</div>
 </div>
 
 <div class="painel" id="painel" style="display:none">
   <h1 id="nomeCena"></h1>
-  <div class="sub">Você pode se deslocar dentro do ambiente</div>
+  <div class="sub" id="subCena"></div>
 
   <label>Profundidade do relevo</label>
   <input type="range" id="forca" min="0" max="100" value="70">
 
-  <label>Alcance do passo</label>
-  <input type="range" id="alcance" min="20" max="200" value="110">
+  <label>Alcance a partir de cada ponto</label>
+  <input type="range" id="alcance" min="50" max="250" value="130">
 
   <div class="teclas">
-    <div><b>W A S D</b> andar</div>
+    <div><b>W A S D</b> caminhar</div>
     <div><b>arrastar</b> olhar em volta</div>
-    <div><b>Q / E</b> abaixar e levantar</div>
-    <div><b>R</b> voltar ao centro</div>
+    <div><b>R</b> voltar ao ponto</div>
   </div>
 </div>
 
@@ -80,8 +88,11 @@
   <button class="bt primario" onclick="recentrar()">Centralizar</button>
 </div>
 
+<canvas id="mapa" width="190" height="190"></canvas>
+<div class="aviso" id="aviso"></div>
+
 <div class="dpad" id="dpad" style="display:none">
-  <div class="vazio1"></div>
+  <div></div>
   <button ontouchstart="tecla('w',1)" ontouchend="tecla('w',0)">▲</button>
   <div></div>
   <button ontouchstart="tecla('a',1)" ontouchend="tecla('a',0)">◀</button>
@@ -91,61 +102,107 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const params = new URLSearchParams(location.search);
 
-let cena3d, camera, renderizador, malha;
-let raiosBase = null, direcoes = null, geometria = null;
+let cena3d, camera, renderizador;
+let pontos = [];                 // {cena, mundo:Vector3, malha, carregando}
+let ativo = null, saindo = null, fade = 1;
 const teclas = {};
 let yaw = 0, pitch = 0, arrastando = false, ultimo = null;
-const posicao = new THREE.Vector3(0, 0, 0);
+const posicao = new THREE.Vector3();
 
-const GRADE_L = 384, GRADE_A = 192;     // resolução da malha esférica
+const GRADE_L = 320, GRADE_A = 160;
+const MAX_MALHAS = 3;            // texturas de panorama pesam; nao da para segurar todas
+const TEX_MAX = 4096;
 
-function falhar(texto){
-  $('carregando').innerHTML = '<div class="erro">' + texto + '</div>';
+function falhar(t){ $('carregando').innerHTML = '<div class="erro">' + t + '</div>'; }
+
+let avisoTimer = null;
+function avisar(texto){
+  $('aviso').textContent = texto;
+  $('aviso').classList.add('ver');
+  clearTimeout(avisoTimer);
+  avisoTimer = setTimeout(() => $('aviso').classList.remove('ver'), 2600);
 }
+
+// ------------------------------------------------------------------ dados
 
 async function iniciar(){
   let tour;
   try { tour = await (await fetch('/api/tour')).json(); }
   catch(e){ return falhar('Não consegui carregar o tour.'); }
 
-  const pedida = params.get('cena');
-  let cena = pedida ? tour.cenas.find(c => c.id === pedida) : null;
-  if (!cena) cena = tour.cenas.find(c => c.profundidade);
-  if (!cena) return falhar('Nenhum ambiente tem mapa de profundidade ainda. '
-    + 'Abra o painel, selecione o ambiente e clique em <b>Gerar profundidade</b>.');
-  if (!cena.profundidade) return falhar('O ambiente <b>' + cena.nome + '</b> ainda não '
-    + 'tem mapa de profundidade. Gere no painel e volte aqui.');
+  const comProfundidade = tour.cenas.filter(c => c.profundidade);
+  if (!comProfundidade.length)
+    return falhar('Nenhum ambiente tem mapa de profundidade. Abra o painel, '
+      + 'selecione o ambiente e clique em <b>Gerar profundidade</b>.');
 
-  $('nomeCena').textContent = cena.nome;
-  document.title = cena.nome + ' · andar';
+  // sem planta definida, tudo vira um ponto so na origem
+  const temPlanta = comProfundidade.some(c => c.posicao);
+  pontos = comProfundidade.map((c, i) => ({
+    cena: c,
+    mundo: new THREE.Vector3(
+      c.posicao ? c.posicao.x : (temPlanta ? 0 : i * 999),
+      0,
+      c.posicao ? c.posicao.y : 0),
+    malha: null, carregando: false, usoEm: 0
+  }));
 
-  try {
-    const [textura, disparidade] = await Promise.all([
-      carregarTextura('/data/scenes/' + cena.arquivo),
-      carregarProfundidade('/data/scenes/' + cena.profundidade)
-    ]);
-    montarCena(textura, disparidade);
-  } catch(e){ return falhar('Falha ao carregar as imagens: ' + e.message); }
+  const pedida = new URLSearchParams(location.search).get('cena');
+  const inicial = pontos.find(p => p.cena.id === pedida) || pontos[0];
 
+  montarTres();
+  posicao.copy(inicial.mundo);
+  ativo = inicial;
+
+  try { await carregarPonto(inicial); }
+  catch(e){ return falhar('Falha ao carregar: ' + e.message); }
+
+  inicial.malha.material.opacity = 1;
+  atualizarPainel();
   $('carregando').style.display = 'none';
   $('painel').style.display = 'block';
   if ('ontouchstart' in window) $('dpad').style.display = 'grid';
+  if (!temPlanta && pontos.length > 1)
+    avisar('Defina a planta no painel para caminhar entre os ambientes');
   animar();
 }
 
-function carregarTextura(url){
-  return new Promise((ok, falha) => {
-    new THREE.TextureLoader().load(url, t => {
-      t.flipY = false;                    // a malha usa v=0 no topo da imagem
-      t.colorSpace = THREE.SRGBColorSpace;
-      ok(t);
-    }, undefined, () => falha(new Error('panorama')));
+function montarTres(){
+  cena3d = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.05, 400);
+  renderizador = new THREE.WebGLRenderer({antialias: true});
+  renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderizador.setSize(innerWidth, innerHeight);
+  $('tela').appendChild(renderizador.domElement);
+  ligarControles();
+  addEventListener('resize', () => {
+    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+    renderizador.setSize(innerWidth, innerHeight);
   });
 }
 
-// O PNG guarda 16 bits repartidos: R e o byte alto, G o byte baixo.
+// ------------------------------------------------------------ carregamento
+
+function carregarTextura(url){
+  return new Promise((ok, falha) => {
+    const img = new Image();
+    img.onload = () => {
+      let fonte = img;
+      if (img.width > TEX_MAX){          // limita a memoria de video
+        const c = document.createElement('canvas');
+        c.width = TEX_MAX; c.height = Math.round(img.height * TEX_MAX / img.width);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        fonte = c;
+      }
+      const t = new THREE.Texture(fonte);
+      t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.needsUpdate = true;
+      ok(t);
+    };
+    img.onerror = () => falha(new Error('panorama'));
+    img.src = url;
+  });
+}
+
 function carregarProfundidade(url){
   return new Promise((ok, falha) => {
     const img = new Image();
@@ -157,153 +214,336 @@ function carregarProfundidade(url){
       const px = ctx.getImageData(0, 0, c.width, c.height).data;
       const d = new Float32Array(c.width * c.height);
       for (let i = 0; i < d.length; i++)
-        d[i] = ((px[i*4] << 8) | px[i*4 + 1]) / 65535;
+        d[i] = ((px[i*4] << 8) | px[i*4 + 1]) / 65535;   // 16 bits em R e G
       ok({dados: d, largura: c.width, altura: c.height});
     };
-    img.onerror = () => falha(new Error('mapa de profundidade'));
+    img.onerror = () => falha(new Error('profundidade'));
     img.src = url;
   });
 }
 
-// disparidade 0..1 (1 = mais perto) -> raio em metros
-function raio(d){ return 1 / (1.542 * d + 0.125); }
+const raio = d => 1 / (1.542 * d + 0.125);
 
-function montarCena(textura, prof){
-  cena3d = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.05, 200);
-  renderizador = new THREE.WebGLRenderer({antialias: true});
-  renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderizador.setSize(innerWidth, innerHeight);
-  $('tela').appendChild(renderizador.domElement);
+// A profundidade estimada nao tem escala absoluta: ela diz o que esta perto e o que
+// esta longe, nao quantos metros. O chao resolve isso — quem fotografou estava com o
+// celular na altura do peito, entao o piso logo abaixo fica a ~1,5 m. Calibrando por
+// ele, as distancias viram metros de verdade e o passo passa a fazer sentido.
+const ALTURA_CAMERA = 1.5;
+
+function calibrarPeloChao(raios){
+  const amostras = [];
+  for (let j = GRADE_A - 6; j <= GRADE_A; j++)
+    for (let i = 0; i <= GRADE_L; i += 8)
+      amostras.push(raios[j * (GRADE_L + 1) + i]);
+  amostras.sort((a, b) => a - b);
+  const chao = amostras[Math.floor(amostras.length / 2)];
+  if (!chao || !isFinite(chao)) return 1;
+  return ALTURA_CAMERA / chao;
+}
+
+async function carregarPonto(p){
+  if (p.malha || p.carregando) return;
+  p.carregando = true;
+  const [textura, prof] = await Promise.all([
+    carregarTextura('/data/scenes/' + p.cena.arquivo),
+    carregarProfundidade('/data/scenes/' + p.cena.profundidade)
+  ]);
 
   const nv = (GRADE_L + 1) * (GRADE_A + 1);
   const posicoes = new Float32Array(nv * 3);
   const uvs = new Float32Array(nv * 2);
-  direcoes = new Float32Array(nv * 3);
-  raiosBase = new Float32Array(nv);
+  const direcoes = new Float32Array(nv * 3);
+  const raios = new Float32Array(nv);
 
   let k = 0;
   for (let j = 0; j <= GRADE_A; j++){
-    const v = j / GRADE_A;
-    const lat = (v - 0.5) * Math.PI;          // -90 no topo, +90 embaixo
+    const v = j / GRADE_A, lat = (v - 0.5) * Math.PI;
     for (let i = 0; i <= GRADE_L; i++){
-      const u = i / GRADE_L;
-      const lon = (u - 0.5) * 2 * Math.PI;
-
-      // y invertido: no equirretangular +lat aponta para baixo, no three.js +y e para cima
-      const dx = Math.cos(lat) * Math.sin(lon);
-      const dy = -Math.sin(lat);
-      const dz = Math.cos(lat) * Math.cos(lon);
-
-      const px = Math.min(prof.largura - 1, Math.round(u * prof.largura));
-      const py = Math.min(prof.altura - 1, Math.round(v * prof.altura));
-      raiosBase[k] = raio(prof.dados[py * prof.largura + px]);
-
-      direcoes[k*3] = dx; direcoes[k*3+1] = dy; direcoes[k*3+2] = dz;
+      const u = i / GRADE_L, lon = (u - 0.5) * 2 * Math.PI;
+      // +lat aponta para baixo no equirretangular; no three.js +y e para cima
+      direcoes[k*3]   = Math.cos(lat) * Math.sin(lon);
+      direcoes[k*3+1] = -Math.sin(lat);
+      direcoes[k*3+2] = Math.cos(lat) * Math.cos(lon);
+      const px = Math.min(prof.largura-1, Math.round(u * prof.largura));
+      const py = Math.min(prof.altura-1,  Math.round(v * prof.altura));
+      raios[k] = raio(prof.dados[py * prof.largura + px]);
       uvs[k*2] = u; uvs[k*2+1] = v;
       k++;
     }
   }
 
+  const escala = calibrarPeloChao(raios);
+  for (let i = 0; i < raios.length; i++) raios[i] *= escala;
+
   const indices = [];
-  for (let j = 0; j < GRADE_A; j++){
+  for (let j = 0; j < GRADE_A; j++)
     for (let i = 0; i < GRADE_L; i++){
-      const a = j * (GRADE_L + 1) + i, b = a + 1;
-      const c = a + GRADE_L + 1, d = c + 1;
+      const a = j*(GRADE_L+1)+i, b = a+1, c = a+GRADE_L+1, d = c+1;
       indices.push(a, c, b, b, c, d);
     }
-  }
 
-  geometria = new THREE.BufferGeometry();
-  geometria.setAttribute('position', new THREE.BufferAttribute(posicoes, 3));
-  geometria.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometria.setIndex(indices);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(posicoes, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  g.setIndex(indices);
 
-  malha = new THREE.Mesh(geometria, new THREE.MeshBasicMaterial({
-    map: textura, side: THREE.DoubleSide
+  const malha = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    map: textura, side: THREE.DoubleSide, transparent: true, opacity: 0, depthWrite: true
   }));
+  malha.position.copy(p.mundo);
+  malha.renderOrder = 0;
   cena3d.add(malha);
 
-  aplicarForca();
-  $('forca').addEventListener('input', aplicarForca);
-  ligarControles();
-  addEventListener('resize', () => {
-    camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
-    renderizador.setSize(innerWidth, innerHeight);
+  let soma = 0;
+  for (let i = 0; i < raios.length; i++) soma += raios[i];
+  p.raioMedio = soma / raios.length;
+
+  p.malha = malha; p.direcoes = direcoes; p.raios = raios;
+  p.carregando = false;
+  p.usoEm = performance.now();
+  aplicarForcaEm(p);
+  limparAntigas();
+}
+
+function limparAntigas(){
+  const vivos = pontos.filter(p => p.malha).sort((a,b) => b.usoEm - a.usoEm);
+  vivos.slice(MAX_MALHAS).forEach(p => {
+    if (p === ativo || p === saindo) return;
+    cena3d.remove(p.malha);
+    p.malha.geometry.dispose();
+    p.malha.material.map.dispose();
+    p.malha.material.dispose();
+    p.malha = null; p.direcoes = null; p.raios = null;
   });
 }
 
-// forca 0 = esfera lisa (sem paralaxe), 100 = relevo cheio
-function aplicarForca(){
+function aplicarForcaEm(p){
+  if (!p || !p.malha) return;
   const f = $('forca').value / 100;
-  const pos = geometria.attributes.position.array;
-  for (let k = 0; k < raiosBase.length; k++){
-    const r = 3.0 * (1 - f) + raiosBase[k] * f;
-    pos[k*3]   = direcoes[k*3]   * r;
-    pos[k*3+1] = direcoes[k*3+1] * r;
-    pos[k*3+2] = direcoes[k*3+2] * r;
+  const pos = p.malha.geometry.attributes.position.array;
+  for (let k = 0; k < p.raios.length; k++){
+    // com força 0 vira uma esfera lisa do tamanho medio do comodo
+    const r = p.raioMedio * (1 - f) + p.raios[k] * f;
+    pos[k*3]   = p.direcoes[k*3]   * r;
+    pos[k*3+1] = p.direcoes[k*3+1] * r;
+    pos[k*3+2] = p.direcoes[k*3+2] * r;
   }
-  geometria.attributes.position.needsUpdate = true;
-  geometria.computeBoundingSphere();
+  p.malha.geometry.attributes.position.needsUpdate = true;
+  p.malha.geometry.computeBoundingSphere();
 }
+
+// ------------------------------------------------------------- movimentacao
+
+function maisProximo(p){
+  let melhor = null, dist = Infinity;
+  for (const pt of pontos){
+    const d = pt.mundo.distanceTo(p);
+    if (d < dist){ dist = d; melhor = pt; }
+  }
+  return {ponto: melhor, dist};
+}
+
+// Distancia da superficie naquela direcao, lida do proprio mapa de profundidade.
+function raioNaDirecao(pt, dir){
+  if (!pt.raios) return Infinity;
+  const lat = Math.asin(Math.max(-1, Math.min(1, -dir.y)));
+  const lon = Math.atan2(dir.x, dir.z);
+  const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
+  const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
+  const k = Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
+          + Math.min(GRADE_L, Math.max(0, i));
+  return pt.raios[k];
+}
+
+/**
+ * O passo so vale se couber dentro da bolha de algum ponto de captura.
+ * Alem do alcance escolhido, respeita a geometria: sem isso a camera atravessa
+ * uma parede que esteja mais perto que o alcance e passa a ver a cena por fora.
+ */
+function podeEstar(p){
+  const alcance = $('alcance').value / 100;
+  return pontos.some(pt => {
+    const desvio = p.clone().sub(pt.mundo);
+    const d = desvio.length();
+    if (d > alcance) return false;
+    if (d < 0.02 || !pt.raios) return true;
+    return d < raioNaDirecao(pt, desvio.normalize()) * 0.72;
+  });
+}
+
+function trocarAtivo(novo){
+  if (novo === ativo) return;
+  saindo = ativo;
+  ativo = novo;
+  fade = 0;
+  ativo.usoEm = performance.now();
+  atualizarPainel();
+  avisar('Você está em ' + ativo.cena.nome);
+  // adianta o carregamento dos vizinhos, para a proxima transicao nao travar
+  pontos.filter(p => p !== ativo && p.mundo.distanceTo(ativo.mundo) < 5)
+        .slice(0, 2).forEach(p => carregarPonto(p).catch(()=>{}));
+}
+
+function atualizarPainel(){
+  $('nomeCena').textContent = ativo.cena.nome;
+  const n = pontos.length;
+  $('subCena').textContent = n > 1
+    ? ('ponto ' + (pontos.indexOf(ativo)+1) + ' de ' + n + ' · caminhe até os outros')
+    : 'você pode se deslocar dentro do ambiente';
+}
+
+function recentrar(){ posicao.copy(ativo.mundo); }
 
 function ligarControles(){
   const alvo = renderizador.domElement;
-  const inicio = e => { arrastando = true; ultimo = ponto(e); };
-  const fim = () => { arrastando = false; };
+  const ponto = e => e.touches ? {x:e.touches[0].clientX, y:e.touches[0].clientY}
+                               : {x:e.clientX, y:e.clientY};
+  alvo.addEventListener('mousedown', e => { arrastando = true; ultimo = ponto(e); });
+  alvo.addEventListener('touchstart', e => { arrastando = true; ultimo = ponto(e); }, {passive:true});
+  addEventListener('mouseup', () => arrastando = false);
+  addEventListener('touchend', () => arrastando = false);
   const mover = e => {
     if (!arrastando) return;
     const p = ponto(e);
     yaw   -= (p.x - ultimo.x) * 0.0045;
     pitch -= (p.y - ultimo.y) * 0.0045;
     pitch = Math.max(-1.45, Math.min(1.45, pitch));
-    ultimo = p;
-    e.preventDefault();
+    ultimo = p; e.preventDefault();
   };
-  const ponto = e => e.touches ? {x: e.touches[0].clientX, y: e.touches[0].clientY}
-                               : {x: e.clientX, y: e.clientY};
-  alvo.addEventListener('mousedown', inicio);
-  addEventListener('mouseup', fim);
   addEventListener('mousemove', mover);
-  alvo.addEventListener('touchstart', inicio, {passive: true});
-  addEventListener('touchend', fim);
-  addEventListener('touchmove', mover, {passive: false});
+  addEventListener('touchmove', mover, {passive:false});
 
   addEventListener('keydown', e => {
     if (e.key.toLowerCase() === 'r') return recentrar();
     teclas[e.key.toLowerCase()] = true;
   });
   addEventListener('keyup', e => { teclas[e.key.toLowerCase()] = false; });
+
+  $('forca').addEventListener('input', () => pontos.forEach(aplicarForcaEm));
+  $('mapa').addEventListener('click', irPeloMapa);
 }
 
-function tecla(k, v){ teclas[k] = !!v; }
-function recentrar(){ posicao.set(0, 0, 0); }
+function tecla(k,v){ teclas[k] = !!v; }
+
+// ------------------------------------------------------------------ mapa
+
+function escalaMapa(){
+  const cv = $('mapa');
+  const xs = pontos.map(p => p.mundo.x), zs = pontos.map(p => p.mundo.z);
+  const minX = Math.min(...xs, posicao.x), maxX = Math.max(...xs, posicao.x);
+  const minZ = Math.min(...zs, posicao.z), maxZ = Math.max(...zs, posicao.z);
+  const cx = (minX+maxX)/2, cz = (minZ+maxZ)/2;
+  const span = Math.max(6, (maxX-minX)*1.5, (maxZ-minZ)*1.5);
+  const k = (cv.width - 26) / span;
+  return {k, cx, cz,
+    tela: (x,z) => [cv.width/2 + (x-cx)*k, cv.height/2 + (z-cz)*k]};
+}
+
+function desenharMapa(){
+  const cv = $('mapa'), ctx = cv.getContext('2d');
+  const e = escalaMapa();
+  ctx.clearRect(0,0,cv.width,cv.height);
+
+  ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 2;
+  for (let i = 0; i < pontos.length; i++)
+    for (let j = i+1; j < pontos.length; j++){
+      if (pontos[i].mundo.distanceTo(pontos[j].mundo) > 4) continue;
+      const [x1,y1] = e.tela(pontos[i].mundo.x, pontos[i].mundo.z);
+      const [x2,y2] = e.tela(pontos[j].mundo.x, pontos[j].mundo.z);
+      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    }
+
+  pontos.forEach(p => {
+    const [x,y] = e.tela(p.mundo.x, p.mundo.z);
+    ctx.beginPath(); ctx.arc(x,y, p === ativo ? 7 : 5, 0, Math.PI*2);
+    ctx.fillStyle = p === ativo ? '#e07b39' : 'rgba(255,255,255,.45)';
+    ctx.fill();
+  });
+
+  // o "bonequinho": posicao e para onde voce esta olhando
+  const [px,py] = e.tela(posicao.x, posicao.z);
+  ctx.save(); ctx.translate(px,py); ctx.rotate(-yaw + Math.PI);
+  ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(6,7); ctx.lineTo(0,3); ctx.lineTo(-6,7);
+  ctx.closePath(); ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.strokeStyle = '#14161a'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+}
+
+function irPeloMapa(ev){
+  const cv = $('mapa'), r = cv.getBoundingClientRect();
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const e = escalaMapa();
+  let alvo = null, melhor = 18;
+  pontos.forEach(p => {
+    const [x,y] = e.tela(p.mundo.x, p.mundo.z);
+    const d = Math.hypot(mx-x, my-y);
+    if (d < melhor){ melhor = d; alvo = p; }
+  });
+  if (!alvo) return;
+  carregarPonto(alvo).then(() => { posicao.copy(alvo.mundo); trocarAtivo(alvo); })
+                     .catch(()=>{});
+}
+
+// ------------------------------------------------------------------ laço
 
 function animar(){
   requestAnimationFrame(animar);
 
-  const passo = 0.035;
+  const passo = 0.03;
   const frente = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
   const lado = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const tentativa = posicao.clone();
 
-  if (teclas['w'] || teclas['arrowup'])    posicao.addScaledVector(frente, -passo);
-  if (teclas['s'] || teclas['arrowdown'])  posicao.addScaledVector(frente, passo);
-  if (teclas['a'] || teclas['arrowleft'])  posicao.addScaledVector(lado, -passo);
-  if (teclas['d'] || teclas['arrowright']) posicao.addScaledVector(lado, passo);
-  if (teclas['q']) posicao.y -= passo;
-  if (teclas['e']) posicao.y += passo;
+  if (teclas['w'] || teclas['arrowup'])    tentativa.addScaledVector(frente, -passo);
+  if (teclas['s'] || teclas['arrowdown'])  tentativa.addScaledVector(frente, passo);
+  if (teclas['a'] || teclas['arrowleft'])  tentativa.addScaledVector(lado, -passo);
+  if (teclas['d'] || teclas['arrowright']) tentativa.addScaledVector(lado, passo);
+  if (teclas['q']) tentativa.y -= passo;
+  if (teclas['e']) tentativa.y += passo;
 
-  // limita o deslocamento: longe do centro os buracos atras dos moveis aparecem
-  const limite = $('alcance').value / 100;
-  if (posicao.length() > limite) posicao.setLength(limite);
+  // so anda para onde algum ponto de captura alcança: e o que forma o corredor
+  if (podeEstar(tentativa)) posicao.copy(tentativa);
+
+  const perto = maisProximo(posicao);
+  if (perto.ponto !== ativo){
+    if (perto.ponto.malha) trocarAtivo(perto.ponto);
+    else carregarPonto(perto.ponto).then(() => trocarAtivo(perto.ponto)).catch(()=>{});
+  }
+
+  // Cada ponto e uma esfera que envolve a camera; se duas ficarem visiveis ao mesmo
+  // tempo, uma tapa a outra e a tela fica preta pela metade. So o ponto atual aparece,
+  // mais o anterior enquanto dura a transicao.
+  for (const p of pontos)
+    if (p.malha) p.malha.visible = (p === ativo || p === saindo);
+
+  if (fade < 1){
+    fade = Math.min(1, fade + 0.045);
+    if (ativo.malha){
+      ativo.malha.material.opacity = fade;
+      ativo.malha.material.depthWrite = true;
+      ativo.malha.renderOrder = 1;
+    }
+    if (saindo && saindo.malha){
+      saindo.malha.material.opacity = 1;      // fica atras, sem competir na mistura
+      saindo.malha.material.depthWrite = false;
+      saindo.malha.renderOrder = 0;
+    }
+    if (fade >= 1 && saindo){
+      if (saindo.malha) saindo.malha.visible = false;
+      saindo = null;
+      limparAntigas();
+    }
+  } else if (ativo.malha){
+    ativo.malha.material.opacity = 1;
+    ativo.malha.material.depthWrite = true;
+  }
 
   camera.position.copy(posicao);
-  camera.lookAt(
-    posicao.x + Math.sin(yaw) * Math.cos(pitch),
-    posicao.y + Math.sin(pitch),
-    posicao.z + Math.cos(yaw) * Math.cos(pitch)
-  );
+  camera.lookAt(posicao.x + Math.sin(yaw)*Math.cos(pitch),
+                posicao.y + Math.sin(pitch),
+                posicao.z + Math.cos(yaw)*Math.cos(pitch));
   renderizador.render(cena3d, camera);
+  desenharMapa();
 }
 
 iniciar();
