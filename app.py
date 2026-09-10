@@ -221,6 +221,49 @@ def api_costurar():
         return jsonify({"ok": False, "erro": "Erro inesperado: %s" % e}), 500
 
 
+@app.route("/api/cenas/varredura", methods=["POST"])
+def api_importar_varredura():
+    """Recebe o panorama do modo Panorama do celular (projecao cilindrica)."""
+    arquivos = request.files.getlist("fotos")
+    nome_base = (request.form.get("nome") or "").strip()
+    try:
+        haov = float(request.form.get("haov") or 360)
+    except ValueError:
+        haov = 360.0
+    if not arquivos:
+        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
+
+    tour = carregar_tour()
+    criadas, avisos = [], []
+    try:
+        for f in arquivos:
+            ext = os.path.splitext(f.filename)[1].lower() or ".jpg"
+            temp = os.path.join(PASTA_UPLOADS, "%s%s" % (uuid.uuid4().hex[:10], ext))
+            f.save(temp)
+
+            arquivo, largura, altura, info = stitcher.importar_varredura(
+                temp, PASTA_CENAS, haov)
+            rotulo = nome_base or os.path.splitext(f.filename)[0][:40] or "Ambiente"
+            cena = montar_cena(rotulo, arquivo, largura, altura, "varredura", info)
+            tour["cenas"].append(cena)
+            criadas.append(cena)
+
+            avisos.append(
+                "Varredura convertida: %.0f graus na horizontal e %.0f na vertical. "
+                "Teto e chão foram preenchidos por aproximação — o modo Panorama do "
+                "celular não alcança essas partes." % (info["haov"], info["fov"]))
+
+        if criadas and not tour["cena_inicial"]:
+            tour["cena_inicial"] = criadas[0]["id"]
+        salvar_tour(tour)
+        return jsonify({"ok": True, "cenas": criadas, "avisos": avisos})
+    except stitcher.ErroCostura as e:
+        return jsonify({"ok": False, "erro": str(e)}), 422
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "erro": str(e)}), 500
+
+
 @app.route("/api/cenas/importar360", methods=["POST"])
 def api_importar_360():
     """Recebe uma foto 360 ja pronta (camera 360 ou app de celular)."""

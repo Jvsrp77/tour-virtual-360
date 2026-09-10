@@ -124,6 +124,20 @@
       </button>
       <div class="dica">Arquivo 2:1 vindo de câmera 360 ou app de celular.</div>
 
+      <label>Panorama do celular (varredura)</label>
+      <input type="text" id="nomeVarredura" placeholder="Nome do ambiente">
+      <input type="file" id="fotoVarredura" accept="image/*" style="margin-top:8px">
+      <div class="linha" style="margin-top:8px">
+        <select id="haovVarredura">
+          <option value="360">Girei 360° completos</option>
+          <option value="270">Girei uns 3/4</option>
+          <option value="180">Girei meia volta</option>
+        </select>
+        <button onclick="importarVarredura()">Converter</button>
+      </div>
+      <div class="dica">O modo Panorama do iPhone/Android. Uma varredura só substitui
+        as 12 fotos — mas não alcança teto nem chão, que ficam preenchidos.</div>
+
       <label>Sem fotos agora</label>
       <button style="width:100%" onclick="gerarDemo()">Gerar ambiente de teste</button>
     </div>
@@ -753,6 +767,27 @@ async function importar360(){
   await carregar();
   aviso(j.avisos.length ? j.avisos.join('<br>') : `${j.cenas.length} ambiente(s) importado(s).`,
         j.avisos.length ? 'erro' : 'ok');
+}
+
+async function importarVarredura(){
+  const arq = $('fotoVarredura').files[0];
+  if (!arq){ aviso('Selecione o arquivo do panorama.', 'erro'); return; }
+  const fd = new FormData();
+  fd.append('fotos', arq);
+  fd.append('nome', $('nomeVarredura').value.trim());
+  fd.append('haov', $('haovVarredura').value);
+
+  aviso('Convertendo a varredura para 360...', 'mira');
+  progresso(40);
+  try{
+    const j = await (await fetch('/api/cenas/varredura', {method:'POST', body: fd})).json();
+    progresso(100); setTimeout(() => progresso(0), 600);
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    $('fotoVarredura').value = ''; $('nomeVarredura').value = '';
+    cenaAtual = j.cenas[0].id;
+    await carregar();
+    aviso((j.avisos || []).join('<br>'), 'ok');
+  }catch(e){ progresso(0); aviso('Falha ao converter: ' + e, 'erro'); }
 }
 
 async function gerarDemo(){

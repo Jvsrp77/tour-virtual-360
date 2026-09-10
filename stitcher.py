@@ -495,6 +495,65 @@ def importar_equirretangular(caminho_origem, pasta_saida):
     return nome, w, h
 
 
+def importar_varredura(caminho_origem, pasta_saida, haov_graus=360.0):
+    """
+    Converte um panorama de varredura de celular (modo Panorama do iPhone/Android)
+    em equirretangular.
+
+    A varredura sai em projecao CILINDRICA, nao esferica: a altura cresce com a
+    tangente da latitude, nao com a latitude. Carregar do jeito que vem esticaria
+    teto e chao. A conversao amostra, para cada linha do equirretangular, a altura
+    correspondente no cilindro.
+
+    O campo vertical nao precisa ser informado: com a cobertura horizontal conhecida,
+    ele sai da propria proporcao da imagem, porque no cilindro
+    largura/altura = haov / (2*tan(vfov/2)).
+    """
+    cil = _ler_imagem(caminho_origem)
+    cil = _redimensionar(cil, LARGURA_MAX_SAIDA)
+    Hc, Wc = cil.shape[:2]
+
+    haov = np.radians(max(30.0, min(360.0, float(haov_graus))))
+    vfov = 2.0 * np.arctan(haov * Hc / (2.0 * Wc))
+    if not np.isfinite(vfov) or vfov <= 0:
+        raise ErroCostura("Não consegui interpretar a geometria dessa varredura.")
+
+    # tela equirretangular na mesma escala angular da entrada
+    W = int(round(Wc * (2 * np.pi) / haov))
+    W = max(1024, min(LARGURA_MAX_SAIDA, W - (W % 2)))
+    H = W // 2
+
+    lon = (np.arange(W, dtype=np.float32) / W - 0.5) * 2 * np.pi
+    lat = (np.arange(H, dtype=np.float32) / H - 0.5) * np.pi
+    lon, lat = np.meshgrid(lon, lat)
+
+    # cilindro: x acompanha a longitude, y e a tangente da latitude
+    mx = (lon / haov + 0.5) * Wc
+    my = (np.tan(lat) / (2 * np.tan(vfov / 2)) + 0.5) * Hc
+
+    dentro = (np.abs(lat) < vfov / 2 - 1e-4) & (np.abs(lon) <= haov / 2 + 1e-6)
+    mx = np.where(dentro, mx, -1).astype(np.float32)
+    my = np.where(dentro, my, -1).astype(np.float32)
+
+    equi = cv2.remap(cil, mx, my, cv2.INTER_CUBIC,
+                     borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+
+    equi = _preencher_bordas_irregulares(equi)
+    nome = "cena_%s.jpg" % uuid.uuid4().hex[:12]
+    _salvar(equi, os.path.join(pasta_saida, nome))
+
+    fechada = haov_graus >= 359.0
+    return nome, equi.shape[1], equi.shape[0], {
+        "haov": 360.0 if fechada else float(haov_graus),
+        "vaov": 180.0 if fechada else float(np.degrees(vfov)),
+        "fechada": fechada,
+        "maior_buraco": 0.0 if fechada else 360.0 - float(haov_graus),
+        "fov": float(np.degrees(vfov)),
+        "confiavel": True,
+        "fileiras": 1,
+    }
+
+
 def eh_equirretangular(largura, altura):
     """Equirretangular completa tem proporcao 2:1 (tolerancia de 5%)."""
     if altura == 0:

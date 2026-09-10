@@ -34,7 +34,22 @@ python app.py
 |---|---|---|
 | **Costurar em 360** | Você tirou 8–12 fotos girando no eixo | O servidor alinha e costura numa panorâmica |
 | **Importar equirretangular** | Você já tem a foto 360 (câmera 360 ou app) | Sobe direto, sem processar |
+| **Panorama do celular** | Você usou o modo Panorama do iPhone/Android | Converte de cilíndrico para equirretangular |
 | **Gerar ambiente de teste** | Não tem foto nenhuma | Cria uma cena sintética para demonstrar |
+
+### Sobre o panorama do celular
+
+O modo Panorama do iPhone entrega uma faixa em projeção **cilíndrica**, não esférica:
+ali a altura cresce com a tangente da latitude, no equirretangular cresce com a
+latitude direta. Carregar do jeito que vem esticaria teto e chão.
+
+O campo vertical não precisa ser informado — sai da própria proporção da imagem,
+porque no cilindro `largura/altura = haov / (2·tan(vfov/2))`. Num teste com uma
+varredura de 9000x1980 o valor deduzido errou 0,3° contra o real.
+
+Vantagem: uma varredura de 20 segundos substitui as 12 fotos. Desvantagem: o campo
+vertical é menor (~69° contra ~81° de uma volta com 12 fotos), então sobra mais teto
+e chão para preencher por aproximação.
 
 ## Funcionalidades
 
