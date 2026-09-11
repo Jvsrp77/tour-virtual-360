@@ -95,6 +95,22 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
        word-break:break-all;display:block;margin-top:6px}
   .barra-prog{height:3px;background:var(--acento);width:0;transition:width .3s;
               position:absolute;top:0;left:0;z-index:5}
+
+  /* Celular: a captura acontece com o telefone na mao, entao o painel precisa
+     funcionar ali. Em tres colunas fixas a da direita ficava fora da tela. */
+  @media (max-width: 1000px){
+    html, body{height:auto}
+    .layout{display:flex;flex-direction:column;height:auto}
+    .centro{order:1;height:56vh;min-height:300px}
+    .coluna{overflow:visible;border:0}
+    .coluna.esq{order:2;border-top:1px solid var(--borda)}
+    .coluna.dir{order:3;border-top:1px solid var(--borda)}
+    header{flex-wrap:wrap;gap:8px;padding:10px 14px}
+    header h1{order:-1;width:100%;font-size:14px}
+    header button{flex:1 1 auto;font-size:12.5px;padding:8px 10px}
+    .barra{position:sticky;bottom:0;z-index:6}
+    #planta{height:240px}
+  }
   #planta{width:100%;background:#0d0f12;border:1px solid var(--borda);border-radius:8px;
           cursor:crosshair;display:block;touch-action:none}
 </style>
@@ -107,6 +123,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <h1 id="tituloImovel">Tour Virtual <span>·</span> Painel</h1>
   <div class="crescer"></div>
   <button onclick="abrirGuia()">Guia de captura</button>
+  <button onclick="verMetricas()">Métricas</button>
   <button onclick="verLeads()">Leads</button>
   <button onclick="copiarEmbed()">Copiar embed</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
@@ -232,8 +249,13 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <input type="text" id="tTitulo">
       <label>Endereço</label>
       <input type="text" id="tEndereco">
+      <label>Descrição</label>
+      <textarea id="tDescricao" rows="3" placeholder="2 suítes, 1 vaga, condomínio com lazer"></textarea>
       <label>Preço</label>
       <input type="text" id="tPreco" placeholder="R$ 000.000">
+      <label>Logo da imobiliária</label>
+      <div id="blocoLogo"></div>
+
       <label>Cor de destaque</label>
       <input type="color" id="tCor" style="height:38px;padding:3px">
       <button class="primario" style="width:100%;margin-top:12px" onclick="salvarTour()">
@@ -313,6 +335,12 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <div class="fechar"><button class="primario" onclick="document.getElementById('dlgGuia').close()">Entendi</button></div>
 </dialog>
 
+<dialog id="dlgMetricas">
+  <h3>Como as pessoas usam este tour</h3>
+  <div id="corpoMetricas"></div>
+  <div class="fechar"><button class="primario" onclick="document.getElementById('dlgMetricas').close()">Fechar</button></div>
+</dialog>
+
 <dialog id="dlgLeads">
   <h3>Contatos capturados</h3>
   <div id="corpoLeads"></div>
@@ -337,6 +365,8 @@ async function carregar(){
   $('tTitulo').value    = tour.titulo || '';
   $('tituloImovel').textContent = tour.titulo || 'Tour Virtual';
   $('tEndereco').value  = tour.endereco || '';
+  $('tDescricao').value = tour.descricao || '';
+  desenharLogo();
   $('tPreco').value     = tour.preco || '';
   $('tCor').value       = tour.cor || '#e07b39';
   $('leadAtivo').checked  = !!(tour.lead && tour.lead.ativo);
@@ -815,10 +845,39 @@ async function gerarDemo(){
   aviso('Ambiente de teste criado. Arraste no visor para girar 360°.', 'ok');
 }
 
+function desenharLogo(){
+  const alvo = $('blocoLogo');
+  if (tour.logo){
+    alvo.innerHTML = `<img src="${CENAS}${tour.logo}?t=${Date.now()}"
+        style="max-width:100%;max-height:60px;background:#fff;border-radius:6px;padding:6px">
+      <button style="width:100%;margin-top:8px" onclick="removerLogo()">Remover logo</button>`;
+  } else {
+    alvo.innerHTML = `<input type="file" id="arqLogo" accept="image/*">
+      <button style="width:100%;margin-top:8px" onclick="enviarLogo()">Enviar logo</button>`;
+  }
+}
+
+async function enviarLogo(){
+  const arq = $('arqLogo').files[0];
+  if (!arq){ aviso('Selecione o arquivo da logo.', 'erro'); return; }
+  const fd = new FormData(); fd.append('logo', arq);
+  const j = await (await fetch(API + '/logo', {method:'POST', body: fd})).json();
+  if (!j.ok){ aviso(j.erro, 'erro'); return; }
+  await carregar();
+  aviso('Logo enviada. Ela aparece no canto do tour.', 'ok');
+}
+
+async function removerLogo(){
+  await fetch(API + '/logo', {method: 'DELETE'});
+  await carregar();
+  aviso('Logo removida.', 'ok');
+}
+
 async function salvarTour(){
   await fetch(URL_TOUR, {method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       titulo: $('tTitulo').value, endereco: $('tEndereco').value,
+      descricao: $('tDescricao').value,
       preco: $('tPreco').value, cor: $('tCor').value,
       lead: {ativo: $('leadAtivo').checked, titulo: $('leadTitulo').value,
              texto: (tour.lead && tour.lead.texto) || '',
@@ -840,6 +899,54 @@ async function copiarEmbed(){
   const codigo = await (await fetch(API + '/embed')).text();
   try{ await navigator.clipboard.writeText(codigo); aviso('Código de embed copiado.', 'ok'); }
   catch(e){ prompt('Copie o código:', codigo); }
+}
+
+function tempo(s){
+  if (s < 60) return s + 's';
+  return Math.floor(s/60) + 'min ' + String(s % 60).padStart(2,'0') + 's';
+}
+
+async function verMetricas(){
+  $('dlgMetricas').showModal();
+  $('corpoMetricas').innerHTML = '<div class="dica">Carregando...</div>';
+  const j = await (await fetch(API + '/metricas')).json();
+
+  if (!j.visitas){
+    $('corpoMetricas').innerHTML = '<div class="dica">Nenhuma visita registrada ainda. '
+      + 'Abra o tour, navegue por alguns ambientes e feche a aba — a medição é enviada '
+      + 'quando o visitante sai.</div>';
+    return;
+  }
+
+  const r = j.resumo;
+  const cartao = (rot, val) => `<div style="flex:1;min-width:104px;background:var(--painel2);
+    border-radius:9px;padding:11px 13px">
+    <div style="font-size:20px;font-weight:700;color:var(--acento)">${val}</div>
+    <div style="font-size:11px;color:var(--suave);text-transform:uppercase;
+                letter-spacing:.4px;margin-top:2px">${rot}</div></div>`;
+
+  const maior = Math.max(...r.ambientes.map(a => a.media), 1);
+
+  $('corpoMetricas').innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      ${cartao('visitas', j.visitas)}
+      ${cartao('tempo típico', tempo(r.tempo_mediano))}
+      ${cartao('viraram lead', r.conversao + '%')}
+      ${cartao('no celular', r.no_celular)}
+      ${cartao('usaram o andar', r.usaram_andar)}
+    </div>
+    <h2>Tempo médio por ambiente</h2>
+    ${r.ambientes.map(a => `
+      <div style="margin-bottom:9px">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px">
+          <span>${a.nome}</span><span style="color:var(--suave)">${tempo(a.media)}</span>
+        </div>
+        <div style="height:7px;background:var(--painel2);border-radius:4px;margin-top:3px">
+          <div style="height:100%;width:${Math.round(a.media/maior*100)}%;
+                      background:var(--acento);border-radius:4px"></div>
+        </div>
+      </div>`).join('')}
+    <div class="dica">O ambiente no topo é por onde o corretor deve começar a conversa.</div>`;
 }
 
 function verLeads(){

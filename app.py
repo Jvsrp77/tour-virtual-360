@@ -145,6 +145,7 @@ TOUR_PADRAO = {
     },
     "cenas": [],
     "leads_capturados": [],
+    "visitas": [],
 }
 
 
@@ -557,10 +558,105 @@ def api_ordenar():
 
 # ------------------------------------------------------------------ leads
 
+@api.route("/visita", methods=["POST"])
+def api_registrar_visita():
+    """
+    Recebe o resumo de uma visita ao tour: quanto tempo durou e quanto tempo o
+    visitante passou em cada ambiente.
+
+    E o que responde "isso vende mais?" com numero em vez de opiniao, e diz ao
+    corretor por onde comecar a conversa: se o cliente ficou 3 minutos na suite,
+    e por ali.
+    """
+    dados = request.get_json(force=True) or {}
+    tour = carregar_tour()
+    visitas = tour.setdefault("visitas", [])
+
+    visitas.append({
+        "quando": datetime.now().isoformat(timespec="seconds"),
+        "segundos": max(0, int(dados.get("segundos") or 0)),
+        "ambientes": {str(k): int(v) for k, v in (dados.get("ambientes") or {}).items()},
+        "andou": bool(dados.get("andou")),
+        "celular": bool(dados.get("celular")),
+        "virou_lead": False,
+    })
+    del visitas[:-500]          # o arquivo e JSON: guardar tudo cresceria sem limite
+    salvar_tour(tour)
+    return jsonify({"ok": True})
+
+
+@api.route("/metricas", methods=["GET"])
+def api_metricas():
+    tour = carregar_tour()
+    visitas = tour.get("visitas", [])
+    nomes = {c["id"]: c["nome"] for c in tour["cenas"]}
+
+    if not visitas:
+        return jsonify({"ok": True, "visitas": 0, "resumo": None})
+
+    duracoes = sorted(v["segundos"] for v in visitas)
+    por_ambiente = {}
+    for v in visitas:
+        for cid, seg in v["ambientes"].items():
+            d = por_ambiente.setdefault(cid, {"nome": nomes.get(cid, "(removido)"),
+                                              "segundos": 0, "visitas": 0})
+            d["segundos"] += seg
+            d["visitas"] += 1
+
+    ranking = sorted(por_ambiente.values(), key=lambda d: d["segundos"], reverse=True)
+    for d in ranking:
+        d["media"] = round(d["segundos"] / max(1, d["visitas"]))
+
+    return jsonify({"ok": True, "visitas": len(visitas), "resumo": {
+        "tempo_mediano": duracoes[len(duracoes) // 2],
+        "tempo_medio": round(sum(duracoes) / len(duracoes)),
+        "usaram_andar": sum(1 for v in visitas if v["andou"]),
+        "no_celular": sum(1 for v in visitas if v["celular"]),
+        "leads": len(tour.get("leads_capturados", [])),
+        "conversao": round(len(tour.get("leads_capturados", [])) * 100.0 / len(visitas), 1),
+        "ambientes": ranking[:12],
+    }})
+
+
+@api.route("/logo", methods=["POST"])
+def api_enviar_logo():
+    """Guarda a marca da imobiliaria, exibida no canto do tour."""
+    arquivo = request.files.get("logo")
+    if not arquivo:
+        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
+
+    ext = os.path.splitext(arquivo.filename)[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".svg"):
+        return jsonify({"ok": False,
+                        "erro": "Use PNG, JPG, WEBP ou SVG."}), 422
+
+    nome = "logo%s" % ext
+    arquivo.save(os.path.join(pasta_cenas(), nome))
+    tour = carregar_tour()
+    tour["logo"] = nome
+    salvar_tour(tour)
+    return jsonify({"ok": True, "logo": nome})
+
+
+@api.route("/logo", methods=["DELETE"])
+def api_remover_logo():
+    tour = carregar_tour()
+    if tour.get("logo"):
+        caminho = os.path.join(pasta_cenas(), tour["logo"])
+        if os.path.exists(caminho):
+            os.remove(caminho)
+    tour["logo"] = ""
+    salvar_tour(tour)
+    return jsonify({"ok": True})
+
+
 @api.route("/leads", methods=["POST"])
 def api_registrar_lead():
     tour = carregar_tour()
     dados = request.get_json(force=True)
+    visitas = tour.get("visitas", [])
+    if visitas:
+        visitas[-1]["virou_lead"] = True
     tour["leads_capturados"].append({
         "nome": dados.get("nome", ""),
         "telefone": dados.get("telefone", ""),
@@ -579,7 +675,8 @@ def api_exportar():
     tour = carregar_tour()
     memoria = io.BytesIO()
     with zipfile.ZipFile(memoria, "w", zipfile.ZIP_DEFLATED) as z:
-        publico = {k: v for k, v in tour.items() if k != "leads_capturados"}
+        privados = ("leads_capturados", "visitas")
+        publico = {k: v for k, v in tour.items() if k not in privados}
         z.writestr("tour.json", json.dumps(publico, ensure_ascii=False, indent=2))
         # O ZIP nao tem servidor: as paginas leem estes enderecos em vez de montar
         # os caminhos a partir do imovel. Injetar a configuracao e mais seguro do que
@@ -603,6 +700,11 @@ def api_exportar():
         pasta_vendor = os.path.join(RAIZ, "static", "vendor")
         for nome in os.listdir(pasta_vendor):
             z.write(os.path.join(pasta_vendor, nome), "vendor/%s" % nome)
+
+        if tour.get("logo"):
+            caminho = os.path.join(pasta_cenas(), tour["logo"])
+            if os.path.exists(caminho):
+                z.write(caminho, "scenes/%s" % tour["logo"])
 
         for cena in tour["cenas"]:
             # o panorama e, quando existir, o mapa de profundidade que permite andar

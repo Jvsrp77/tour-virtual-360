@@ -144,6 +144,38 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Métricas de visita
+
+O tour mede sozinho quanto tempo a visita durou e quanto tempo o visitante passou em
+cada ambiente. O botão **Métricas** no painel mostra visitas, tempo típico, conversão
+em lead, quantos abriram no celular, quantos usaram o modo caminhar, e o ranking de
+ambientes por tempo médio.
+
+Duas decisões que fazem o número valer alguma coisa:
+
+- **A contagem para quando a aba fica escondida.** Um tour aberto e esquecido registraria
+  horas de interesse que não existiram.
+- **O envio usa `sendBeacon`.** A medição só fecha quando o visitante sai, e um `fetch`
+  comum seria cancelado junto com a aba.
+
+Visitas com menos de 3 segundos são descartadas — quem abriu e fechou não é visita.
+O histórico guarda as últimas 500; como o armazenamento é um JSON, guardar tudo
+cresceria sem limite.
+
+Leads e visitas **não vão no ZIP exportado**: é dado da imobiliária, não do cliente que
+recebe o link.
+
+## Marca e descrição
+
+O painel aceita a logo da imobiliária (PNG, JPG, WEBP ou SVG) e um texto de descrição.
+Os dois aparecem no cartão do tour. A logo também é empacotada no ZIP.
+
+## Celular
+
+O painel funciona no telefone: abaixo de 1000px vira coluna única, com o visualizador
+no topo. Isso importa porque a captura acontece com o celular na mão — em três colunas
+fixas, a coluna de "Gerar profundidade" ficava fora da tela.
+
 ## Exportar e publicar
 
 O botão **Exportar ZIP** gera um pacote com `index.html`, `tour.json`, as imagens e a
