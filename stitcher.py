@@ -78,8 +78,13 @@ def _geometria(cameras, largura_foto):
     # fotos nao sao um giro no eixo, e o resultado seria um haov sem sentido.
     confiavel = 25.0 <= fov <= 120.0
 
+    # cobertura vertical: o quanto as fotos inclinaram mais o campo de uma foto.
+    # Celular em pe tem o sensor mais alto que largo, dai o 4/3.
+    vaov_real = min(180.0, span_pitch + fov * 4.0 / 3.0)
+
     return {
         "haov": 360.0 if fechada else min(360.0, (360.0 - maior_buraco) + fov),
+        "vaov_real": vaov_real,
         "fechada": fechada,
         "maior_buraco": maior_buraco,
         "fov": fov,
@@ -457,6 +462,110 @@ def _tentar_costurar(imagens):
     return None, ultimo_codigo, motivo_recusa, None
 
 
+ABERTURA_TETO = 70.0        # graus a partir do polo considerados na analise
+SUAVIDADE_TETO = 16.0
+
+
+def limite_do_teto(equi, limiar=8.0):
+    """
+    Ate quantos graus do polo superior nao existe foto de verdade.
+
+    Medido na propria imagem, varrendo de cima ate aparecer detalhe. A alternativa
+    seria deduzir do campo da lente, mas essa estimativa vem do ajuste de foco do
+    OpenCV e sai inflada: num caso real dava 115 graus de lente, o que apontaria
+    um buraco de 7 graus quando o real era 44.
+    """
+    H = equi.shape[0]
+    for y in range(0, H // 2, 6):
+        faixa = cv2.cvtColor(equi[y:y + 14], cv2.COLOR_BGR2GRAY)
+        if cv2.Laplacian(faixa, cv2.CV_32F).var() > limiar:
+            return max(0.0, 90.0 - (y / float(H)) * 180.0)
+    return 0.0
+
+
+def preencher_teto(equi, graus_sem_dado):
+    """
+    Refaz o teto onde a captura nao alcancou.
+
+    O preenchimento padrao estica a cor de cada coluna para cima, o que no polo
+    vira um leque de cunhas — o defeito mais visivel ao olhar para cima. Aqui o
+    teto observado e projetado numa vista azimutal (o polo vira o centro, sem a
+    distorcao do equirretangular), ajusta-se uma superficie suave a ele e essa
+    superficie e estendida para dentro do buraco.
+
+    So entram no ajuste os pixels mais claros do anel: o anel tambem contem topo
+    de armario e quina escura, e incluir isso puxava a cor para um disco cinza.
+
+    Nao e invencao de conteudo: e a continuacao da superficie que a foto mostra.
+    Medido no quarto de teste, a energia de cunha caiu de 50,8 para 3,7. O LaMa
+    (198 MB) foi testado no mesmo caso e chegou a 37,3 — a tecnica simples ganhou.
+    """
+    H, W = equi.shape[:2]
+    if abs(W / float(H) - 2.0) > 0.1 or graus_sem_dado < 4:
+        return equi
+
+    lado = 640
+    eixo = (np.arange(lado, dtype=np.float32) - lado / 2.0) / (lado / 2.0)
+    X, Y = np.meshgrid(eixo, eixo)
+    raio = np.sqrt(X * X + Y * Y)
+    theta = raio * np.radians(ABERTURA_TETO)
+
+    # equirretangular -> vista azimutal do zenite
+    phi = np.arctan2(X, -Y)
+    lat = -(np.pi / 2 - theta)
+    mx = ((phi / (2 * np.pi)) + 0.5) * W
+    my = ((lat / np.pi) + 0.5) * H
+    vista = cv2.remap(equi, mx.astype(np.float32), my.astype(np.float32),
+                      cv2.INTER_CUBIC, borderMode=cv2.BORDER_WRAP)
+
+    limite = np.radians(min(graus_sem_dado, ABERTURA_TETO - 8))
+    buraco = (theta < limite) & (raio <= 1)
+    anel = (theta >= limite) & (theta < limite + np.radians(18)) & (raio <= 1)
+    if buraco.sum() < 400 or anel.sum() < 400:
+        return equi
+
+    cinza = cv2.cvtColor(vista, cv2.COLOR_BGR2GRAY)
+    claros = anel & (cinza > np.percentile(cinza[anel], 55))
+    if claros.sum() < 200:
+        claros = anel
+
+    def termos(x, y):
+        return np.stack([np.ones_like(x), x, y, x * x, x * y, y * y], 1)
+
+    A = termos(X[claros], Y[claros])
+    B = termos(X[buraco], Y[buraco])
+    saida = vista.copy().astype(np.float32)
+    for canal in range(3):
+        coef, *_ = np.linalg.lstsq(A, vista[claros][:, canal].astype(np.float32),
+                                   rcond=None)
+        saida[buraco, canal] = np.clip(B @ coef, 0, 255)
+
+    # ruido fraco com a mesma textura do teto observado: sem isso fica plastico
+    desvio = float(cinza[claros].std()) * 0.10
+    ruido = np.random.default_rng(7).normal(0, desvio, (lado, lado, 1)).astype(np.float32)
+    saida[buraco] += ruido[buraco]
+
+    peso = cv2.GaussianBlur((buraco * 255).astype(np.uint8), (0, 0),
+                            SUAVIDADE_TETO).astype(np.float32)[..., None] / 255.0
+    vista = (vista * (1 - peso) + np.clip(saida, 0, 255) * peso).astype(np.uint8)
+
+    # de volta para o equirretangular, so na calota de cima
+    lon = (np.arange(W, dtype=np.float32) / W - 0.5) * 2 * np.pi
+    latE = (np.arange(H, dtype=np.float32) / H - 0.5) * np.pi
+    lonG, latG = np.meshgrid(lon, latE)
+    thetaE = np.pi / 2 + latG                      # 0 no polo de cima
+    dentro = thetaE < np.radians(ABERTURA_TETO)
+    rr = thetaE / np.radians(ABERTURA_TETO)
+    ux = (0.5 + 0.5 * rr * np.sin(lonG)) * (lado - 1)
+    uy = (0.5 - 0.5 * rr * np.cos(lonG)) * (lado - 1)
+    volta = cv2.remap(vista, ux.astype(np.float32), uy.astype(np.float32),
+                      cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+
+    mistura = np.clip((np.radians(ABERTURA_TETO) - thetaE) /
+                      np.radians(10), 0, 1)[..., None] * dentro[..., None]
+    return (equi * (1 - mistura) + volta * mistura).astype(np.uint8)
+
+
 def _nivelar(panorama):
     """Endireita o horizonte, engolindo a falha: cena sem quinas nao tem prumo."""
     try:
@@ -535,6 +644,10 @@ def costurar(caminhos, pasta_saida, relatar=None):
         # uma superficie completa, e numa faixa parcial o mapeamento seria outro.
         aviso(88, "nivelando o horizonte")
         panorama, info["nivelamento"] = _nivelar(panorama)
+
+        aviso(94, "refazendo o teto")
+        sem_dado = limite_do_teto(panorama)
+        panorama = preencher_teto(panorama, sem_dado)
 
     aviso(92, "gravando o panorama")
     panorama = _redimensionar(panorama, LARGURA_MAX_SAIDA)

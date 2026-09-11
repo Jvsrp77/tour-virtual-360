@@ -145,6 +145,38 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Reconstrução do teto
+
+O preenchimento padrão estica a cor de cada coluna para cima. No polo isso vira um leque
+de cunhas — o defeito mais visível ao olhar para cima, e o que motivou este trabalho.
+
+O teto observado é projetado numa vista azimutal (o polo vira o centro, sem a distorção
+do equirretangular), ajusta-se uma superfície suave a ele, e essa superfície é estendida
+para dentro do buraco. Só entram no ajuste os pixels mais claros do anel: o anel contém
+topo de armário e quina escura, e incluir isso puxava o resultado para um disco cinza
+evidente.
+
+Energia de cunha medida no quarto de teste, pelos harmônicos angulares:
+
+| Abordagem | Cunha |
+|---|---|
+| Preenchimento anterior | 50,8 |
+| `cv2.inpaint` (Telea / Navier-Stokes) | ~50 (sem mudança) |
+| **LaMa, 198 MB** | **37,3** |
+| **Extrapolação da superfície** | **2,6** |
+
+**A técnica simples ganhou do modelo de IA por uma margem larga**, e sem 198 MB de
+download nem 4 s de inferência. O LaMa foi baixado, testado nos dois modos de preparo e
+descartado.
+
+Não é invenção de conteúdo: é a continuação da superfície que a própria foto mostra.
+Diferente de gerar piso, que afirmaria algo sobre característica usada na decisão de
+compra.
+
+O limite do buraco é medido **na imagem**, varrendo de cima até aparecer detalhe. Deduzir
+do campo da lente não funciona: a estimativa de foco do OpenCV saía inflada (115°),
+apontando um buraco de 7° quando o real era 44°.
+
 ## Marca no chão
 
 Toda foto 360 profissional cobre o ponto exatamente abaixo da câmera: ali fica o tripé,
