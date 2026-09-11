@@ -145,24 +145,31 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
-## Metragem estimada
+## Metragem: tentada e descartada
 
-Todo anúncio precisa de m², e hoje esse número sai de trena ou da matrícula. O tour já
-tem o necessário: profundidade por direção, calibrada pela altura da câmera.
+Foi implementada uma estimativa de m² a partir do mapa de profundidade, e **descartada
+depois de confrontar com trena**. Fica registrado para ninguém repetir.
 
-Cada pixel vira ponto 3D. Os que estão a ~1,5 m abaixo da câmera são piso. Para cada
-direção, o código caminha do chão para fora e para onde o piso acaba — ali está a parede.
-Isso desenha o contorno do cômodo visto de cima, e a área do polígono é a metragem.
+Quarto de teste real: 3,20 × 2,80 = **8,96 m²**.
 
-**Uma armadilha que custou uma versão inteira.** A primeira tentativa pegava o ponto mais
-distante que "parecia piso" em cada direção. Resultado: parede a 12 m e **102 m² num
-quarto**. Profundidade estimada erra feio no longe, e um ponto solto virava cômodo inteiro.
-Caminhar até a borda do piso, em vez de pegar o extremo, trouxe para 7,7 m².
+| Abordagem | Resultado |
+|---|---|
+| Piso, versão inicial | 102 m² — ponto solto no longe virava cômodo |
+| Piso, caminhando até a borda | 7,7 m² (−14%) |
+| Piso, sem a porta aberta | 5,4 m² (**−39%**) |
+| Teto | 137 m² (+1400%) |
+| Pé-direito estimado | 4,03 m, contra ~2,7 m reais |
 
-**Não é medida oficial.** Profundidade monocular é aproximada, e porta aberta faz o piso
-do corredor entrar na conta — no teste apareceu como um espigão de 4,2 m no contorno. O
-número serve como estimativa rápida e como conferência do que o anúncio declara. O painel
-mostra com `~` na frente, de propósito.
+O −14% parecia aceitável, mas era **sorte**: o móvel encolhia o cômodo em 39% e a porta
+aberta devolvia 2,3 m² de corredor. Tirar o defeito óbvio piorava o resultado.
+
+Ajustar um retângulo dava −3% no percentil 88 — e −34% no percentil 80, +41% no 94. Isso
+não é método, é número escolhido para acertar um quarto conhecido.
+
+**A raiz é a profundidade monocular não ser métrica.** Ela ordena bem o que está perto e
+longe, o que basta para o modo caminhar, mas não sustenta medida em metros. Para medir de
+verdade seria preciso profundidade métrica — LiDAR do iPhone Pro, ou um modelo métrico
+como Depth Pro.
 
 ## Reconstrução do teto
 
