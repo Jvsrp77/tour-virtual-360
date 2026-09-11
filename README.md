@@ -144,6 +144,26 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Miniaturas
+
+As listas mostram o panorama num quadradinho de 109x60 — mas carregavam a imagem de
+5807x2903. Num tour de 13 ambientes, **o menu baixava 17 MB antes do visitante clicar em
+nada**.
+
+Cada cena passou a ter uma miniatura de 480px (~15 KB). Abrir o tour caiu de 17,2 MB para
+1,5 MB, uma redução de 91%. As miniaturas que faltam nos imóveis antigos são geradas na
+subida do servidor.
+
+## Limpeza das fotos originais
+
+As fotos enviadas ficam em `data/uploads/` e valem a pena guardar: já foi preciso
+recosturar um ambiente com ajustes melhores. Mas nada as apagava — eram **226 MB** de
+lotes de costuras que falharam ou de cenas já removidas.
+
+Agora cada cena guarda de qual lote veio. Apagar a cena (ou o imóvel) apaga as originais
+junto, e na subida o servidor remove lotes órfãos com mais de 7 dias. O prazo existe
+porque um lote recém-criado pode ser de uma costura ainda na fila.
+
 ## Leads ficam fora do tour público
 
 `GET /api/imoveis/<id>/tour` alimenta o visualizador, que é público por natureza — é o

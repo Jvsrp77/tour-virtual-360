@@ -227,7 +227,7 @@ function montarCenas(){
 function desenharMenu(){
   $('menu').innerHTML = tour.cenas.map(c => `
     <div class="amb ${c.id === atual ? 'ativo' : ''}" onclick="irPara('${c.id}')">
-      <img src="${CENAS}${c.arquivo}" alt="">
+      <img src="${CENAS}${c.miniatura || c.arquivo}" alt="" loading="lazy">
       <span>${c.nome}</span>
     </div>`).join('');
 }

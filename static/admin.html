@@ -421,7 +421,7 @@ function desenharCenas(){
   }
   alvo.innerHTML = tour.cenas.map(c => `
     <div class="cena ${c.id === cenaAtual ? 'ativa' : ''}" onclick="abrirCena('${c.id}')">
-      <img src="${CENAS}${c.arquivo}" alt="">
+      <img src="${CENAS}${c.miniatura || c.arquivo}" alt="" loading="lazy">
       <div class="nome">${c.nome}</div>
       ${c.id === tour.cena_inicial ? '<span class="marca">início</span>' : ''}
     </div>`).join('');

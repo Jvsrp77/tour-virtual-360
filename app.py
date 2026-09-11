@@ -11,6 +11,7 @@ import json
 import uuid
 import shutil
 import zipfile
+import time
 import threading
 import traceback
 from datetime import datetime
@@ -19,6 +20,7 @@ from flask import (Flask, Blueprint, g, request, jsonify, send_from_directory,
                    send_file, redirect, Response, abort)
 
 import cv2
+import numpy as np
 
 import stitcher
 import cena_demo
@@ -62,7 +64,7 @@ def listar_imoveis():
         if not imovel_existe(iid):
             continue
         tour = carregar_tour(iid)
-        capa = next((c["arquivo"] for c in tour["cenas"]), None)
+        capa = next((c.get("miniatura") or c["arquivo"] for c in tour["cenas"]), None)
         itens.append({
             "id": iid,
             "titulo": tour.get("titulo") or "Imóvel sem título",
@@ -216,6 +218,98 @@ def achar_cena(tour, cena_id):
     return next((c for c in tour["cenas"] if c["id"] == cena_id), None)
 
 
+LARGURA_MINIATURA = 480
+
+
+def gerar_miniatura(imovel_id, arquivo):
+    """
+    Versao pequena do panorama para as listas.
+
+    Sem isso, uma miniatura de 109x60 na tela baixa o panorama inteiro: o menu de
+    um tour de 13 ambientes puxava 17 MB antes do visitante clicar em nada.
+    """
+    origem = os.path.join(pasta_cenas(imovel_id), arquivo)
+    if not os.path.exists(origem):
+        return ""
+    nome = "mini_" + os.path.splitext(arquivo)[0] + ".jpg"
+    destino = os.path.join(pasta_cenas(imovel_id), nome)
+    try:
+        img = cv2.imdecode(np.fromfile(origem, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return ""
+        escala = LARGURA_MINIATURA / float(img.shape[1])
+        if escala < 1:
+            img = cv2.resize(img, (LARGURA_MINIATURA, max(1, int(img.shape[0] * escala))),
+                             interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 78])
+        if not ok:
+            return ""
+        buf.tofile(destino)
+        return nome
+    except Exception:
+        traceback.print_exc()
+        return ""
+
+
+def completar_miniaturas():
+    """Cria as miniaturas que faltam nos imoveis ja existentes."""
+    feitas = 0
+    for iid in os.listdir(PASTA_IMOVEIS):
+        if not imovel_existe(iid):
+            continue
+        tour = carregar_tour(iid)
+        mudou = False
+        for cena in tour["cenas"]:
+            if cena.get("miniatura"):
+                caminho = os.path.join(pasta_cenas(iid), cena["miniatura"])
+                if os.path.exists(caminho):
+                    continue
+            nome = gerar_miniatura(iid, cena["arquivo"])
+            if nome:
+                cena["miniatura"] = nome
+                mudou = True
+                feitas += 1
+        if mudou:
+            salvar_tour(tour, iid)
+    if feitas:
+        print("  %d miniatura(s) gerada(s)" % feitas)
+
+
+DIAS_GUARDA_UPLOADS = 7
+
+
+def limpar_uploads_orfaos():
+    """
+    Apaga lotes de fotos originais que nao pertencem a nenhuma cena.
+
+    As originais valem a pena guardar por um tempo — ja precisei delas para
+    recosturar com ajustes melhores. Mas sem limpeza a pasta so cresce: estavam
+    226 MB de lotes de costuras que falharam ou foram apagadas.
+    """
+    usados = set()
+    for iid in os.listdir(PASTA_IMOVEIS):
+        if not imovel_existe(iid):
+            continue
+        for cena in carregar_tour(iid)["cenas"]:
+            if cena.get("lote"):
+                usados.add(cena["lote"])
+
+    limite = time.time() - DIAS_GUARDA_UPLOADS * 86400
+    liberado = 0
+    for nome in os.listdir(PASTA_UPLOADS):
+        caminho = os.path.join(PASTA_UPLOADS, nome)
+        if nome in usados or not os.path.isdir(caminho):
+            continue
+        if os.path.getmtime(caminho) > limite:
+            continue                       # recente: pode ser de uma costura em curso
+        tamanho = sum(os.path.getsize(os.path.join(r, f))
+                      for r, _, fs in os.walk(caminho) for f in fs)
+        shutil.rmtree(caminho, ignore_errors=True)
+        liberado += tamanho
+    if liberado:
+        print("  faxina: %.0f MB de fotos originais orfas apagados" % (liberado / 1e6))
+
+
 def montar_cena(nome, arquivo, largura, altura, origem, info=None):
     """
     info vem da costura e traz a cobertura medida a partir da orientacao das fotos.
@@ -242,6 +336,7 @@ def montar_cena(nome, arquivo, largura, altura, origem, info=None):
         "vaov": round(vaov, 2),
         "vista_inicial": {"yaw": 0, "pitch": 0, "hfov": 100},
         "hotspots": [],
+        "miniatura": gerar_miniatura(g.imovel, arquivo),
     }
     if info:
         cena["captura"] = {
@@ -312,6 +407,9 @@ def api_remover_imovel(imovel):
     """Apaga o imovel inteiro: tour, cenas, mapas de profundidade e leads."""
     if not imovel_existe(imovel):
         return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
+    for cena in carregar_tour(imovel)["cenas"]:
+        if cena.get("lote"):
+            shutil.rmtree(os.path.join(PASTA_UPLOADS, cena["lote"]), ignore_errors=True)
     shutil.rmtree(pasta_imovel(imovel), ignore_errors=True)
     return jsonify({"ok": True})
 
@@ -374,7 +472,8 @@ def api_costurar():
 
     temporarios = []
     try:
-        lote = os.path.join(PASTA_UPLOADS, uuid.uuid4().hex[:10])
+        nome_lote = uuid.uuid4().hex[:10]
+        lote = os.path.join(PASTA_UPLOADS, nome_lote)
         os.makedirs(lote, exist_ok=True)
         for i, f in enumerate(arquivos):
             ext = os.path.splitext(f.filename)[1].lower() or ".jpg"
@@ -394,6 +493,7 @@ def api_costurar():
             with trava_do_imovel(imovel):
                 tour = carregar_tour(imovel)
                 cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
+                cena["lote"] = nome_lote      # para apagar as originais junto com a cena
                 tour["cenas"].append(cena)
                 if not tour["cena_inicial"]:
                     tour["cena_inicial"] = cena["id"]
@@ -555,13 +655,16 @@ def api_remover_cena(cena_id):
         return jsonify({"ok": False, "erro": "Cena nao encontrada."}), 404
 
     # o panorama e tambem o mapa de profundidade e a previa, senao ficam orfaos
-    for chave in ("arquivo", "profundidade", "previa_profundidade"):
+    for chave in ("arquivo", "profundidade", "previa_profundidade", "miniatura"):
         nome = cena.get(chave)
         if not nome:
             continue
         caminho = os.path.join(pasta_cenas(), nome)
         if os.path.exists(caminho):
             os.remove(caminho)
+
+    if cena.get("lote"):
+        shutil.rmtree(os.path.join(PASTA_UPLOADS, cena["lote"]), ignore_errors=True)
 
     tour["cenas"] = [c for c in tour["cenas"] if c["id"] != cena_id]
 
@@ -801,7 +904,7 @@ def api_exportar():
 
         for cena in tour["cenas"]:
             # o panorama e, quando existir, o mapa de profundidade que permite andar
-            for chave in ("arquivo", "profundidade"):
+            for chave in ("arquivo", "profundidade", "miniatura"):
                 nome = cena.get(chave)
                 if not nome:
                     continue
@@ -830,6 +933,8 @@ tarefas.iniciar()
 
 if __name__ == "__main__":
     migrar_formato_antigo()
+    completar_miniaturas()
+    limpar_uploads_orfaos()
     if not listar_imoveis():
         criar_imovel("Meu primeiro imóvel")
         print("  nenhum imovel encontrado: criei um vazio para comecar")
