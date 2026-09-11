@@ -33,6 +33,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
     border-top:1px solid rgba(255,255,255,.12);padding-top:9px}
   .cartao .end{font-size:12.5px;color:#a9b0ba}
   .cartao .preco{margin-top:9px;font-size:19px;font-weight:700;color:var(--acento)}
+  .cartao .area{margin-top:7px;font-size:12.5px;color:#c3c9d1}
+  .cartao .area b{color:#eef1f4}
 
   .topo-dir{position:absolute;top:18px;right:18px;z-index:10;display:flex;gap:8px}
   .bt{background:rgba(14,16,20,.86);backdrop-filter:blur(12px);color:#fff;
@@ -48,6 +50,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .amb:hover{border-color:rgba(255,255,255,.4)}
   .amb.ativo{border-color:var(--acento)}
   .amb img{width:100%;height:60px;object-fit:cover;display:block;background:#111}
+  .amb span i{display:block;font-style:normal;font-size:10px;margin-top:1px;
+    color:var(--acento)}
   .amb span{display:block;padding:6px 8px;font-size:11.5px;text-align:center;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
@@ -113,6 +117,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <h1 id="vTitulo"></h1>
   <div class="end" id="vEndereco"></div>
   <div class="preco" id="vPreco"></div>
+  <div class="area" id="vArea" style="display:none"></div>
   <div class="desc" id="vDescricao" style="display:none"></div>
 </div>
 
@@ -160,6 +165,7 @@ async function iniciar(){
   $('vTitulo').textContent   = tour.titulo || '';
   $('vEndereco').textContent = tour.endereco || '';
   $('vPreco').textContent    = tour.preco || '';
+  desenharArea();
   if (tour.logo){
     $('vLogo').src = CENAS + tour.logo;
     $('vLogo').style.display = 'block';
@@ -228,11 +234,24 @@ function desenharMenu(){
   $('menu').innerHTML = tour.cenas.map(c => `
     <div class="amb ${c.id === atual ? 'ativo' : ''}" onclick="irPara('${c.id}')">
       <img src="${CENAS}${c.miniatura || c.arquivo}" alt="" loading="lazy">
-      <span>${c.nome}</span>
+      <span>${c.nome}${c.area ? `<i>${nBR(c.area.m2)} m²</i>` : ''}</span>
     </div>`).join('');
 }
 
 function irPara(id){ if (id !== atual) visor.loadScene(id); }
+
+const nBR = n => Number(n).toLocaleString('pt-BR');
+
+// Metragem no anuncio: so a soma dos ambientes que o corretor publicou. Se
+// metade esta medida, dizer "48 m²" sem ressalva vira informacao errada.
+function desenharArea(){
+  const medidos = tour.cenas.filter(c => c.area);
+  if (!medidos.length) return;
+  const total = medidos.reduce((s, c) => s + c.area.m2, 0);
+  $('vArea').innerHTML = `<b>${nBR(Math.round(total * 10) / 10)} m²</b> em `
+    + `${medidos.length} de ${tour.cenas.length} ambiente(s)`;
+  $('vArea').style.display = 'block';
+}
 
 function andarAqui(){
   medicao.andou = true;

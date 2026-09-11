@@ -93,14 +93,19 @@
 <script>
 const $ = id => document.getElementById(id);
 
+const nBR = n => Number(n).toLocaleString('pt-BR');
+
 async function carregar(){
   const j = await (await fetch('/api/imoveis')).json();
   const lista = j.imoveis || [];
 
   const totalAmb = lista.reduce((s, i) => s + i.ambientes, 0);
+  const totalArea = lista.reduce((s, i) => s + (i.area_total || 0), 0);
   const totalLeads = lista.reduce((s, i) => s + i.leads, 0);
   $('resumo').textContent = lista.length
-    ? `${lista.length} imóvel(is) · ${totalAmb} ambiente(s) · ${totalLeads} contato(s) capturado(s)`
+    ? `${lista.length} imóvel(is) · ${totalAmb} ambiente(s)`
+      + (totalArea ? ` · ${nBR(Math.round(totalArea))} m² medidos` : '')
+      + ` · ${totalLeads} contato(s) capturado(s)`
     : '';
 
   if (!lista.length){
@@ -121,6 +126,8 @@ async function carregar(){
         ${i.preco ? `<div class="preco">${escapar(i.preco)}</div>` : ''}
         <div class="selos">
           <span class="selo">${i.ambientes} ambiente(s)</span>
+          ${i.area_total ? `<span class="selo destaque">${nBR(i.area_total)} m²${
+              i.ambientes_medidos < i.ambientes ? ' em ' + i.ambientes_medidos : ''}</span>` : ''}
           ${i.com_profundidade ? `<span class="selo destaque">${i.com_profundidade} com caminhada</span>` : ''}
           ${i.leads ? `<span class="selo">${i.leads} lead(s)</span>` : ''}
         </div>

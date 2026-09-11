@@ -74,6 +74,9 @@ def listar_imoveis():
             "preco": tour.get("preco", ""),
             "ambientes": len(tour["cenas"]),
             "com_profundidade": sum(1 for c in tour["cenas"] if c.get("profundidade")),
+            "area_total": round(sum(c["area"]["m2"] for c in tour["cenas"]
+                                    if c.get("area")), 1),
+            "ambientes_medidos": sum(1 for c in tour["cenas"] if c.get("area")),
             "leads": len(tour.get("leads_capturados", [])),
             "capa": capa,
             "criado_em": tour.get("criado_em", ""),
@@ -754,6 +757,46 @@ def api_area(cena_id):
     except area.ErroArea as e:
         return jsonify({"ok": False, "erro": str(e)}), 422
     return jsonify({"ok": True, "medida": r})
+
+
+@api.route("/cenas/<cena_id>/area", methods=["PUT", "DELETE"])
+def api_publicar_area(cena_id):
+    """
+    Grava (ou tira) a metragem que aparece no anuncio.
+
+    Medir e publicar sao passos separados de proposito. A estimativa tem uns 2%
+    de erro e o corretor costuma ter o numero da matricula, que vale mais. Quem
+    publica assume o numero — por isso fica gravado se ele foi medido ou digitado.
+    """
+    tour = carregar_tour()
+    cena = achar_cena(tour, cena_id)
+    if not cena:
+        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
+
+    if request.method == "DELETE":
+        cena.pop("area", None)
+        salvar_tour(tour)
+        return jsonify({"ok": True})
+
+    dados = request.get_json(silent=True) or {}
+    try:
+        metros = float(str(dados.get("area_m2", "")).replace(",", "."))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "erro": "Metragem inválida."}), 400
+    if not (1.0 <= metros <= 400.0):
+        return jsonify({"ok": False, "erro":
+                        "A metragem precisa ficar entre 1 e 400 m²."}), 400
+
+    registro = {"m2": round(metros, 1),
+                "origem": "informado" if dados.get("corrigido") else "medido"}
+    for campo in ("comprimento_m", "largura_m"):
+        try:
+            registro[campo] = round(float(dados[campo]), 2)
+        except (KeyError, TypeError, ValueError):
+            pass
+    cena["area"] = registro
+    salvar_tour(tour)
+    return jsonify({"ok": True, "area": registro})
 
 
 @api.route("/cenas/<cena_id>/profundidade", methods=["POST"])

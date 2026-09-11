@@ -449,6 +449,7 @@ function abrirCena(id){
                                 : `vão de ${cap.maior_buraco}° sem foto`)
            + ` · lente ${cap.fov_foto}°` : '');
   $('covHaov').value = Math.round(c.haov);
+  desenharArea(c);
   desenharProfundidade(c);
   desenharHotspots(c);
   montarVisor(c);
@@ -609,24 +610,77 @@ async function salvarPlanta(){
   aviso('Planta salva. Abra <b>Caminhar pelo imóvel</b> para percorrer os pontos.', 'ok');
 }
 
+const nBR = n => Number(n).toLocaleString('pt-BR');
+let medidaAtual = null;
+
+// Medir e publicar sao dois passos: o numero so vale no anuncio depois que
+// alguem confere. Sem isso a medida morria na tela e nao chegava a ninguem.
+function desenharArea(c){
+  medidaAtual = null;
+  const a = c.area;
+  $('btArea').textContent = a ? 'Medir de novo' : 'Medir o ambiente';
+  $('blocoArea').innerHTML = !a ? '' : `
+    <div style="background:var(--painel2);border-radius:8px;padding:11px 13px;margin-top:8px">
+      <div style="font-size:22px;font-weight:700;color:var(--acento)">${nBR(a.m2)} m²</div>
+      <div class="dica" style="margin-top:2px">
+        ${a.comprimento_m ? nBR(a.comprimento_m) + ' × ' + nBR(a.largura_m) + ' m · ' : ''}
+        ${a.origem === 'informado' ? 'informado por você' : 'estimado pela profundidade'}
+      </div>
+      <div class="dica" style="margin-top:6px">Aparece no tour e na lista de imóveis.</div>
+      <button style="width:100%;margin-top:8px" onclick="removerArea()">Tirar do anúncio</button>
+    </div>`;
+}
+
 async function medirArea(){
   const bt = $('btArea');
+  const rotulo = bt.textContent;
   bt.disabled = true; bt.textContent = 'Medindo...';
-  $('blocoArea').innerHTML = '';
   try{
     const j = await (await fetch(API + '/cenas/' + cenaAtual + '/area')).json();
     if (!j.ok){ aviso(j.erro, 'erro'); return; }
-    const m = j.medida;
+    const m = medidaAtual = j.medida;
     $('blocoArea').innerHTML = `
       <div style="background:var(--painel2);border-radius:8px;padding:11px 13px;margin-top:8px">
-        <div style="font-size:22px;font-weight:700;color:var(--acento)">${m.area_m2} m²</div>
-        <div class="dica" style="margin-top:2px">${m.comprimento_m} × ${m.largura_m} m ·
-          piso livre ${m.piso_livre_m2} m²</div>
+        <div style="font-size:22px;font-weight:700;color:var(--acento)">${nBR(m.area_m2)} m²</div>
+        <div class="dica" style="margin-top:2px">${nBR(m.comprimento_m)} × ${nBR(m.largura_m)} m ·
+          piso livre ${nBR(m.piso_livre_m2)} m²</div>
+        <div class="linha" style="margin-top:10px">
+          <input type="number" id="areaCorrigida" step="0.1" min="1" max="400" value="${m.area_m2}">
+          <button onclick="publicarArea()">Publicar</button>
+        </div>
       </div>
-      <div class="dica">Aferido num quarto real contra o LiDAR do iPhone: erro de 2%
-        na área. Confira antes de publicar — é uma medição só.</div>`;
+      <div class="dica">Aferido num quarto real contra o LiDAR do iPhone: 2% de erro na
+        área — mas é uma medição só. Confira antes de publicar, e se você tem o número
+        da matrícula, corrija no campo acima: ele vale mais que a estimativa.</div>`;
   }catch(e){ aviso('Falha ao medir: ' + e, 'erro'); }
-  finally{ bt.disabled = false; bt.textContent = 'Medir o ambiente'; }
+  finally{ bt.disabled = false; bt.textContent = rotulo; }
+}
+
+async function publicarArea(){
+  if (!medidaAtual) return;
+  const valor = parseFloat($('areaCorrigida').value);
+  if (!(valor >= 1 && valor <= 400))
+    return aviso('Informe uma metragem entre 1 e 400 m².', 'erro');
+  const corrigido = Math.abs(valor - medidaAtual.area_m2) > 0.05;
+  const corpo = {area_m2: valor, corrigido};
+  if (!corrigido){
+    corpo.comprimento_m = medidaAtual.comprimento_m;
+    corpo.largura_m = medidaAtual.largura_m;
+  }
+  const j = await (await fetch(API + '/cenas/' + cenaAtual + '/area', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(corpo)})).json();
+  if (!j.ok) return aviso(j.erro, 'erro');
+  await carregar();
+  aviso('Metragem publicada: aparece no tour e na lista de imóveis.', 'ok');
+}
+
+async function removerArea(){
+  const j = await (await fetch(API + '/cenas/' + cenaAtual + '/area',
+                               {method: 'DELETE'})).json();
+  if (!j.ok) return aviso(j.erro || 'Falha ao remover.', 'erro');
+  await carregar();
+  aviso('Metragem retirada do anúncio.', 'ok');
 }
 
 function desenharProfundidade(c){

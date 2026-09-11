@@ -169,6 +169,21 @@ percentil 100 mede o ruído.
 
 O painel mostra os dois números — a metragem e o piso livre.
 
+### Medir e publicar são passos separados
+
+Medir só serve se o número chegar a quem compra. Depois de medir, o painel oferece
+**Publicar**: a metragem fica gravada na cena e passa a aparecer no cartão do tour
+(`13,9 m² em 1 de 1 ambiente(s)`), embaixo de cada miniatura do menu, e como selo na
+lista de imóveis, que soma os ambientes publicados.
+
+A publicação é um passo à parte de propósito. A estimativa tem uns 2% de erro e o
+corretor muitas vezes tem o número da matrícula, que vale mais — por isso o campo ao
+lado do botão é editável e aceita vírgula decimal. Fica gravado se o número foi
+`medido` ou `informado`.
+
+O tour nunca extrapola: se só metade dos ambientes tem metragem, ele diz *"em 2 de 5
+ambiente(s)"* em vez de anunciar um total que não cobre a casa inteira.
+
 ### Um episódio que vale registrar
 
 Esta funcionalidade foi **implementada, descartada e restaurada**. A primeira aferição usou
