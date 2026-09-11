@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar · Tour Virtual</title>
+<style>
+  :root{
+    --bg:#14161a; --painel:#1c1f25; --painel2:#22262d; --borda:#2e333c;
+    --texto:#e8eaed; --suave:#9aa2ad; --acento:#e07b39; --erro:#d9534f; --ok:#3fa96b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--texto);
+       display:flex;align-items:center;justify-content:center;padding:24px;
+       font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .caixa{width:100%;max-width:390px;background:var(--painel);
+         border:1px solid var(--borda);border-radius:14px;padding:28px}
+  .marca{font-size:17px;font-weight:600;margin-bottom:3px}
+  .marca span{color:var(--acento)}
+  .sub{color:var(--suave);font-size:13px;margin-bottom:20px}
+  label{display:block;font-size:11px;color:var(--suave);margin:14px 0 5px;
+        text-transform:uppercase;letter-spacing:.5px}
+  input{width:100%;background:#121418;color:var(--texto);border:1px solid var(--borda);
+        border-radius:8px;padding:11px 12px;font:inherit}
+  input:focus{outline:none;border-color:var(--acento)}
+  button{width:100%;margin-top:20px;background:var(--acento);color:#1a1207;border:none;
+         border-radius:8px;padding:12px;font:inherit;font-weight:700;cursor:pointer}
+  button:hover{background:#ee8c4b}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .recado{margin-top:15px;padding:10px 12px;border-radius:8px;font-size:12.5px;
+          border:1px solid var(--borda);background:var(--painel2);display:none}
+  .recado.erro{display:block;border-color:var(--erro);color:#ffaba8}
+  .recado.info{display:block;border-color:var(--acento);color:#ffca9a}
+  .dica{font-size:12px;color:var(--suave);margin-top:14px;line-height:1.5}
+</style>
+</head>
+<body>
+
+<div class="caixa">
+  <div class="marca">Tour Virtual <span>·</span> <span id="modo">Entrar</span></div>
+  <div class="sub" id="sub">Acesse o painel para gerenciar seus imóveis.</div>
+
+  <label>Usuário</label>
+  <input type="text" id="usuario" autocomplete="username" autofocus>
+
+  <label>Senha</label>
+  <input type="password" id="senha" autocomplete="current-password">
+
+  <div id="blocoConfirma" style="display:none">
+    <label>Repita a senha</label>
+    <input type="password" id="confirma" autocomplete="new-password">
+  </div>
+
+  <button id="acao" onclick="enviar()">Entrar</button>
+  <div class="recado" id="recado"></div>
+  <div class="dica" id="dica"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let primeiroAcesso = false;
+
+function recado(texto, tipo){
+  $('recado').className = 'recado ' + (tipo || '');
+  $('recado').innerHTML = texto || '';
+}
+
+async function inicio(){
+  try{
+    const j = await (await fetch('/api/acesso/estado')).json();
+    primeiroAcesso = j.primeiro_acesso;
+  }catch(e){ recado('Servidor fora do ar.', 'erro'); return; }
+
+  if (primeiroAcesso){
+    $('modo').textContent = 'Primeiro acesso';
+    $('sub').textContent = 'Ainda não existe nenhuma conta. Crie a sua para começar.';
+    $('senha').autocomplete = 'new-password';
+    $('blocoConfirma').style.display = 'block';
+    $('acao').textContent = 'Criar conta e entrar';
+    $('dica').textContent = 'Use pelo menos 8 caracteres. Esta conta terá acesso a '
+                          + 'todos os imóveis e aos contatos capturados.';
+  } else {
+    $('dica').innerHTML = 'Os tours publicados continuam abertos a quem tem o link — '
+                        + 'o login protege só o painel.';
+  }
+}
+
+async function enviar(){
+  const usuario = $('usuario').value.trim();
+  const senha = $('senha').value;
+  if (!usuario || !senha){ recado('Preencha usuário e senha.', 'erro'); return; }
+  if (primeiroAcesso && senha !== $('confirma').value){
+    recado('As duas senhas não conferem.', 'erro'); return;
+  }
+
+  $('acao').disabled = true;
+  recado('Verificando...', 'info');
+  try{
+    const rota = primeiroAcesso ? '/api/acesso/primeiro' : '/api/acesso/entrar';
+    const j = await (await fetch(rota, {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({usuario, senha})})).json();
+    if (!j.ok){ recado(j.erro, 'erro'); $('acao').disabled = false; return; }
+    location.href = '/imoveis';
+  }catch(e){
+    recado('Não consegui falar com o servidor.', 'erro');
+    $('acao').disabled = false;
+  }
+}
+
+for (const id of ['usuario', 'senha', 'confirma'])
+  $(id).addEventListener('keydown', e => { if (e.key === 'Enter') enviar(); });
+
+inicio();
+</script>
+</body>
+</html>

@@ -144,6 +144,31 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Acesso
+
+Na primeira vez, `/entrar` pede para criar a conta inicial. Não existe senha padrão —
+enquanto não houver nenhuma conta, a tela de primeiro acesso fica disponível; depois
+disso ela some.
+
+As senhas são guardadas com hash scrypt (via werkzeug), nunca em texto. A chave que
+assina o cookie de sessão fica em `data/segredo.txt` e é gerada uma vez — se fosse
+sorteada a cada subida, todo reinício derrubaria as sessões abertas.
+
+**O que continua público:** o tour (`/tour/<id>`), o modo caminhar, as imagens das cenas,
+e os envios de visita e de lead. É o link que o corretor manda ao cliente, que
+obviamente não tem conta.
+
+**O que exige sessão:** a lista de imóveis, o painel, métricas, exportação, as fotos
+originais em `data/uploads/` e qualquer escrita.
+
+### Um vazamento que isso corrigiu
+
+`GET /api/imoveis/<id>/tour` devolvia o tour inteiro — incluindo `leads_capturados`.
+Qualquer pessoa com o link do tour conseguia ler nome, telefone e e-mail de todos os
+contatos capturados. Agora, sem sessão, esses campos saem da resposta.
+
+Vale saber disso ao vender para imobiliárias: é dado pessoal de terceiro.
+
 ## Fila de processamento
 
 Costura e profundidade levam de 10 a 25 segundos. Enquanto rodavam dentro da requisição,

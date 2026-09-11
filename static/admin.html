@@ -128,6 +128,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button onclick="copiarEmbed()">Copiar embed</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
+  <button onclick="location.href='/sair'" title="Encerrar a sessão">Sair</button>
 </header>
 
 <div class="layout">
@@ -394,7 +395,9 @@ async function acompanhar(tid, aoTerminar){
 function progresso(p){ const b = $('prog'); if (b) b.style.width = p + '%'; }
 
 async function carregar(){
-  tour = await (await fetch(URL_TOUR)).json();
+  const resposta = await fetch(URL_TOUR);
+  if (resposta.status === 401){ location.href = '/entrar'; return; }
+  tour = await resposta.json();
   $('tTitulo').value    = tour.titulo || '';
   $('tituloImovel').textContent = tour.titulo || 'Tour Virtual';
   $('tEndereco').value  = tour.endereco || '';
