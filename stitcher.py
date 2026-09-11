@@ -21,6 +21,8 @@ import uuid
 import cv2
 import numpy as np
 
+import nivelamento
+
 cv2.ocl.setUseOpenCL(False)   # reforco para a thread de importacao
 
 LARGURA_MAX_SAIDA = 8000     # teto de seguranca da imagem final
@@ -455,6 +457,16 @@ def _tentar_costurar(imagens):
     return None, ultimo_codigo, motivo_recusa, None
 
 
+def _nivelar(panorama):
+    """Endireita o horizonte, engolindo a falha: cena sem quinas nao tem prumo."""
+    try:
+        return nivelamento.nivelar(panorama)
+    except nivelamento.ErroNivelamento as e:
+        return panorama, {"aplicado": False, "motivo": str(e)}
+    except Exception:
+        return panorama, {"aplicado": False, "motivo": "falha ao nivelar"}
+
+
 def costurar(caminhos, pasta_saida, relatar=None):
     """
     Costura N fotos numa panoramica esferica.
@@ -519,6 +531,10 @@ def costurar(caminhos, pasta_saida, relatar=None):
     # panorama fica parcial e o haov real vai junto para o visualizador.
     if info["fechada"]:
         panorama = _completar_esfera(panorama)
+        # Nivelar so depois da esfera fechada: a rotacao trata o panorama como
+        # uma superficie completa, e numa faixa parcial o mapeamento seria outro.
+        aviso(88, "nivelando o horizonte")
+        panorama, info["nivelamento"] = _nivelar(panorama)
 
     aviso(92, "gravando o panorama")
     panorama = _redimensionar(panorama, LARGURA_MAX_SAIDA)
@@ -587,11 +603,15 @@ def importar_varredura(caminho_origem, pasta_saida, haov_graus=360.0):
 
     equi = ajustar_exposicao(equi)
     equi = _preencher_bordas_irregulares(equi)
+    nivel = {"aplicado": False}
+    if haov_graus >= 359.0:
+        equi, nivel = _nivelar(equi)
     nome = "cena_%s.jpg" % uuid.uuid4().hex[:12]
     _salvar(equi, os.path.join(pasta_saida, nome))
 
     fechada = haov_graus >= 359.0
     return nome, equi.shape[1], equi.shape[0], {
+        "nivelamento": nivel,
         "haov": 360.0 if fechada else float(haov_graus),
         "vaov": 180.0 if fechada else float(np.degrees(vfov)),
         "fechada": fechada,

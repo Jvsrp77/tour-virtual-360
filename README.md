@@ -145,6 +145,31 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Nivelamento do horizonte
+
+Quem fotografa com o celular na mão quase nunca fica no prumo. Num panorama torto o chão
+"escorrega" quando o visitante gira — desconforto físico que aparece acima de uns 2°.
+A captura de teste estava **4,9° fora do prumo**.
+
+Como se descobre onde é "para baixo": pelas verticais da própria cena. Batente de porta,
+quina de parede e lateral de armário são verticais reais. Cada linha dessas, vista da
+câmera, define um plano que passa pelo centro óptico; a direção da gravidade está contida
+em todos esses planos ao mesmo tempo. Achar essa direção é achar o prumo — RANSAC sobre
+as normais, refinado com os inliers ponderados pelo comprimento.
+
+Resultado medido: 4,86° → **0,59°**, com 76 das 133 linhas concordando, em 0,7 s.
+No fluxo completo: 5,2° → 0,29°, conferido relendo o arquivo salvo.
+
+**Por que não pela profundidade.** Também dá para estimar ajustando um plano ao piso do
+mapa de profundidade. Testei: deu 19°, contra os 4,9° reais. Profundidade monocular é
+relativa e o ajuste saiu com planaridade 0,22 — ruim demais. As verticais são geometria
+direta e o resultado se verifica sozinho: mede, corrige, mede de novo.
+
+Só acontece em panorama 360 fechado: a rotação trata a imagem como superfície completa,
+e numa faixa parcial o mapeamento seria outro. Abaixo de 0,8° não mexe, para não perder
+nitidez reamostrando à toa. Cena sem quinas (parede lisa) é recusada com explicação, e o
+panorama segue intacto.
+
 ## Correção de exposição
 
 Fotografar cômodo tem um problema constante: janela clara contra parede escura. Medindo

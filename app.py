@@ -507,6 +507,15 @@ def api_costurar():
                     "Você cobriu %.0f graus, com um vão de %.0f graus sem foto. O "
                     "ambiente abre como panorama parcial. Para virar 360 completo, "
                     "feche a volta." % (info["haov"], info["maior_buraco"]))
+            niv = info.get("nivelamento") or {}
+            if niv.get("aplicado"):
+                avisos.append(
+                    "Horizonte nivelado: a captura estava %.1f° fora do prumo, "
+                    "corrigida com %d linhas verticais da cena."
+                    % (niv.get("inclinacao", 0), niv.get("linhas_usadas", 0)))
+            elif niv.get("motivo"):
+                avisos.append("Não consegui nivelar: " + niv["motivo"])
+
             exp = info.get("exposicao", {})
             if exp.get("antes") and exp.get("depois"):
                 ganho = exp["antes"]["sombra_esmagada"] - exp["depois"]["sombra_esmagada"]
