@@ -145,6 +145,28 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Marca no chão
+
+Toda foto 360 profissional cobre o ponto exatamente abaixo da câmera: ali fica o tripé,
+o pé de quem fotografou, ou — numa captura de uma fileira só — o preenchimento sintético
+que não alcança o chão.
+
+Medido no quarto de teste: **cerca de 40% da altura do equirretangular é preenchimento**,
+com nitidez praticamente zero nas faixas de topo e base. A marca cobre a parte pior disso
+e ainda reforça a marca de quem publicou.
+
+O disco é desenhado direto no equirretangular: cada pixel da faixa de baixo vira
+coordenada polar no chão — a distância ao polo vira raio, a longitude vira ângulo. É o
+inverso da projeção que o visualizador faz. A borda externa dissolve para não virar um
+círculo recortado.
+
+**Não inventa conteúdo.** Substitui área sem informação por um logotipo declarado.
+Diferente de gerar piso com IA, que afirmaria algo falso sobre uma característica que o
+comprador usa para decidir.
+
+O panorama original fica guardado ao lado (`orig_<arquivo>`), então dá para trocar a logo
+ou desfazer sem recosturar as fotos.
+
 ## Nivelamento do horizonte
 
 Quem fotografa com o celular na mão quase nunca fica no prumo. Num panorama torto o chão
@@ -205,6 +227,10 @@ lotes de costuras que falharam ou de cenas já removidas.
 Agora cada cena guarda de qual lote veio. Apagar a cena (ou o imóvel) apaga as originais
 junto, e na subida o servidor remove lotes órfãos com mais de 7 dias. O prazo existe
 porque um lote recém-criado pode ser de uma costura ainda na fila.
+
+O mesmo vale para `scenes/`: costura recusada no meio, cena substituída ou profundidade
+de cena já removida deixavam arquivo para trás. A faxina na subida encontrou 1,9 MB assim
+num imóvel com um único ambiente.
 
 ## Leads ficam fora do tour público
 

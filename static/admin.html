@@ -255,6 +255,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <input type="text" id="tPreco" placeholder="R$ 000.000">
       <label>Logo da imobiliária</label>
       <div id="blocoLogo"></div>
+      <div id="blocoMarca"></div>
 
       <label>Cor de destaque</label>
       <input type="color" id="tCor" style="height:38px;padding:3px">
@@ -400,6 +401,7 @@ async function carregar(){
   $('tEndereco').value  = tour.endereco || '';
   $('tDescricao').value = tour.descricao || '';
   desenharLogo();
+  desenharMarca();
   $('tPreco').value     = tour.preco || '';
   $('tCor').value       = tour.cor || '#e07b39';
   $('leadAtivo').checked  = !!(tour.lead && tour.lead.ativo);
@@ -875,6 +877,37 @@ async function gerarDemo(){
   cenaAtual = j.cena.id;
   await carregar();
   aviso('Ambiente de teste criado. Arraste no visor para girar 360°.', 'ok');
+}
+
+function desenharMarca(){
+  const alvo = $('blocoMarca');
+  if (!tour.logo){ alvo.innerHTML = ''; return; }
+  const temMarca = tour.cenas.some(c => c.marca_chao);
+  alvo.innerHTML = temMarca
+    ? `<button style="width:100%;margin-top:8px" onclick="marcaChao(false)">
+         Remover marca do chão</button>
+       <div class="dica">A marca cobre o ponto abaixo da câmera, onde a captura de
+         uma fileira não alcança. O panorama original fica guardado.</div>`
+    : `<button style="width:100%;margin-top:8px" onclick="marcaChao(true)">
+         Aplicar marca no chão</button>
+       <div class="dica">Cobre o borrão embaixo com a sua logo — é o que toda foto
+         360 profissional faz, porque ali fica o tripé ou o pé do fotógrafo.</div>`;
+}
+
+async function marcaChao(ativo){
+  aviso(ativo ? 'Aplicando a marca...' : 'Removendo...', 'mira');
+  progresso(40);
+  try{
+    const j = await (await fetch(API + '/marca-chao', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ativo})})).json();
+    progresso(100); setTimeout(() => progresso(0), 600);
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    await carregar();
+    const erros = (j.erros || []).length ? '<br>' + j.erros.join('<br>') : '';
+    aviso((ativo ? 'Marca aplicada em ' : 'Marca removida de ') + j.alteradas
+          + ' ambiente(s).' + erros, erros ? 'mira' : 'ok');
+  }catch(e){ progresso(0); aviso('Falha: ' + e, 'erro'); }
 }
 
 function desenharLogo(){

@@ -26,6 +26,7 @@ import stitcher
 import cena_demo
 import profundidade
 import tarefas
+import marca
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
@@ -276,6 +277,43 @@ def completar_miniaturas():
 
 
 DIAS_GUARDA_UPLOADS = 7
+
+
+def limpar_cenas_orfas():
+    """
+    Apaga arquivos em scenes/ que nenhuma cena referencia.
+
+    Costura recusada no meio, cena substituida, profundidade de uma cena ja
+    removida: cada caso deixa arquivo para tras. Foram encontrados 2,5 MB assim
+    num imovel com um unico ambiente.
+    """
+    liberado = 0
+    for iid in os.listdir(PASTA_IMOVEIS):
+        if not imovel_existe(iid):
+            continue
+        tour = carregar_tour(iid)
+        usados = set()
+        if tour.get("logo"):
+            usados.add(tour["logo"])
+        for cena in tour["cenas"]:
+            for chave in ("arquivo", "profundidade", "previa_profundidade", "miniatura"):
+                if cena.get(chave):
+                    usados.add(cena[chave])
+            if cena.get("arquivo"):
+                usados.add("orig_" + cena["arquivo"])   # pristino da marca no chao
+
+        pasta = os.path.join(pasta_imovel(iid), "scenes")
+        if not os.path.isdir(pasta):
+            continue
+        for nome in os.listdir(pasta):
+            if nome in usados:
+                continue
+            caminho = os.path.join(pasta, nome)
+            if os.path.isfile(caminho):
+                liberado += os.path.getsize(caminho)
+                os.remove(caminho)
+    if liberado:
+        print("  faxina: %.1f MB de arquivos de cena orfaos apagados" % (liberado / 1e6))
 
 
 def limpar_uploads_orfaos():
@@ -675,6 +713,10 @@ def api_remover_cena(cena_id):
 
     # o panorama e tambem o mapa de profundidade e a previa, senao ficam orfaos
     for chave in ("arquivo", "profundidade", "previa_profundidade", "miniatura"):
+        if chave == "arquivo":
+            orig = os.path.join(pasta_cenas(), "orig_" + cena["arquivo"])
+            if os.path.exists(orig):
+                os.remove(orig)
         nome = cena.get(chave)
         if not nome:
             continue
@@ -827,6 +869,72 @@ def api_metricas():
     }})
 
 
+@api.route("/marca-chao", methods=["POST"])
+def api_marca_chao():
+    """
+    Aplica ou remove a marca no chao de todas as cenas 360 do imovel.
+
+    O panorama original fica guardado ao lado: assim da para trocar a logo, mudar
+    o tamanho ou desfazer, sem precisar recosturar as fotos.
+    """
+    dados = request.get_json(silent=True) or {}
+    ativo = bool(dados.get("ativo", True))
+    raio = float(dados.get("raio") or marca.RAIO_PADRAO)
+
+    tour = carregar_tour()
+    if ativo and not tour.get("logo"):
+        return jsonify({"ok": False, "erro":
+                        "Envie a logo da imobiliária antes de aplicar a marca."}), 422
+
+    pasta = pasta_cenas()
+    logo = None
+    if ativo:
+        caminho_logo = os.path.join(pasta, tour["logo"])
+        logo = cv2.imdecode(np.fromfile(caminho_logo, dtype=np.uint8),
+                            cv2.IMREAD_UNCHANGED)
+        if logo is None:
+            return jsonify({"ok": False, "erro": "Não consegui abrir a logo."}), 422
+        if logo.ndim == 2:
+            logo = cv2.cvtColor(logo, cv2.COLOR_GRAY2BGR)
+
+    alteradas, erros = 0, []
+    for cena in tour["cenas"]:
+        if not cena.get("panorama_completo"):
+            continue
+        atual = os.path.join(pasta, cena["arquivo"])
+        original = os.path.join(pasta, "orig_" + cena["arquivo"])
+
+        try:
+            if not ativo:
+                if os.path.exists(original):
+                    shutil.copyfile(original, atual)
+                    os.remove(original)
+                    cena.pop("marca_chao", None)
+                    alteradas += 1
+                continue
+
+            if not os.path.exists(original):
+                shutil.copyfile(atual, original)      # guarda o pristino uma vez
+            base = cv2.imdecode(np.fromfile(original, dtype=np.uint8), cv2.IMREAD_COLOR)
+            saida = marca.aplicar(base, logo, raio)
+            ok, buf = cv2.imencode(".jpg", saida, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if not ok:
+                raise marca.ErroMarca("falha ao gravar")
+            buf.tofile(atual)
+            cena["marca_chao"] = {"raio": raio}
+            cena["miniatura"] = gerar_miniatura(g.imovel, cena["arquivo"])
+            alteradas += 1
+        except marca.ErroMarca as e:
+            erros.append("%s: %s" % (cena["nome"], e))
+        except Exception as e:
+            traceback.print_exc()
+            erros.append("%s: %s" % (cena["nome"], e))
+
+    salvar_tour(tour)
+    return jsonify({"ok": True, "alteradas": alteradas, "erros": erros,
+                    "ativo": ativo})
+
+
 @api.route("/logo", methods=["POST"])
 def api_enviar_logo():
     """Guarda a marca da imobiliaria, exibida no canto do tour."""
@@ -954,6 +1062,7 @@ if __name__ == "__main__":
     migrar_formato_antigo()
     completar_miniaturas()
     limpar_uploads_orfaos()
+    limpar_cenas_orfas()
     if not listar_imoveis():
         criar_imovel("Meu primeiro imóvel")
         print("  nenhum imovel encontrado: criei um vazio para comecar")
