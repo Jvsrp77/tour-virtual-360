@@ -144,6 +144,24 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Fila de processamento
+
+Costura e profundidade levam de 10 a 25 segundos. Enquanto rodavam dentro da requisição,
+o navegador segurava a conexão aberta o tempo todo — numa rede de celular um proxy corta
+antes do fim, e o corretor via erro **com o panorama já pronto no servidor**.
+
+Agora a requisição devolve um número de tarefa em ~0,3 s e o painel pergunta o andamento
+a cada segundo, mostrando a etapa real: *lendo 16 fotos → alinhando e costurando →
+acabamento das bordas → gravando*.
+
+**Um trabalhador só, de propósito.** A costura consome bastante memória; duas ao mesmo
+tempo derrubariam o processo. Quando há duas na fila, a segunda mostra a posição em vez
+de competir por memória.
+
+Limitação conhecida: as tarefas vivem na memória do processo. Reiniciar o servidor no
+meio de uma costura perde aquele trabalho — as fotos originais continuam em
+`data/uploads/`, mas é preciso reenviar.
+
 ## Escrita concorrente
 
 Quase toda rota que escreve faz ler-alterar-gravar no `tour.json`. Sem serializar, duas

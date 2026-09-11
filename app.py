@@ -23,6 +23,7 @@ import cv2
 import stitcher
 import cena_demo
 import profundidade
+import tarefas
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
@@ -372,33 +373,38 @@ def api_costurar():
             f.save(destino)
             temporarios.append(destino)
 
-        arquivo, largura, altura, info = stitcher.costurar(temporarios, pasta_cenas())
+        imovel = g.imovel
+        destino = pasta_cenas()
 
-        with trava_do_imovel(g.imovel):
-            tour = carregar_tour()
-            cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
-            tour["cenas"].append(cena)
-            if not tour["cena_inicial"]:
-                tour["cena_inicial"] = cena["id"]
-            salvar_tour(tour)
+        def trabalho(relatar):
+            arquivo, largura, altura, info = stitcher.costurar(
+                temporarios, destino, relatar)
 
-        avisos = []
-        if not info["fechada"]:
-            avisos.append(
-                "Você cobriu %.0f graus, com um vão de %.0f graus sem foto. O ambiente "
-                "abre como panorama parcial. Para virar 360 completo, feche a volta."
-                % (info["haov"], info["maior_buraco"]))
-        if info["fileiras"] == 1:
-            avisos.append(
-                "Captura em 1 fileira: teto e chão foram preenchidos por aproximação. "
-                "Fotografe também com o celular inclinado para cima e para baixo se "
-                "quiser teto e chão reais.")
+            with trava_do_imovel(imovel):
+                tour = carregar_tour(imovel)
+                cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
+                tour["cenas"].append(cena)
+                if not tour["cena_inicial"]:
+                    tour["cena_inicial"] = cena["id"]
+                salvar_tour(tour, imovel)
 
-        return jsonify({"ok": True, "cena": cena, "fotos_usadas": len(temporarios),
-                        "avisos": avisos})
+            avisos = []
+            if not info["fechada"]:
+                avisos.append(
+                    "Você cobriu %.0f graus, com um vão de %.0f graus sem foto. O "
+                    "ambiente abre como panorama parcial. Para virar 360 completo, "
+                    "feche a volta." % (info["haov"], info["maior_buraco"]))
+            if info["fileiras"] == 1:
+                avisos.append(
+                    "Captura em 1 fileira: teto e chão foram preenchidos por "
+                    "aproximação. Fotografe também com o celular inclinado para cima "
+                    "e para baixo se quiser teto e chão reais.")
+            return {"cena": cena, "fotos_usadas": len(temporarios), "avisos": avisos}
 
-    except stitcher.ErroCostura as e:
-        return jsonify({"ok": False, "erro": str(e)}), 422
+        tid = tarefas.criar(imovel, "costura", "Costurando %s" % nome)
+        tarefas.enfileirar(tid, trabalho)
+        return jsonify({"ok": True, "tarefa": tid}), 202
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"ok": False, "erro": "Erro inesperado: %s" % e}), 500
@@ -569,30 +575,38 @@ def api_gerar_profundidade(cena_id):
         return jsonify({"ok": False, "erro":
                         "Só dá para andar em cenas com 360 completo. Esta é parcial."}), 422
 
-    try:
-        disp, previa = profundidade.gerar(os.path.join(pasta_cenas(), cena["arquivo"]))
+    if not profundidade.modelo_disponivel():
+        return jsonify({"ok": False, "erro":
+                        "O modelo de profundidade não está instalado. Rode "
+                        "'python baixar_modelo.py' uma vez (94 MB)."}), 422
+
+    imovel = g.imovel
+    destino = pasta_cenas()
+    panorama = os.path.join(destino, cena["arquivo"])
+
+    def trabalho(relatar):
+        disp, previa = profundidade.gerar(panorama, relatar=relatar)
         nome = "prof_%s.png" % cena_id
-        profundidade.salvar(disp, os.path.join(pasta_cenas(), nome))
+        profundidade.salvar(disp, os.path.join(destino, nome))
 
         nome_previa = "prev_%s.jpg" % cena_id
         ok, buf = cv2.imencode(".jpg", previa, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok:
-            buf.tofile(os.path.join(pasta_cenas(), nome_previa))
+            buf.tofile(os.path.join(destino, nome_previa))
 
-        with trava_do_imovel(g.imovel):
-            tour = carregar_tour()          # relê: pode ter mudado durante o calculo
-            cena = achar_cena(tour, cena_id)
-            if not cena:
-                return jsonify({"ok": False, "erro": "Cena removida durante o cálculo."}), 404
-            cena["profundidade"] = nome
-            cena["previa_profundidade"] = nome_previa
-            salvar_tour(tour)
-        return jsonify({"ok": True, "cena": cena})
-    except profundidade.ErroProfundidade as e:
-        return jsonify({"ok": False, "erro": str(e)}), 422
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"ok": False, "erro": "Falha ao gerar profundidade: %s" % e}), 500
+        with trava_do_imovel(imovel):
+            tour = carregar_tour(imovel)     # relê: pode ter mudado durante o calculo
+            atual = achar_cena(tour, cena_id)
+            if not atual:
+                raise RuntimeError("A cena foi removida durante o cálculo.")
+            atual["profundidade"] = nome
+            atual["previa_profundidade"] = nome_previa
+            salvar_tour(tour, imovel)
+        return {"cena": atual}
+
+    tid = tarefas.criar(imovel, "profundidade", "Profundidade de %s" % cena["nome"])
+    tarefas.enfileirar(tid, trabalho)
+    return jsonify({"ok": True, "tarefa": tid}), 202
 
 
 @api.route("/cenas/ordenar", methods=["POST"])
@@ -632,6 +646,19 @@ def api_registrar_visita():
     del visitas[:-500]          # o arquivo e JSON: guardar tudo cresceria sem limite
     salvar_tour(tour)
     return jsonify({"ok": True})
+
+
+@api.route("/tarefas/<tid>", methods=["GET"])
+def api_tarefa(tid):
+    tarefa = tarefas.obter(tid)
+    if not tarefa or tarefa["imovel"] != g.imovel:
+        return jsonify({"ok": False, "erro": "Tarefa não encontrada."}), 404
+    return jsonify({"ok": True, "tarefa": tarefa})
+
+
+@api.route("/tarefas", methods=["GET"])
+def api_tarefas():
+    return jsonify({"ok": True, "tarefas": tarefas.listar(g.imovel)})
 
 
 @api.route("/metricas", methods=["GET"])
@@ -781,6 +808,7 @@ def api_embed():
 
 
 app.register_blueprint(api)
+tarefas.iniciar()
 
 
 if __name__ == "__main__":

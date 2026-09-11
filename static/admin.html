@@ -358,6 +358,39 @@ function aviso(texto, tipo){
   if (tipo === 'ok') setTimeout(() => { $('msg').innerHTML = ''; }, 4000);
 }
 
+/**
+ * Acompanha uma tarefa da fila ate terminar.
+ * O trabalho pesado nao cabe dentro da requisicao: numa rede de celular o proxy
+ * corta a conexao antes dos 20 segundos e o corretor ve erro com o panorama ja
+ * pronto no servidor. Aqui a requisicao volta na hora e o painel pergunta.
+ */
+async function acompanhar(tid, aoTerminar){
+  for(;;){
+    await new Promise(r => setTimeout(r, 900));
+    let t;
+    try{
+      const j = await (await fetch(API + '/tarefas/' + tid)).json();
+      if (!j.ok){ aviso('Perdi o acompanhamento desta tarefa.', 'erro'); return; }
+      t = j.tarefa;
+    }catch(e){ continue; }          // rede oscilou: tenta de novo no proximo ciclo
+
+    if (t.estado === 'na_fila'){
+      progresso(4);
+      aviso(`${t.titulo} — na fila, posição ${t.posicao}.`, 'mira');
+      continue;
+    }
+    if (t.estado === 'processando'){
+      progresso(t.progresso);
+      aviso(`${t.titulo} — ${t.etapa} (${t.progresso}%)`, 'mira');
+      continue;
+    }
+    progresso(100); setTimeout(() => progresso(0), 600);
+    if (t.estado === 'erro'){ aviso(t.erro, 'erro'); return; }
+    await aoTerminar(t.resultado || {});
+    return;
+  }
+}
+
 function progresso(p){ const b = $('prog'); if (b) b.style.width = p + '%'; }
 
 async function carregar(){
@@ -597,15 +630,17 @@ async function gerarProfundidade(){
   aviso('Calculando a profundidade do ambiente...', 'mira');
   progresso(40);
   try{
-    const r = await fetch(API + '/cenas/' + cenaAtual + '/profundidade', {method: 'POST'});
-    const j = await r.json();
-    progresso(100); setTimeout(() => progresso(0), 600);
+    const j = await (await fetch(API + '/cenas/' + cenaAtual + '/profundidade',
+                                 {method: 'POST'})).json();
     if (!j.ok){ aviso(j.erro, 'erro'); botoes.forEach(b => { b.disabled = false; }); return; }
-    await carregar();
-    aviso('Profundidade pronta. Clique em <b>Andar</b> para se deslocar pelo ambiente.', 'ok');
+    await acompanhar(j.tarefa, async () => {
+      await carregar();
+      aviso('Profundidade pronta. Clique em <b>Andar</b> para se deslocar pelo ambiente.', 'ok');
+    });
   }catch(e){
     progresso(0);
     aviso('Falha ao gerar profundidade: ' + e, 'erro');
+  }finally{
     botoes.forEach(b => { b.disabled = false; });
   }
 }
@@ -765,32 +800,29 @@ async function costurar(){
   fd.append('nome', $('nomeCostura').value.trim() || 'Ambiente');
   for (const f of arquivos) fd.append('fotos', f);
 
-  // a costura roda na CPU: ~10s para poucas fotos, ~30s para um lote de 15.
-  const estimativa = Math.max(8, Math.round(arquivos.length * 2));
   const botao = document.querySelector('button[onclick="costurar()"]');
   if (botao){ botao.disabled = true; botao.textContent = 'Costurando...'; }
 
-  aviso(`Costurando ${arquivos.length} fotos. Leva cerca de ${estimativa} segundos — ` +
-        `não feche a página nem clique de novo.`, 'mira');
-  progresso(30);
+  aviso(`Enviando ${arquivos.length} fotos...`, 'mira');
+  progresso(15);
   try{
-    const r = await fetch(API + '/cenas/costurar', {method: 'POST', body: fd});
-    const j = await r.json();
-    progresso(100); setTimeout(() => progresso(0), 600);
+    const j = await (await fetch(API + '/cenas/costurar', {method: 'POST', body: fd})).json();
     if (!j.ok){ aviso(j.erro, 'erro'); return; }
     $('fotosCostura').value = ''; $('nomeCostura').value = '';
-    cenaAtual = j.cena.id;
-    await carregar();
-    const cap = j.cena.captura || {};
-    const resumo = `Panorama criado com ${j.fotos_usadas} fotos · `
-      + `${cap.fileiras || 1} fileira(s) · `
-      + (cap.volta_fechada ? 'volta fechada, 360 completo' : 'captura parcial');
-    aviso([resumo].concat(j.avisos || []).join('<br>'),
-          (j.avisos && j.avisos.length) ? 'mira' : 'ok');
+
+    await acompanhar(j.tarefa, async res => {
+      cenaAtual = res.cena.id;
+      await carregar();
+      const cap = res.cena.captura || {};
+      const resumo = `Panorama criado com ${res.fotos_usadas} fotos · `
+        + `${cap.fileiras || 1} fileira(s) · `
+        + (cap.volta_fechada ? 'volta fechada, 360 completo' : 'captura parcial');
+      aviso([resumo].concat(res.avisos || []).join('<br>'),
+            (res.avisos && res.avisos.length) ? 'mira' : 'ok');
+    });
   }catch(e){
     progresso(0);
-    aviso('O servidor não respondeu. Se isso acontecer com muitas fotos de uma vez, ' +
-          'tente de novo com menos fotos. Detalhe técnico: ' + e, 'erro');
+    aviso('Falha ao enviar as fotos: ' + e, 'erro');
   }finally{
     if (botao){ botao.disabled = false; botao.textContent = 'Costurar em 360'; }
   }

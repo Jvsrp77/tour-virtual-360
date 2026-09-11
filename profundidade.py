@@ -101,11 +101,13 @@ def _direcoes_equirretangulares(largura, altura):
                      np.cos(lat) * np.cos(lon)], -1)
 
 
-def gerar(caminho_panorama, largura_saida=1024):
+def gerar(caminho_panorama, largura_saida=1024, relatar=None):
     """
     Devolve (disparidade, previa_colorida) no tamanho largura_saida x largura_saida/2.
     A disparidade vem normalizada em 0..1, onde 1 e o ponto mais proximo.
     """
+    aviso = relatar or (lambda p, e: None)
+    aviso(8, "abrindo o panorama")
     dados = np.fromfile(caminho_panorama, dtype=np.uint8)
     equi = cv2.imdecode(dados, cv2.IMREAD_COLOR)
     if equi is None:
@@ -117,7 +119,8 @@ def gerar(caminho_panorama, largura_saida=1024):
     acumulado = np.zeros((H, W), np.float32)
     pesos = np.zeros((H, W), np.float32)
 
-    for yaw, pitch in DIRECOES:
+    for indice, (yaw, pitch) in enumerate(DIRECOES):
+        aviso(15 + indice * 12, "analisando vista %d de %d" % (indice + 1, len(DIRECOES)))
         face, f = _recortar_vista(equi, yaw, pitch)
         disp = _inferir(face)
 
@@ -156,6 +159,7 @@ def gerar(caminho_panorama, largura_saida=1024):
         acumulado += amostra * peso
         pesos += peso
 
+    aviso(90, "juntando as vistas")
     disparidade = acumulado / np.maximum(pesos, 1e-6)
     disparidade = cv2.GaussianBlur(disparidade, (0, 0), 1.6)
 

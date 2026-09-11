@@ -422,17 +422,23 @@ def _tentar_costurar(imagens):
     return None, ultimo_codigo, motivo_recusa, None
 
 
-def costurar(caminhos, pasta_saida):
-    """Costura N fotos numa panoramica esferica. Devolve (nome_arquivo, largura, altura)."""
+def costurar(caminhos, pasta_saida, relatar=None):
+    """
+    Costura N fotos numa panoramica esferica.
+    relatar(progresso, etapa) e opcional e serve para a fila mostrar o andamento.
+    """
+    aviso = relatar or (lambda p, e: None)
     if len(caminhos) < 2:
         raise ErroCostura("Envie pelo menos 2 fotos para costurar um panorama.")
 
     # a flag e por thread e esta funcao roda na thread da requisicao, nao na de import
     cv2.ocl.setUseOpenCL(False)
 
+    aviso(10, "lendo %d fotos" % len(caminhos))
     largura = _largura_trabalho(len(caminhos))
     imagens = [_redimensionar(_ler_imagem(c), largura) for c in caminhos]
 
+    aviso(25, "alinhando e costurando")
     panorama, codigo, motivo, geo = _tentar_costurar(imagens)
     if panorama is None:
         if motivo == "estreito":
@@ -459,6 +465,7 @@ def costurar(caminhos, pasta_saida):
     # O corte das bordas e a validacao ja aconteceram dentro de _tentar_costurar.
     # O acabamento vem depois de propositio: preencher as bordas deixaria a imagem
     # 99% cheia e a checagem de panorama deformado nunca mais reprovaria nada.
+    aviso(80, "acabamento das bordas")
     panorama = _preencher_bordas_irregulares(panorama)
 
     info = dict(geo)
@@ -475,6 +482,7 @@ def costurar(caminhos, pasta_saida):
     if info["fechada"]:
         panorama = _completar_esfera(panorama)
 
+    aviso(92, "gravando o panorama")
     panorama = _redimensionar(panorama, LARGURA_MAX_SAIDA)
 
     nome = "cena_%s.jpg" % uuid.uuid4().hex[:12]
