@@ -145,31 +145,41 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
-## Metragem: tentada e descartada
+## Metragem
 
-Foi implementada uma estimativa de m² a partir do mapa de profundidade, e **descartada
-depois de confrontar com trena**. Fica registrado para ninguém repetir.
+Botão **Medir o ambiente**: estima comprimento, largura e m² a partir do mapa de
+profundidade. Aferido contra o LiDAR do iPhone num quarto real.
 
-Quarto de teste real: 3,20 × 2,80 = **8,96 m²**.
+| | Real (iPhone) | Medido | Erro |
+|---|---|---|---|
+| Comprimento | 5,26 m | 5,38 m | +2,3% |
+| Largura | 2,58 m | 2,59 m | +0,4% |
+| Área | 13,57 m² | 13,9 m² | +2,4% |
 
-| Abordagem | Resultado |
-|---|---|
-| Piso, versão inicial | 102 m² — ponto solto no longe virava cômodo |
-| Piso, caminhando até a borda | 7,7 m² (−14%) |
-| Piso, sem a porta aberta | 5,4 m² (**−39%**) |
-| Teto | 137 m² (+1400%) |
-| Pé-direito estimado | 4,03 m, contra ~2,7 m reais |
+Cada pixel vira ponto 3D; os que estão a ~1,5 m abaixo da câmera são piso. Para cada
+direção o código caminha do chão para fora até o piso acabar, e a um retângulo é ajustado
+ao contorno.
 
-O −14% parecia aceitável, mas era **sorte**: o móvel encolhia o cômodo em 39% e a porta
-aberta devolvia 2,3 m² de corredor. Tirar o defeito óbvio piorava o resultado.
+**Por que retângulo, e por que percentil alto.** O polígono de piso sozinho mede *piso
+livre*, não o cômodo: móvel encostado interrompe o piso antes da parede, e aqui isso deu
+7,7 m² — 55% do cômodo. Cômodo é retangular e o móvel só esconde a parede em algumas
+direções, então a extensão usa percentil 96: alcança a parede onde ela está visível e
+ainda descarta ponto solto de profundidade ruim. Percentil 88 mede o móvel (−37%);
+percentil 100 mede o ruído.
 
-Ajustar um retângulo dava −3% no percentil 88 — e −34% no percentil 80, +41% no 94. Isso
-não é método, é número escolhido para acertar um quarto conhecido.
+O painel mostra os dois números — a metragem e o piso livre.
 
-**A raiz é a profundidade monocular não ser métrica.** Ela ordena bem o que está perto e
-longe, o que basta para o modo caminhar, mas não sustenta medida em metros. Para medir de
-verdade seria preciso profundidade métrica — LiDAR do iPhone Pro, ou um modelo métrico
-como Depth Pro.
+### Um episódio que vale registrar
+
+Esta funcionalidade foi **implementada, descartada e restaurada**. A primeira aferição usou
+uma referência de 3,20 × 2,80 m, contra a qual o resultado dava −39% e nenhum ajuste
+salvava. Foi removida com um commit explicando por que não funcionava.
+
+A medição correta (LiDAR) era 5,26 × 2,58. Contra ela, o mesmo código acerta as duas
+dimensões dentro de 2,3%. **O código estava certo; a referência é que estava errada.**
+
+Fica a lição: uma verificação vale o que vale o padrão de comparação. Antes de concluir
+que algo não funciona, confirme contra o que está sendo comparado.
 
 ## Reconstrução do teto
 

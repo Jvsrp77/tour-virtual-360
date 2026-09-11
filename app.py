@@ -26,6 +26,7 @@ import stitcher
 import cena_demo
 import profundidade
 import tarefas
+import area
 import marca
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -737,6 +738,22 @@ def api_remover_cena(cena_id):
         tour["cena_inicial"] = tour["cenas"][0]["id"] if tour["cenas"] else None
     salvar_tour(tour)
     return jsonify({"ok": True})
+
+
+@api.route("/cenas/<cena_id>/area", methods=["GET"])
+def api_area(cena_id):
+    """Metragem a partir do mapa de profundidade, com retangulo ajustado."""
+    cena = achar_cena(carregar_tour(), cena_id)
+    if not cena:
+        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
+    if not cena.get("profundidade"):
+        return jsonify({"ok": False, "erro":
+                        "Gere a profundidade deste ambiente antes de medir."}), 422
+    try:
+        r = area.medir(os.path.join(pasta_cenas(), cena["profundidade"]))
+    except area.ErroArea as e:
+        return jsonify({"ok": False, "erro": str(e)}), 422
+    return jsonify({"ok": True, "medida": r})
 
 
 @api.route("/cenas/<cena_id>/profundidade", methods=["POST"])
