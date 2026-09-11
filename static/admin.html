@@ -128,7 +128,6 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button onclick="copiarEmbed()">Copiar embed</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
-  <button onclick="location.href='/sair'" title="Encerrar a sessão">Sair</button>
 </header>
 
 <div class="layout">
@@ -395,9 +394,7 @@ async function acompanhar(tid, aoTerminar){
 function progresso(p){ const b = $('prog'); if (b) b.style.width = p + '%'; }
 
 async function carregar(){
-  const resposta = await fetch(URL_TOUR);
-  if (resposta.status === 401){ location.href = '/entrar'; return; }
-  tour = await resposta.json();
+  tour = await (await fetch(URL_TOUR)).json();
   $('tTitulo').value    = tour.titulo || '';
   $('tituloImovel').textContent = tour.titulo || 'Tour Virtual';
   $('tEndereco').value  = tour.endereco || '';
@@ -984,8 +981,12 @@ async function verMetricas(){
     <div class="dica">O ambiente no topo é por onde o corretor deve começar a conversa.</div>`;
 }
 
-function verLeads(){
-  const leads = tour.leads_capturados || [];
+async function verLeads(){
+  // os leads nao vem mais no tour: aquele endereco e publico e vazaria os
+  // contatos para qualquer um com o link
+  let leads = [];
+  try{ leads = (await (await fetch(API + '/leads')).json()).leads || []; }
+  catch(e){ leads = []; }
   $('corpoLeads').innerHTML = leads.length
     ? leads.map(l => `<div class="hs"><div class="crescer"><b>${l.nome}</b> · ${l.telefone} · ${l.email}</div></div>`).join('')
     : '<div class="dica">Nenhum contato capturado ainda. Abra o tour e preencha o formulário para testar.</div>';

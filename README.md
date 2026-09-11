@@ -144,30 +144,18 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
-## Acesso
+## Leads ficam fora do tour público
 
-Na primeira vez, `/entrar` pede para criar a conta inicial. Não existe senha padrão —
-enquanto não houver nenhuma conta, a tela de primeiro acesso fica disponível; depois
-disso ela some.
+`GET /api/imoveis/<id>/tour` alimenta o visualizador, que é público por natureza — é o
+link que o corretor manda ao cliente. Essa rota **nunca** devolve `leads_capturados` nem
+`visitas`.
 
-As senhas são guardadas com hash scrypt (via werkzeug), nunca em texto. A chave que
-assina o cookie de sessão fica em `data/segredo.txt` e é gerada uma vez — se fosse
-sorteada a cada subida, todo reinício derrubaria as sessões abertas.
+Antes devolvia o tour inteiro: qualquer pessoa com o link lia nome, telefone e e-mail de
+todos os contatos capturados. O painel busca esses dados em `/leads` e `/metricas`.
 
-**O que continua público:** o tour (`/tour/<id>`), o modo caminhar, as imagens das cenas,
-e os envios de visita e de lead. É o link que o corretor manda ao cliente, que
-obviamente não tem conta.
-
-**O que exige sessão:** a lista de imóveis, o painel, métricas, exportação, as fotos
-originais em `data/uploads/` e qualquer escrita.
-
-### Um vazamento que isso corrigiu
-
-`GET /api/imoveis/<id>/tour` devolvia o tour inteiro — incluindo `leads_capturados`.
-Qualquer pessoa com o link do tour conseguia ler nome, telefone e e-mail de todos os
-contatos capturados. Agora, sem sessão, esses campos saem da resposta.
-
-Vale saber disso ao vender para imobiliárias: é dado pessoal de terceiro.
+Não há login por enquanto: quem alcança a porta 5000 edita qualquer imóvel. Enquanto o
+servidor roda só na máquina de vocês, tudo bem; no dia que subir para uma imobiliária
+acessar, autenticação volta a ser o primeiro item.
 
 ## Fila de processamento
 

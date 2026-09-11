@@ -11,13 +11,12 @@ import json
 import uuid
 import shutil
 import zipfile
-import time
 import threading
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import (Flask, Blueprint, g, request, jsonify, send_from_directory,
-                   send_file, redirect, Response, abort, session)
+                   send_file, redirect, Response, abort)
 
 import cv2
 
@@ -25,7 +24,6 @@ import stitcher
 import cena_demo
 import profundidade
 import tarefas
-import usuarios
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
@@ -117,34 +115,6 @@ def migrar_formato_antigo():
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024   # 300 MB por requisicao
-app.secret_key = usuarios.segredo(PASTA_DADOS)
-app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
-                  PERMANENT_SESSION_LIFETIME=timedelta(days=30))
-
-# O tour publicado precisa continuar aberto: e o link que o corretor manda ao
-# cliente, que obviamente nao tem conta. Tudo o mais exige sessao.
-# Rotas registradas no app nao levam prefixo no nome; so as do Blueprint levam.
-ROTAS_PUBLICAS = {
-    "entrar", "api_entrar", "api_primeiro_acesso", "sair", "api_estado_acesso",
-    "visualizador", "andar", "arquivo_cena", "static",
-    "api.api_obter_tour", "api.api_registrar_visita", "api.api_registrar_lead",
-}
-
-
-def autenticado():
-    return bool(session.get("usuario"))
-
-
-@app.before_request
-def _exigir_sessao():
-    if request.endpoint in ROTAS_PUBLICAS or request.endpoint is None:
-        return None
-    if autenticado():
-        return None
-    if request.path.startswith("/api/"):
-        return jsonify({"ok": False, "erro": "Faça login para continuar.",
-                        "login": True}), 401
-    return redirect("/entrar")
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
 # proprio caminho, entao nenhuma rota precisa receber o imovel como parametro.
@@ -189,6 +159,7 @@ def _soltar_trava(erro=None):
     trava = g.pop("trava", None)
     if trava is not None:
         trava.release()
+
 
 TOUR_PADRAO = {
     "titulo": "Imovel sem titulo",
@@ -289,77 +260,6 @@ def home():
     return redirect("/imoveis")
 
 
-@app.route("/entrar")
-def entrar():
-    if autenticado():
-        return redirect("/imoveis")
-    return send_from_directory("static", "entrar.html")
-
-
-@app.route("/api/acesso/estado", methods=["GET"])
-def api_estado_acesso():
-    return jsonify({"ok": True, "primeiro_acesso": not usuarios.ha_usuarios(PASTA_DADOS),
-                    "usuario": session.get("usuario")})
-
-
-@app.route("/api/acesso/primeiro", methods=["POST"])
-def api_primeiro_acesso():
-    """Cria a conta inicial. So funciona enquanto nao existe nenhuma."""
-    if usuarios.ha_usuarios(PASTA_DADOS):
-        return jsonify({"ok": False, "erro": "As contas já foram criadas."}), 403
-    d = request.get_json(force=True) or {}
-    try:
-        nome = usuarios.criar(PASTA_DADOS, d.get("usuario"), d.get("senha"))
-    except usuarios.ErroUsuario as e:
-        return jsonify({"ok": False, "erro": str(e)}), 422
-    session.permanent = True
-    session["usuario"] = nome
-    return jsonify({"ok": True})
-
-
-# Uma tentativa errada custa pouco; mil, nao. O atraso cresce com as falhas
-# seguidas do mesmo endereco, o que inviabiliza tentar senha por forca bruta.
-_FALHAS = {}
-
-
-@app.route("/api/acesso/entrar", methods=["POST"])
-def api_entrar():
-    d = request.get_json(force=True) or {}
-    origem = request.remote_addr or "?"
-    falhas = _FALHAS.get(origem, 0)
-    if falhas >= 5:
-        time.sleep(min(8, 0.5 * falhas))
-
-    if not usuarios.verificar(PASTA_DADOS, d.get("usuario"), d.get("senha")):
-        _FALHAS[origem] = falhas + 1
-        return jsonify({"ok": False, "erro": "Usuário ou senha incorretos."}), 401
-
-    _FALHAS.pop(origem, None)
-    session.permanent = True
-    session["usuario"] = (d.get("usuario") or "").strip().lower()
-    return jsonify({"ok": True})
-
-
-@app.route("/api/acesso/sair", methods=["POST"])
-@app.route("/sair")
-def sair():
-    session.clear()
-    if request.path.startswith("/api/"):
-        return jsonify({"ok": True})
-    return redirect("/entrar")
-
-
-@app.route("/api/acesso/senha", methods=["POST"])
-def api_trocar_senha():
-    d = request.get_json(force=True) or {}
-    try:
-        usuarios.trocar_senha(PASTA_DADOS, session.get("usuario"),
-                              d.get("atual"), d.get("nova"))
-    except usuarios.ErroUsuario as e:
-        return jsonify({"ok": False, "erro": str(e)}), 422
-    return jsonify({"ok": True})
-
-
 @app.route("/imoveis")
 def pagina_imoveis():
     return send_from_directory("static", "imoveis.html")
@@ -426,13 +326,15 @@ def arquivo_upload(nome):
 @api.route("/tour", methods=["GET"])
 def api_obter_tour():
     """
-    O visualizador publico usa esta rota. Sem sessao, os campos internos saem de
-    fora: qualquer um com o link do tour estaria lendo os contatos capturados.
+    O visualizador publico usa esta rota, entao ela nunca devolve dado interno.
+
+    Antes mandava o tour inteiro, com leads_capturados junto: qualquer um com o
+    link do tour lia nome, telefone e e-mail de todos os contatos capturados. O
+    painel busca esses dados em /leads e /metricas.
     """
     tour = carregar_tour()
-    if not autenticado():
-        for campo in ("leads_capturados", "visitas"):
-            tour.pop(campo, None)
+    for campo in ("leads_capturados", "visitas"):
+        tour.pop(campo, None)
     return jsonify(tour)
 
 
@@ -833,6 +735,12 @@ def api_remover_logo():
     tour["logo"] = ""
     salvar_tour(tour)
     return jsonify({"ok": True})
+
+
+@api.route("/leads", methods=["GET"])
+def api_listar_leads():
+    """Usado pelo painel. Fica separado do tour para nao vazar no link publico."""
+    return jsonify({"ok": True, "leads": carregar_tour().get("leads_capturados", [])})
 
 
 @api.route("/leads", methods=["POST"])

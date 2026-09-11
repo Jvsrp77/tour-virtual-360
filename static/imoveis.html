@@ -67,8 +67,6 @@
 <header>
   <h1>Tour Virtual <span>·</span> Imóveis</h1>
   <div class="crescer"></div>
-  <span id="quemSou" style="color:#9aa2ad;font-size:12.5px"></span>
-  <button onclick="location.href='/sair'">Sair</button>
   <button class="primario" onclick="abrirNovo()">+ Novo imóvel</button>
 </header>
 
@@ -94,13 +92,6 @@
 
 <script>
 const $ = id => document.getElementById(id);
-
-async function quemSou(){
-  try{
-    const j = await (await fetch('/api/acesso/estado')).json();
-    if (j.usuario) $('quemSou').textContent = j.usuario;
-  }catch(e){}
-}
 
 async function carregar(){
   const j = await (await fetch('/api/imoveis')).json();
@@ -164,7 +155,6 @@ async function remover(id, titulo){
 }
 
 $('tituloNovo').addEventListener('keydown', e => { if (e.key === 'Enter') criar(); });
-quemSou();
 carregar();
 </script>
 </body>
