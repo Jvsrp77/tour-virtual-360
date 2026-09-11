@@ -145,6 +145,25 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Metragem estimada
+
+Todo anúncio precisa de m², e hoje esse número sai de trena ou da matrícula. O tour já
+tem o necessário: profundidade por direção, calibrada pela altura da câmera.
+
+Cada pixel vira ponto 3D. Os que estão a ~1,5 m abaixo da câmera são piso. Para cada
+direção, o código caminha do chão para fora e para onde o piso acaba — ali está a parede.
+Isso desenha o contorno do cômodo visto de cima, e a área do polígono é a metragem.
+
+**Uma armadilha que custou uma versão inteira.** A primeira tentativa pegava o ponto mais
+distante que "parecia piso" em cada direção. Resultado: parede a 12 m e **102 m² num
+quarto**. Profundidade estimada erra feio no longe, e um ponto solto virava cômodo inteiro.
+Caminhar até a borda do piso, em vez de pegar o extremo, trouxe para 7,7 m².
+
+**Não é medida oficial.** Profundidade monocular é aproximada, e porta aberta faz o piso
+do corredor entrar na conta — no teste apareceu como um espigão de 4,2 m no contorno. O
+número serve como estimativa rápida e como conferência do que o anúncio declara. O painel
+mostra com `~` na frente, de propósito.
+
 ## Reconstrução do teto
 
 O preenchimento padrão estica a cor de cada coluna para cima. No polo isso vira um leque

@@ -234,6 +234,10 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <div class="dica">360 = você deu a volta completa. Se fotografou só parte do cômodo,
         reduza até as paredes pararem de esticar.</div>
 
+      <h2 style="margin-top:20px">Metragem</h2>
+      <button style="width:100%" id="btArea" onclick="medirArea()">Estimar área</button>
+      <div id="blocoArea"></div>
+
       <h2 style="margin-top:20px">Andar pelo ambiente</h2>
       <div id="blocoProfundidade"></div>
       <div class="dica">Calcula a profundidade de cada ponto do panorama para o
@@ -603,6 +607,27 @@ async function salvarPlanta(){
     body: JSON.stringify({posicoes})});
   await carregar();
   aviso('Planta salva. Abra <b>Caminhar pelo imóvel</b> para percorrer os pontos.', 'ok');
+}
+
+async function medirArea(){
+  const bt = $('btArea');
+  bt.disabled = true; bt.textContent = 'Medindo...';
+  $('blocoArea').innerHTML = '';
+  try{
+    const j = await (await fetch(API + '/cenas/' + cenaAtual + '/area')).json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    const m = j.medida;
+    // rotulado como estimativa de proposito: profundidade monocular e aproximada
+    $('blocoArea').innerHTML = `
+      <div style="background:var(--painel2);border-radius:8px;padding:11px 13px;margin-top:8px">
+        <div style="font-size:22px;font-weight:700;color:var(--acento)">~${m.area_m2} m²</div>
+        <div class="dica" style="margin-top:2px">perímetro ${m.perimetro_m} m ·
+          parede mais próxima ${m.menor_distancia_m} m · mais distante ${m.maior_distancia_m} m</div>
+      </div>
+      <div class="dica">Estimativa a partir da profundidade, não medida oficial.
+        Porta aberta faz o piso do corredor entrar na conta e inflar o número.</div>`;
+  }catch(e){ aviso('Falha ao medir: ' + e, 'erro'); }
+  finally{ bt.disabled = false; bt.textContent = 'Estimar área'; }
 }
 
 function desenharProfundidade(c){
