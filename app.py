@@ -11,6 +11,7 @@ import json
 import uuid
 import shutil
 import zipfile
+import threading
 import traceback
 from datetime import datetime
 
@@ -124,10 +125,39 @@ def _pegar_imovel(endpoint, valores):
     g.imovel = valores.pop("imovel", None)
 
 
+# Uma trava por imovel. Quase toda rota que escreve faz ler-alterar-gravar; sem
+# serializar, duas requisicoes leem a mesma versao e a segunda apaga o que a
+# primeira gravou. Num teste com 40 visitas simultaneas, 27 se perdiam.
+_TRAVAS = {}
+_TRAVA_MESTRA = threading.Lock()
+
+ROTAS_PESADAS = {"api.api_costurar", "api.api_importar_varredura",
+                 "api.api_importar_360", "api.api_gerar_profundidade"}
+
+
+def trava_do_imovel(imovel_id):
+    with _TRAVA_MESTRA:
+        return _TRAVAS.setdefault(imovel_id, threading.RLock())
+
+
 @api.before_request
 def _exigir_imovel():
     if not imovel_existe(g.imovel):
         return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
+    # Rotas pesadas (costura, profundidade) levam dezenas de segundos. Se
+    # segurassem a trava o tempo todo, um visitante ficaria esperando a costura
+    # terminar para registrar a visita — medi 10,7s de espera. Elas travam
+    # sozinhas, so no momento de gravar o tour.json.
+    if request.method != "GET" and request.endpoint not in ROTAS_PESADAS:
+        g.trava = trava_do_imovel(g.imovel)
+        g.trava.acquire()
+
+
+@api.teardown_request
+def _soltar_trava(erro=None):
+    trava = g.pop("trava", None)
+    if trava is not None:
+        trava.release()
 
 TOUR_PADRAO = {
     "titulo": "Imovel sem titulo",
@@ -163,10 +193,21 @@ def carregar_tour(imovel_id=None):
 
 
 def salvar_tour(tour, imovel_id=None):
+    """
+    Grava num arquivo temporario e so entao troca pelo definitivo.
+
+    Escrever por cima do arquivo original nao serve: outra requisicao pode le-lo
+    no meio da gravacao e encontrar JSON pela metade. os.replace troca o arquivo
+    de uma vez, entao quem le sempre pega a versao inteira, velha ou nova.
+    """
     caminho = arq_tour(imovel_id or g.imovel)
     os.makedirs(os.path.dirname(caminho), exist_ok=True)
-    with open(caminho, "w", encoding="utf-8") as f:
+    temporario = caminho + ".tmp"
+    with open(temporario, "w", encoding="utf-8") as f:
         json.dump(tour, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(temporario, caminho)
 
 
 def achar_cena(tour, cena_id):
@@ -333,12 +374,13 @@ def api_costurar():
 
         arquivo, largura, altura, info = stitcher.costurar(temporarios, pasta_cenas())
 
-        tour = carregar_tour()
-        cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
-        tour["cenas"].append(cena)
-        if not tour["cena_inicial"]:
-            tour["cena_inicial"] = cena["id"]
-        salvar_tour(tour)
+        with trava_do_imovel(g.imovel):
+            tour = carregar_tour()
+            cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
+            tour["cenas"].append(cena)
+            if not tour["cena_inicial"]:
+                tour["cena_inicial"] = cena["id"]
+            salvar_tour(tour)
 
         avisos = []
         if not info["fechada"]:
@@ -374,8 +416,7 @@ def api_importar_varredura():
     if not arquivos:
         return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
 
-    tour = carregar_tour()
-    criadas, avisos = [], []
+    criadas, avisos, prontas = [], [], []
     try:
         for f in arquivos:
             ext = os.path.splitext(f.filename)[1].lower() or ".jpg"
@@ -385,18 +426,20 @@ def api_importar_varredura():
             arquivo, largura, altura, info = stitcher.importar_varredura(
                 temp, pasta_cenas(), haov)
             rotulo = nome_base or os.path.splitext(f.filename)[0][:40] or "Ambiente"
-            cena = montar_cena(rotulo, arquivo, largura, altura, "varredura", info)
-            tour["cenas"].append(cena)
-            criadas.append(cena)
+            prontas.append(montar_cena(rotulo, arquivo, largura, altura, "varredura", info))
 
             avisos.append(
                 "Varredura convertida: %.0f graus na horizontal e %.0f na vertical. "
                 "Teto e chão foram preenchidos por aproximação — o modo Panorama do "
                 "celular não alcança essas partes." % (info["haov"], info["fov"]))
 
-        if criadas and not tour["cena_inicial"]:
-            tour["cena_inicial"] = criadas[0]["id"]
-        salvar_tour(tour)
+        with trava_do_imovel(g.imovel):
+            tour = carregar_tour()
+            tour["cenas"].extend(prontas)
+            criadas = prontas
+            if criadas and not tour["cena_inicial"]:
+                tour["cena_inicial"] = criadas[0]["id"]
+            salvar_tour(tour)
         return jsonify({"ok": True, "cenas": criadas, "avisos": avisos})
     except stitcher.ErroCostura as e:
         return jsonify({"ok": False, "erro": str(e)}), 422
@@ -413,7 +456,6 @@ def api_importar_360():
     if not arquivos:
         return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
 
-    tour = carregar_tour()
     criadas, avisos = [], []
     try:
         for f in arquivos:
@@ -428,12 +470,14 @@ def api_importar_360():
                 avisos.append(
                     "A foto %s nao esta na proporcao 2:1 (esta %dx%d). Vai abrir como "
                     "foto parcial, sem giro completo." % (rotulo, largura, altura))
-            tour["cenas"].append(cena)
             criadas.append(cena)
 
-        if criadas and not tour["cena_inicial"]:
-            tour["cena_inicial"] = criadas[0]["id"]
-        salvar_tour(tour)
+        with trava_do_imovel(g.imovel):
+            tour = carregar_tour()
+            tour["cenas"].extend(criadas)
+            if criadas and not tour["cena_inicial"]:
+                tour["cena_inicial"] = criadas[0]["id"]
+            salvar_tour(tour)
         return jsonify({"ok": True, "cenas": criadas, "avisos": avisos})
     except Exception as e:
         traceback.print_exc()
@@ -535,9 +579,14 @@ def api_gerar_profundidade(cena_id):
         if ok:
             buf.tofile(os.path.join(pasta_cenas(), nome_previa))
 
-        cena["profundidade"] = nome
-        cena["previa_profundidade"] = nome_previa
-        salvar_tour(tour)
+        with trava_do_imovel(g.imovel):
+            tour = carregar_tour()          # relê: pode ter mudado durante o calculo
+            cena = achar_cena(tour, cena_id)
+            if not cena:
+                return jsonify({"ok": False, "erro": "Cena removida durante o cálculo."}), 404
+            cena["profundidade"] = nome
+            cena["previa_profundidade"] = nome_previa
+            salvar_tour(tour)
         return jsonify({"ok": True, "cena": cena})
     except profundidade.ErroProfundidade as e:
         return jsonify({"ok": False, "erro": str(e)}), 422
@@ -741,6 +790,9 @@ if __name__ == "__main__":
         print("  nenhum imovel encontrado: criei um vazio para comecar")
     print("")
     print("  Tour Virtual rodando")
-    print("  Imoveis: http://localhost:5000/imoveis")
+    print("  Imoveis: http://127.0.0.1:5000/imoveis")
     print("")
+    # 127.0.0.1 de proposito, e nao localhost: no Windows o nome resolve para
+    # IPv6 (::1) primeiro, o servidor so escuta IPv4, e cada requisicao espera
+    # o timeout antes de tentar o IPv4 — medi 2 segundos por chamada.
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

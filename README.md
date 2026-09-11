@@ -144,6 +144,33 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Escrita concorrente
+
+Quase toda rota que escreve faz ler-alterar-gravar no `tour.json`. Sem serializar, duas
+requisições leem a mesma versão e a segunda apaga o que a primeira gravou. **Num teste
+com 40 visitas simultâneas, 27 se perdiam** — e várias devolviam HTTP 500, porque outra
+thread lia o arquivo no meio da gravação e encontrava JSON pela metade.
+
+Basta o corretor mandar o link num grupo de WhatsApp para isso acontecer.
+
+Duas correções:
+
+- **Gravação atômica.** Escreve num arquivo temporário e troca com `os.replace`. Quem lê
+  sempre pega a versão inteira, velha ou nova — nunca metade.
+- **Uma trava por imóvel**, para requisições que escrevem. Leituras seguem em paralelo.
+
+As rotas pesadas (costura, profundidade) **não** seguram a trava enquanto processam, só
+no momento de gravar. Segurando o tempo todo, um visitante esperava 10,7 s para registrar
+a visita. Depois da correção: 26 ms normalmente, 151 ms no pior caso durante uma costura.
+
+Depois: 120 escritas simultâneas, 120 gravadas, zero erros.
+
+## Use 127.0.0.1, não localhost
+
+No Windows, `localhost` resolve para IPv6 (`::1`) primeiro. O servidor escuta só IPv4,
+então cada requisição espera o timeout antes de tentar o endereço certo — medi **2
+segundos por chamada**. Navegadores disfarçam isso; scripts e ferramentas, não.
+
 ## Métricas de visita
 
 O tour mede sozinho quanto tempo a visita durou e quanto tempo o visitante passou em
