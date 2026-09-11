@@ -256,6 +256,96 @@ def gerar_miniatura(imovel_id, arquivo):
         return ""
 
 
+LADO_ESBOCO = (960, 540)
+
+
+def gerar_esboco(imovel_id, cena):
+    """
+    Poster da vista inicial: a primeira coisa que o visitante enxerga.
+
+    O panorama tem 1,3 MB e leva quase 7 s em 4G fraco — tempo que o visitante
+    passa olhando "Carregando o tour...". O esboco tem uns 30 KB, chega em 0,2 s
+    e ja mostra o comodo no enquadramento exato em que o panorama vai abrir.
+
+    Tem de ser um recorte em perspectiva, nao o equirretangular reduzido: o
+    Pannellum desenha o preview como imagem de fundo chapada (background-size:
+    cover), entao um equirretangular apareceria esmagado.
+    """
+    origem = os.path.join(pasta_cenas(imovel_id), cena.get("arquivo", ""))
+    if not cena.get("arquivo") or not os.path.exists(origem):
+        return ""
+    try:
+        img = cv2.imdecode(np.fromfile(origem, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            return ""
+        H, W = img.shape[:2]
+        vista = cena.get("vista_inicial") or {}
+        larg, alt = LADO_ESBOCO
+        hfov = max(30.0, min(120.0, float(vista.get("hfov") or 100)))
+        f = (larg / 2.0) / np.tan(np.radians(hfov) / 2.0)
+
+        eixo_x = np.arange(larg, dtype=np.float32) - larg / 2.0
+        eixo_y = np.arange(alt, dtype=np.float32) - alt / 2.0
+        ux, uy = np.meshgrid(eixo_x, eixo_y)
+        d = np.stack([ux, uy, np.full_like(ux, f)], -1)
+        d /= np.linalg.norm(d, axis=-1, keepdims=True)
+
+        # pitch positivo olha para cima; +y da imagem aponta para baixo
+        p = np.radians(float(vista.get("pitch") or 0))
+        y = np.radians(float(vista.get("yaw") or 0))
+        Rx = np.array([[1, 0, 0],
+                       [0, np.cos(p), -np.sin(p)],
+                       [0, np.sin(p), np.cos(p)]])
+        Ry = np.array([[np.cos(y), 0, np.sin(y)],
+                       [0, 1, 0],
+                       [-np.sin(y), 0, np.cos(y)]])
+        d = d @ (Ry @ Rx).T
+
+        lon = np.degrees(np.arctan2(d[..., 0], d[..., 2]))
+        lat = np.degrees(np.arcsin(np.clip(d[..., 1], -1, 1)))
+        # cena parcial ocupa so haov x vaov da esfera, centrada em (0, 0)
+        haov = float(cena.get("haov") or 360.0) or 360.0
+        vaov = float(cena.get("vaov") or 180.0) or 180.0
+        mx = ((lon / haov) + 0.5) * W
+        my = ((lat / vaov) + 0.5) * H
+        borda = cv2.BORDER_WRAP if haov >= 359.0 else cv2.BORDER_REPLICATE
+        recorte = cv2.remap(img, mx.astype(np.float32), my.astype(np.float32),
+                            cv2.INTER_AREA, borderMode=borda)
+
+        nome = "esboco_%s.jpg" % cena["id"]
+        ok, buf = cv2.imencode(".jpg", recorte, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ok:
+            return ""
+        buf.tofile(os.path.join(pasta_cenas(imovel_id), nome))
+        return nome
+    except Exception:
+        traceback.print_exc()
+        return ""
+
+
+def completar_esbocos():
+    """Cria o poster de abertura das cenas que ainda nao tem."""
+    feitos = 0
+    for iid in os.listdir(PASTA_IMOVEIS):
+        if not imovel_existe(iid):
+            continue
+        tour = carregar_tour(iid)
+        mudou = False
+        for cena in tour["cenas"]:
+            if cena.get("esboco") and os.path.exists(
+                    os.path.join(pasta_cenas(iid), cena["esboco"])):
+                continue
+            nome = gerar_esboco(iid, cena)
+            if nome:
+                cena["esboco"] = nome
+                mudou = True
+                feitos += 1
+        if mudou:
+            salvar_tour(tour, iid)
+    if feitos:
+        print("  %d esboco(s) de abertura gerado(s)" % feitos)
+
+
 def completar_miniaturas():
     """Cria as miniaturas que faltam nos imoveis ja existentes."""
     feitas = 0
@@ -300,7 +390,8 @@ def limpar_cenas_orfas():
         if tour.get("logo"):
             usados.add(tour["logo"])
         for cena in tour["cenas"]:
-            for chave in ("arquivo", "profundidade", "previa_profundidade", "miniatura"):
+            for chave in ("arquivo", "profundidade", "previa_profundidade",
+                          "miniatura", "esboco"):
                 if cena.get(chave):
                     usados.add(cena[chave])
             if cena.get("arquivo"):
@@ -381,6 +472,7 @@ def montar_cena(nome, arquivo, largura, altura, origem, info=None,
         "hotspots": [],
         "miniatura": gerar_miniatura(imovel_id or g.imovel, arquivo),
     }
+    cena["esboco"] = gerar_esboco(imovel_id or g.imovel, cena)
     if info:
         cena["captura"] = {
             "fileiras": info["fileiras"],
@@ -685,6 +777,9 @@ def api_atualizar_cena(cena_id):
     for campo in ("nome", "hotspots", "vista_inicial", "haov", "vaov", "posicao"):
         if campo in dados:
             cena[campo] = dados[campo]
+    # o poster de abertura e um recorte da vista inicial: se ela mudou, refaz
+    if {"vista_inicial", "haov", "vaov"} & set(dados):
+        cena["esboco"] = gerar_esboco(g.imovel, cena)
     salvar_tour(tour)
     return jsonify({"ok": True, "cena": cena})
 
@@ -716,7 +811,8 @@ def api_remover_cena(cena_id):
         return jsonify({"ok": False, "erro": "Cena nao encontrada."}), 404
 
     # o panorama e tambem o mapa de profundidade e a previa, senao ficam orfaos
-    for chave in ("arquivo", "profundidade", "previa_profundidade", "miniatura"):
+    for chave in ("arquivo", "profundidade", "previa_profundidade",
+                  "miniatura", "esboco"):
         if chave == "arquivo":
             orig = os.path.join(pasta_cenas(), "orig_" + cena["arquivo"])
             if os.path.exists(orig):
@@ -970,6 +1066,8 @@ def api_marca_chao():
                     shutil.copyfile(original, atual)
                     os.remove(original)
                     cena.pop("marca_chao", None)
+                    cena["miniatura"] = gerar_miniatura(g.imovel, cena["arquivo"])
+                    cena["esboco"] = gerar_esboco(g.imovel, cena)
                     alteradas += 1
                 continue
 
@@ -983,6 +1081,7 @@ def api_marca_chao():
             buf.tofile(atual)
             cena["marca_chao"] = {"raio": raio}
             cena["miniatura"] = gerar_miniatura(g.imovel, cena["arquivo"])
+            cena["esboco"] = gerar_esboco(g.imovel, cena)
             alteradas += 1
         except marca.ErroMarca as e:
             erros.append("%s: %s" % (cena["nome"], e))
@@ -1090,8 +1189,9 @@ def api_exportar():
                 z.write(caminho, "scenes/%s" % tour["logo"])
 
         for cena in tour["cenas"]:
-            # o panorama e, quando existir, o mapa de profundidade que permite andar
-            for chave in ("arquivo", "profundidade", "miniatura"):
+            # o panorama, o poster de abertura, a miniatura do menu e — quando
+            # existir — o mapa de profundidade que permite andar
+            for chave in ("arquivo", "profundidade", "miniatura", "esboco"):
                 nome = cena.get(chave)
                 if not nome:
                     continue
@@ -1121,6 +1221,7 @@ tarefas.iniciar()
 if __name__ == "__main__":
     migrar_formato_antigo()
     completar_miniaturas()
+    completar_esbocos()
     limpar_uploads_orfaos()
     limpar_cenas_orfas()
     if not listar_imoveis():

@@ -61,6 +61,17 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
     border-top-color:var(--acento);border-radius:50%;animation:girar .9s linear infinite}
   @keyframes girar{to{transform:rotate(360deg)}}
 
+  /* o esboco ja esta na tela; isto so avisa que a versao nitida vem vindo */
+  .afinando{position:absolute;left:50%;transform:translateX(-50%);bottom:104px;
+    z-index:12;display:none;align-items:center;gap:8px;pointer-events:none;
+    background:rgba(14,16,20,.82);backdrop-filter:blur(10px);color:#d6dbe2;
+    border:1px solid rgba(255,255,255,.12);border-radius:99px;
+    padding:6px 13px;font-size:11.5px}
+  .afinando .aro{width:12px;height:12px;border-width:2px}
+  /* o Pannellum tem a propria caixa "Loading..." — ela ficaria por cima do
+     esboco dizendo que nao ha nada na tela, justamente quando ja ha */
+  .pnlm-load-box{display:none !important}
+
   .lead{position:absolute;inset:0;z-index:30;display:none;align-items:center;
     justify-content:center;background:rgba(0,0,0,.68);backdrop-filter:blur(4px);padding:20px}
   .lead .caixa{background:#181b21;border:1px solid rgba(255,255,255,.14);border-radius:14px;
@@ -106,6 +117,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 <body>
 
 <div id="pano"></div>
+
+<div class="afinando" id="afinando"><div class="aro"></div>carregando em alta definição</div>
 
 <div class="carregando" id="carregando">
   <div class="aro"></div>
@@ -195,6 +208,9 @@ function montarCenas(){
     cenas[c.id] = {
       type: 'equirectangular',
       panorama: CENAS + c.arquivo,
+      // poster de 30 KB no enquadramento de abertura: o comodo aparece em
+      // ~0,2 s enquanto o panorama de 1,3 MB ainda esta vindo pela rede.
+      preview: c.esboco ? CENAS + c.esboco : undefined,
       haov: c.haov, vaov: c.vaov, vOffset: 0,
       yaw: c.vista_inicial.yaw, pitch: c.vista_inicial.pitch, hfov: c.vista_inicial.hfov,
       compass: c.panorama_completo,
@@ -222,12 +238,34 @@ function montarCenas(){
   });
 
   atual = inicial;
-  visor.on('scenechange', id => { contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar(); });
-  visor.on('load', () => { $('carregando').style.display = 'none'; });
+
+  // Com esboco, o comodo aparece assim que o Pannellum monta o poster: segurar o
+  // overlay ate o panorama inteiro chegar desperdicaria os 7 s que ele economiza.
+  if (temEsboco(inicial)) mostrarEsboco();
+
+  visor.on('scenechange', id => {
+    contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar();
+    if (temEsboco(id)) mostrarEsboco();
+  });
+  visor.on('load', () => {
+    $('carregando').style.display = 'none';
+    $('afinando').style.display = 'none';
+  });
   visor.on('error', msg => {
+    $('afinando').style.display = 'none';
     $('carregando').style.display = 'flex';
     $('carregando').innerHTML = '<div class="dica-vazio">Erro ao carregar a imagem: ' + msg + '</div>';
   });
+}
+
+function temEsboco(id){
+  const c = tour.cenas.find(x => x.id === id);
+  return !!(c && c.esboco);
+}
+
+function mostrarEsboco(){
+  $('carregando').style.display = 'none';
+  $('afinando').style.display = 'flex';
 }
 
 function desenharMenu(){

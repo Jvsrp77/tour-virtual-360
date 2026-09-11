@@ -145,6 +145,35 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
+## Abertura instantânea
+
+O panorama tem 1,3 MB. Em 4G fraco são ~7 s olhando *"Carregando o tour..."* antes de
+ver qualquer coisa — e quem procura imóvel no celular não espera 7 s.
+
+Cada cena guarda um **esboço** de ~40 KB: um recorte em perspectiva no enquadramento
+exato em que o tour vai abrir. O Pannellum o exibe como pôster enquanto o panorama
+vem pela rede.
+
+| Rede | Antes | Agora |
+|---|---|---|
+| 4G típico (6 Mbps) | 1,8 s | 0,2 s |
+| 4G fraco (1,5 Mbps) | 7,1 s | 0,6 s |
+| 3G (0,7 Mbps) | 15,3 s | 1,3 s |
+
+91% menos bytes até a primeira imagem, ao custo de 40 KB em disco por ambiente (3% do
+panorama).
+
+**Tem de ser perspectiva, não equirretangular reduzido.** O Pannellum desenha o
+`preview` como imagem de fundo chapada (`background-size: cover`), não sobre a esfera —
+um equirretangular apareceria esmagado. O recorte é refeito sempre que a vista inicial,
+a cobertura ou o panorama mudam.
+
+Dois detalhes sem os quais o ganho não aparecia na tela: o overlay de carregamento
+cobria o esboço até o panorama inteiro chegar (agora sai assim que o pôster monta, e no
+lugar dele fica uma pílula discreta *"carregando em alta definição"*), e a caixa
+*"Loading..."* do próprio Pannellum ficava por cima anunciando que não havia nada na
+tela — justamente quando já havia.
+
 ## Metragem
 
 Botão **Medir o ambiente**: estima comprimento, largura e m² a partir do mapa de
