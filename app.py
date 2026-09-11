@@ -26,7 +26,6 @@ import stitcher
 import cena_demo
 import profundidade
 import tarefas
-import classificador
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
@@ -311,7 +310,8 @@ def limpar_uploads_orfaos():
         print("  faxina: %.0f MB de fotos originais orfas apagados" % (liberado / 1e6))
 
 
-def montar_cena(nome, arquivo, largura, altura, origem, info=None):
+def montar_cena(nome, arquivo, largura, altura, origem, info=None,
+                imovel_id=None):
     """
     info vem da costura e traz a cobertura medida a partir da orientacao das fotos.
     Sem ele (foto 360 importada ou cena demo) a cobertura e deduzida da proporcao.
@@ -337,7 +337,7 @@ def montar_cena(nome, arquivo, largura, altura, origem, info=None):
         "vaov": round(vaov, 2),
         "vista_inicial": {"yaw": 0, "pitch": 0, "hfov": 100},
         "hotspots": [],
-        "miniatura": gerar_miniatura(g.imovel, arquivo),
+        "miniatura": gerar_miniatura(imovel_id or g.imovel, arquivo),
     }
     if info:
         cena["captura"] = {
@@ -493,7 +493,8 @@ def api_costurar():
 
             with trava_do_imovel(imovel):
                 tour = carregar_tour(imovel)
-                cena = montar_cena(nome, arquivo, largura, altura, "costura", info)
+                cena = montar_cena(nome, arquivo, largura, altura, "costura", info,
+                                   imovel_id=imovel)
                 cena["lote"] = nome_lote      # para apagar as originais junto com a cena
                 tour["cenas"].append(cena)
                 if not tour["cena_inicial"]:
@@ -506,6 +507,13 @@ def api_costurar():
                     "Você cobriu %.0f graus, com um vão de %.0f graus sem foto. O "
                     "ambiente abre como panorama parcial. Para virar 360 completo, "
                     "feche a volta." % (info["haov"], info["maior_buraco"]))
+            exp = info.get("exposicao", {})
+            if exp.get("antes") and exp.get("depois"):
+                ganho = exp["antes"]["sombra_esmagada"] - exp["depois"]["sombra_esmagada"]
+                if ganho > 0.5:
+                    avisos.append(
+                        "Exposição corrigida: detalhe recuperado em %.1f%% da imagem "
+                        "que estava escura demais." % ganho)
             if info["fileiras"] == 1:
                 avisos.append(
                     "Captura em 1 fileira: teto e chão foram preenchidos por "
@@ -544,7 +552,8 @@ def api_importar_varredura():
             arquivo, largura, altura, info = stitcher.importar_varredura(
                 temp, pasta_cenas(), haov)
             rotulo = nome_base or os.path.splitext(f.filename)[0][:40] or "Ambiente"
-            prontas.append(montar_cena(rotulo, arquivo, largura, altura, "varredura", info))
+            prontas.append(montar_cena(rotulo, arquivo, largura, altura, "varredura",
+                                       info, imovel_id=g.imovel))
 
             avisos.append(
                 "Varredura convertida: %.0f graus na horizontal e %.0f na vertical. "
@@ -677,30 +686,6 @@ def api_remover_cena(cena_id):
         tour["cena_inicial"] = tour["cenas"][0]["id"] if tour["cenas"] else None
     salvar_tour(tour)
     return jsonify({"ok": True})
-
-
-@api.route("/cenas/<cena_id>/sugerir-nome", methods=["GET"])
-def api_sugerir_nome(cena_id):
-    """
-    Sugere o comodo a partir da imagem. Sugere, nao decide: medindo num quarto
-    que tambem serve de escritorio, a vista da cama deu "Quarto" com 55% e a das
-    escrivaninhas deu "Escritorio" com 99%. Com essa margem, renomear sozinho
-    erraria o rotulo de anuncios sem ninguem perceber.
-    """
-    cena = achar_cena(carregar_tour(), cena_id)
-    if not cena:
-        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
-    if not classificador.disponivel():
-        return jsonify({"ok": False, "erro":
-                        "O reconhecimento de ambiente não está instalado. "
-                        "Rode 'python baixar_modelo.py' uma vez."}), 422
-    try:
-        resultado = classificador.identificar(
-            os.path.join(pasta_cenas(), cena["arquivo"]))
-    except classificador.ErroClassificador as e:
-        return jsonify({"ok": False, "erro": str(e)}), 422
-    return jsonify({"ok": True, "sugestoes": [
-        {"nome": n, "confianca": round(p * 100, 1)} for n, p in resultado[:3]]})
 
 
 @api.route("/cenas/<cena_id>/profundidade", methods=["POST"])

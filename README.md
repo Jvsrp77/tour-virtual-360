@@ -145,25 +145,21 @@ O modelo não vem no repositório. Rode uma vez:
 python baixar_modelo.py
 ```
 
-## Reconhecimento do ambiente
+## Correção de exposição
 
-O botão **Sugerir pela imagem** olha o panorama e propõe o cômodo: Quarto, Sala,
-Cozinha, Banheiro, Varanda, Área de serviço, Garagem, Corredor, Escritório ou Área
-externa. Um clique preenche o nome. Roda local (CLIP quantizado, ~85 MB), sem custo
-por uso e sem internet depois de instalado.
+Fotografar cômodo tem um problema constante: janela clara contra parede escura. Medindo
+as 16 fotos de um quarto real, o brilho variava de 109,6 a 149,2 entre elas — 40 níveis.
 
-O panorama não vai direto ao modelo: equirretangular distorce demais. São recortadas
-quatro vistas em perspectiva ao redor do horizonte e as pontuações somadas.
+O OpenCV já compensa esse ganho entre fotos, e medi que ele faz bem: o brilho médio do
+panorama sai uniforme. O que sobrava era **perda de detalhe nas sombras**: 11% dos pixels
+esmagados abaixo de 25, sem informação recuperável.
 
-**Sugere, não decide.** Medindo num quarto que também serve de escritório, a vista da
-cama deu *Quarto 55%* e a das escrivaninhas deu *Escritório 99%* — e a segunda dominou
-o resultado final. Não estava errado: o cômodo tem duas escrivaninhas completas. Mas
-com essa margem, renomear sozinho rotularia anúncios errado sem ninguém perceber. Por
-isso aparecem as três melhores opções com a confiança de cada uma.
+A correção é **local, não global**. Achatar o brilho do panorama inteiro destruiria a
+iluminação real — a parede da janela é mesmo mais clara que o canto. Com CLAHE no canal
+de luminância, a sombra esmagada caiu para 7,2% e o estouro ficou igual (0,02% → 0,08%).
 
-Os textos das categorias são sempre os mesmos, então ficam pré-calculados em
-`modelos/clip_rotulos.npz`. Em uso, só o codificador de imagem roda; o de texto e o
-tokenizador servem apenas para gerar esse arquivo uma vez.
+Limite 4,0 foi testado e **piorou**: 15,4% de sombra esmagada, por redistribuir demais.
+Ficou 2,5 com grade 16x8.
 
 ## Miniaturas
 
