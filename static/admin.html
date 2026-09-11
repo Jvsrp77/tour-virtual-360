@@ -220,6 +220,10 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <h2>Ambiente selecionado</h2>
       <label>Nome</label>
       <input type="text" id="nomeCena" onchange="renomear()">
+      <button style="width:100%;margin-top:7px" id="btSugerir" onclick="sugerirNome()">
+        Sugerir pela imagem
+      </button>
+      <div id="sugestoes"></div>
       <div class="linha" style="margin-top:10px">
         <button onclick="definirInicial()">Cena de abertura</button>
         <button class="perigo" onclick="excluirCena()">Excluir</button>
@@ -768,6 +772,30 @@ async function salvarVista(){
   c.vista_inicial = {yaw: visor.getYaw(), pitch: visor.getPitch(), hfov: visor.getHfov()};
   await gravarCena(c);
   aviso('Vista de abertura salva. O tour vai abrir exatamente neste ângulo.', 'ok');
+}
+
+async function sugerirNome(){
+  const bt = $('btSugerir');
+  bt.disabled = true; bt.textContent = 'Analisando...';
+  $('sugestoes').innerHTML = '';
+  try{
+    const j = await (await fetch(API + '/cenas/' + cenaAtual + '/sugerir-nome')).json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    // sugestao, nao decisao: a confianca aparece para o corretor julgar
+    $('sugestoes').innerHTML = '<div class="dica">Clique para usar:</div>'
+      + '<div class="linha" style="margin-top:6px">'
+      + j.sugestoes.map(sg => `<button onclick="usarNome('${sg.nome.replace(/'/g, "\'")}')"
+            style="font-size:12px;padding:6px 8px">${sg.nome}<br>
+            <span style="color:#9aa2ad;font-size:10.5px">${sg.confianca}%</span></button>`).join('')
+      + '</div>';
+  }catch(e){ aviso('Falha ao analisar: ' + e, 'erro'); }
+  finally{ bt.disabled = false; bt.textContent = 'Sugerir pela imagem'; }
+}
+
+async function usarNome(nome){
+  $('nomeCena').value = nome;
+  $('sugestoes').innerHTML = '';
+  await renomear();
 }
 
 async function renomear(){

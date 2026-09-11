@@ -11,8 +11,9 @@ navegável. Roda inteiro na máquina local, sem depender de Kuula, CloudPano ou 
 git clone https://github.com/Jvsrp77/tour-virtual-360.git
 ```
 
-O modelo de profundidade (94 MB) não vem no repositório. Depois de clonar, rode
-`python baixar_modelo.py` uma vez — sem ele tudo funciona, menos o modo "andar".
+Os modelos (~240 MB) não vêm no repositório. Depois de clonar, rode
+`python baixar_modelo.py` uma vez — sem eles tudo funciona, menos o modo "andar" e o
+reconhecimento de ambiente.
 
 ## Como rodar
 
@@ -143,6 +144,26 @@ O modelo não vem no repositório. Rode uma vez:
 ```bash
 python baixar_modelo.py
 ```
+
+## Reconhecimento do ambiente
+
+O botão **Sugerir pela imagem** olha o panorama e propõe o cômodo: Quarto, Sala,
+Cozinha, Banheiro, Varanda, Área de serviço, Garagem, Corredor, Escritório ou Área
+externa. Um clique preenche o nome. Roda local (CLIP quantizado, ~85 MB), sem custo
+por uso e sem internet depois de instalado.
+
+O panorama não vai direto ao modelo: equirretangular distorce demais. São recortadas
+quatro vistas em perspectiva ao redor do horizonte e as pontuações somadas.
+
+**Sugere, não decide.** Medindo num quarto que também serve de escritório, a vista da
+cama deu *Quarto 55%* e a das escrivaninhas deu *Escritório 99%* — e a segunda dominou
+o resultado final. Não estava errado: o cômodo tem duas escrivaninhas completas. Mas
+com essa margem, renomear sozinho rotularia anúncios errado sem ninguém perceber. Por
+isso aparecem as três melhores opções com a confiança de cada uma.
+
+Os textos das categorias são sempre os mesmos, então ficam pré-calculados em
+`modelos/clip_rotulos.npz`. Em uso, só o codificador de imagem roda; o de texto e o
+tokenizador servem apenas para gerar esse arquivo uma vez.
 
 ## Miniaturas
 

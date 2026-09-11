@@ -10,10 +10,18 @@ import os
 import sys
 import urllib.request
 
-URL = ("https://huggingface.co/onnx-community/depth-anything-v2-small"
-       "/resolve/main/onnx/model.onnx")
-DESTINO = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "modelos", "depth.onnx")
+PASTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modelos")
+
+CLIP = "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main"
+ARQUIVOS = [
+    ("depth.onnx", "https://huggingface.co/onnx-community/depth-anything-v2-small"
+                   "/resolve/main/onnx/model.onnx", 94),
+    ("clip_visao.onnx", CLIP + "/onnx/vision_model_quantized.onnx", 85),
+    ("clip_texto.onnx", CLIP + "/onnx/text_model_quantized.onnx", 62),
+    ("clip_vocab.json", CLIP + "/vocab.json", 1),
+    ("clip_merges.txt", CLIP + "/merges.txt", 1),
+]
+DESTINO = os.path.join(PASTA, "depth.onnx")
 
 
 def progresso(blocos, tamanho_bloco, total):

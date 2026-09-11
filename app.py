@@ -26,6 +26,7 @@ import stitcher
 import cena_demo
 import profundidade
 import tarefas
+import classificador
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 PASTA_DADOS = os.path.join(RAIZ, "data")
@@ -676,6 +677,30 @@ def api_remover_cena(cena_id):
         tour["cena_inicial"] = tour["cenas"][0]["id"] if tour["cenas"] else None
     salvar_tour(tour)
     return jsonify({"ok": True})
+
+
+@api.route("/cenas/<cena_id>/sugerir-nome", methods=["GET"])
+def api_sugerir_nome(cena_id):
+    """
+    Sugere o comodo a partir da imagem. Sugere, nao decide: medindo num quarto
+    que tambem serve de escritorio, a vista da cama deu "Quarto" com 55% e a das
+    escrivaninhas deu "Escritorio" com 99%. Com essa margem, renomear sozinho
+    erraria o rotulo de anuncios sem ninguem perceber.
+    """
+    cena = achar_cena(carregar_tour(), cena_id)
+    if not cena:
+        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
+    if not classificador.disponivel():
+        return jsonify({"ok": False, "erro":
+                        "O reconhecimento de ambiente não está instalado. "
+                        "Rode 'python baixar_modelo.py' uma vez."}), 422
+    try:
+        resultado = classificador.identificar(
+            os.path.join(pasta_cenas(), cena["arquivo"]))
+    except classificador.ErroClassificador as e:
+        return jsonify({"ok": False, "erro": str(e)}), 422
+    return jsonify({"ok": True, "sugestoes": [
+        {"nome": n, "confianca": round(p * 100, 1)} for n, p in resultado[:3]]})
 
 
 @api.route("/cenas/<cena_id>/profundidade", methods=["POST"])
