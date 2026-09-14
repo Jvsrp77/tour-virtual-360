@@ -23,10 +23,30 @@ caminho de crescimento e mais thread e mais CPU, nao mais processo.
 """
 import os
 import sys
+import threading
+import time
+import traceback
 
 from waitress import serve
 
 import app as aplicacao
+import backup
+
+
+def _backup_periodico(horas):
+    """
+    Copia de seguranca sozinha, uma vez por dia.
+
+    Backup que depende de alguem lembrar de rodar nao e backup. Roda na propria
+    thread e engole qualquer falha: disco cheio na hora da copia nao pode
+    derrubar o site.
+    """
+    while True:
+        try:
+            backup.criar(silencioso=True)
+        except Exception:
+            traceback.print_exc()
+        time.sleep(horas * 3600)
 
 
 def main():
@@ -46,6 +66,15 @@ def main():
     else:
         print("  SEM proxy reverso: o cookie de sessao vai sem a marca de seguro.")
         print("  Publique atras de HTTPS e ligue TOUR_ATRAS_DE_PROXY=1.")
+    horas = float(os.environ.get("TOUR_BACKUP_HORAS", "24"))
+    if horas > 0:
+        threading.Thread(target=_backup_periodico, args=(horas,),
+                         daemon=True, name="backup").start()
+        print("  backup automatico a cada %.0fh, guardando %d copias em %s"
+              % (horas, backup.GUARDAR, backup.PASTA_BACKUPS))
+    else:
+        print("  backup automatico DESLIGADO (TOUR_BACKUP_HORAS=0)")
+
     print("")
     sys.stdout.flush()
 

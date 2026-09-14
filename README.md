@@ -209,6 +209,56 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Backup
+
+São 42 MB numa pasta: tours, panoramas, mapas de profundidade, contas e os contatos
+capturados. Um disco que falha levava tudo, e **não havia de onde refazer** — as fotos
+originais são apagadas depois que a cena é montada, e profundidade e camada de fundo
+custam minutos de CPU cada.
+
+```bash
+python backup.py criar
+python backup.py listar
+python backup.py restaurar tour-2026-09-14-1520.zip
+```
+
+Em produção roda sozinho, uma vez por dia, guardando as 7 cópias mais recentes
+(`TOUR_BACKUP_HORAS`, `TOUR_BACKUPS_GUARDAR`). Backup que depende de alguém lembrar de
+rodar não é backup.
+
+**Monte `backups/` num disco separado.** Cópia no mesmo disco dos dados não protege contra
+o caso que mais importa: o disco falhar.
+
+### Consistência sem travar o servidor
+
+O backup roda fora do processo do servidor, então não pega as travas dele — e não precisa.
+O `tour.json` é gravado com `os.replace`, que troca o arquivo inteiro de uma vez: quem lê
+pega a versão antiga ou a nova, nunca um meio-termo. As imagens são escritas uma vez e
+nunca alteradas.
+
+O caso que sobra é uma cena criada **no meio** da cópia: o `tour.json` pode entrar sem ela,
+ou a imagem entrar sem constar no `tour.json`. Nenhum dos dois corrompe nada — no pior caso
+a cena não aparece, e o próprio servidor limpa arquivos órfãos no arranque.
+
+O ZIP só vira backup quando está inteiro: grava como `.parcial` e renomeia no fim. Uma
+queda de energia no meio deixa lixo, não uma cópia falsa que parece boa.
+
+### A restauração foi testada, não só escrita
+
+Backup que nunca foi restaurado é esperança, não cópia de segurança. O teste, num sandbox:
+copiar os dados, fazer o backup, **apagar tudo**, restaurar e comparar SHA-256 arquivo por
+arquivo.
+
+| | |
+|---|---|
+| Arquivos no original | 9 |
+| Restaurados | 9 |
+| Faltando / diferentes / sobrando | nenhum |
+
+Restaurar também não é caminho sem volta: o `data/` atual é movido para
+`data-antes-de-restaurar-<data>` antes de ser substituído, para o caso de alguém restaurar
+a cópia errada.
+
 ## Produção
 
 O `app.run()` do Flask é o servidor de desenvolvimento — o próprio Flask avisa para não

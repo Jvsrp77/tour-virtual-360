@@ -17,11 +17,16 @@ services:
       # como seguro e para registrar o IP real do visitante, nao o do proxy
       TOUR_ATRAS_DE_PROXY: "1"
       TOUR_THREADS: "16"
+      TOUR_BACKUP_HORAS: "24"       # 0 desliga o backup automatico
+      TOUR_BACKUPS_GUARDAR: "7"
     volumes:
       # tours, panoramas, contas e leads. E o que precisa de backup.
       - ./data:/app/data
       # 302 MB de modelos, baixados uma vez e reaproveitados entre versoes
       - ./modelos:/app/modelos
+      # copias diarias. Num servidor de verdade, monte aqui um disco SEPARADO:
+      # backup no mesmo disco dos dados nao protege contra o disco falhar.
+      - ./backups:/app/backups
     expose:
       - "8000"
 

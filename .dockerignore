@@ -3,3 +3,4 @@ modelos/
 .git/
 __pycache__/
 *.pyc
+backups/
