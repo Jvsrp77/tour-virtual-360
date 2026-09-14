@@ -250,8 +250,14 @@ class TestLeads(Base):
 
 class TestConcorrencia(Base):
     """
-    40 escritas simultaneas perdiam 27 antes das travas por imovel existirem:
-    duas requisicoes liam o mesmo tour.json e a segunda apagava a primeira.
+    Dois defeitos diferentes, ambos vistos de verdade:
+
+    1. 40 escritas simultaneas perdiam 27 antes das travas por imovel existirem:
+       duas requisicoes liam o mesmo tour.json e a segunda apagava a primeira.
+    2. No Windows, o os.replace da gravacao atomica falha com WinError 5 se
+       alguem estiver LENDO o arquivo naquele instante — e leitura nao pega
+       trava, de proposito. Por isso o teste roda visitantes lendo ao mesmo
+       tempo: sem eles o defeito so aparecia em 1 execucao a cada 3.
     """
 
     def test_escritas_simultaneas_nao_se_perdem(self):
@@ -259,10 +265,30 @@ class TestConcorrencia(Base):
         iid = self.imovel(dona, "Concorrência")
         quantas = 40
 
-        def envia(n):
+        # visitantes lendo o tour enquanto os contatos chegam: e o handle aberto
+        # deles que faz o os.replace falhar no Windows
+        parar = threading.Event()
+
+        def lendo():
             c = self.app.test_client()
-            c.post("/api/imoveis/%s/leads" % iid,
-                   json={"nome": "visitante %d" % n, "telefone": str(n)})
+            while not parar.is_set():
+                c.get("/api/imoveis/%s/tour" % iid)
+
+        leitores = [threading.Thread(target=lendo, daemon=True) for _ in range(4)]
+        for t in leitores:
+            t.start()
+        self.addCleanup(parar.set)
+
+        codigos, falhas = [], []
+
+        def envia(n):
+            try:
+                c = self.app.test_client()
+                r = c.post("/api/imoveis/%s/leads" % iid,
+                           json={"nome": "visitante %d" % n, "telefone": str(n)})
+                codigos.append(r.status_code)
+            except Exception as e:
+                falhas.append("%s: %s" % (type(e).__name__, e))
 
         threads = [threading.Thread(target=envia, args=(n,)) for n in range(quantas)]
         for t in threads:
@@ -270,7 +296,15 @@ class TestConcorrencia(Base):
         for t in threads:
             t.join()
 
+        parar.set()
         leads = dona.get("/api/imoveis/%s/leads" % iid).get_json()["leads"]
+        if len(leads) != quantas:
+            import collections
+            nomes = {l["nome"] for l in leads}
+            print("\n    codigos HTTP:", dict(collections.Counter(codigos)))
+            print("    excecoes:", falhas or "nenhuma")
+            print("    faltando:", sorted(n for n in
+                  ("visitante %d" % i for i in range(quantas)) if n not in nomes))
         self.assertEqual(len(leads), quantas,
                          "%d de %d contatos se perderam" % (quantas - len(leads), quantas))
 

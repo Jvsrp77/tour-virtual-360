@@ -34,6 +34,13 @@ MUT = [
      "if False:",
      "TestConcorrencia"),
 
+    # no Windows o os.replace recusa a troca se alguem tiver o arquivo aberto;
+    # sem a trava na LEITURA, visitantes lendo derrubavam 38 de 40 gravacoes
+    ("tira a trava da leitura do tour", "app.py",
+     "    with trava_do_imovel(alvo):\n        with open(caminho, \"r\", encoding=\"utf-8\") as f:\n            tour = json.load(f)",
+     "    with open(caminho, \"r\", encoding=\"utf-8\") as f:\n        tour = json.load(f)",
+     "TestConcorrencia"),
+
     ("tour publico devolve os leads", "app.py",
      'for campo in ("leads_capturados", "visitas"):',
      "for campo in ():",

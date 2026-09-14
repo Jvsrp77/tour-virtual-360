@@ -258,11 +258,24 @@ TOUR_PADRAO = {
 # ------------------------------------------------------------------ dados
 
 def carregar_tour(imovel_id=None):
-    caminho = arq_tour(imovel_id or g.imovel)
+    """
+    Le o tour, sob a trava do imovel.
+
+    A trava aqui nao e pela leitura em si — `os.replace` ja garante que ninguem
+    ve JSON pela metade. E pelo Windows: la o `MoveFileEx` RECUSA a troca
+    enquanto o destino tiver um handle aberto, e a gravacao falha com WinError 5.
+    Com visitantes lendo sem parar, isso derrubava 38 de 40 gravacoes.
+
+    Custa pouco: ler e questao de microssegundos, e as rotas pesadas (costura,
+    profundidade) nao seguram a trava — so a pegam no instante de gravar.
+    """
+    alvo = imovel_id or g.imovel
+    caminho = arq_tour(alvo)
     if not os.path.exists(caminho):
         return json.loads(json.dumps(TOUR_PADRAO))
-    with open(caminho, "r", encoding="utf-8") as f:
-        tour = json.load(f)
+    with trava_do_imovel(alvo):
+        with open(caminho, "r", encoding="utf-8") as f:
+            tour = json.load(f)
     for chave, valor in TOUR_PADRAO.items():          # completa campos novos
         tour.setdefault(chave, valor)
     return tour
@@ -276,14 +289,40 @@ def salvar_tour(tour, imovel_id=None):
     no meio da gravacao e encontrar JSON pela metade. os.replace troca o arquivo
     de uma vez, entao quem le sempre pega a versao inteira, velha ou nova.
     """
-    caminho = arq_tour(imovel_id or g.imovel)
+    alvo = imovel_id or g.imovel
+    caminho = arq_tour(alvo)
     os.makedirs(os.path.dirname(caminho), exist_ok=True)
     temporario = caminho + ".tmp"
-    with open(temporario, "w", encoding="utf-8") as f:
-        json.dump(tour, f, ensure_ascii=False, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temporario, caminho)
+    with trava_do_imovel(alvo):
+        with open(temporario, "w", encoding="utf-8") as f:
+            json.dump(tour, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        _trocar(temporario, caminho)
+
+
+def _trocar(temporario, definitivo, tentativas=12, espera=0.02):
+    """
+    os.replace, com paciência — no Windows ele falha se o destino estiver aberto.
+
+    Quem resolve a corrida interna é a trava em `carregar_tour`/`salvar_tour`:
+    com ela, nenhuma thread nossa tem o arquivo aberto na hora da troca. Medido:
+    o teste de concorrência passa sem este retry.
+
+    Ele fica para os handles que NÃO são nossos e que a trava não alcança —
+    antivírus varrendo o arquivo recém-escrito, indexador do Windows, ferramenta
+    de backup. Nenhum teste aqui consegue produzir isso, então é precaução
+    declarada, não conserto medido. No Linux o rename é atômico mesmo com
+    leitores e este caminho nunca é exercido.
+    """
+    for tentativa in range(tentativas):
+        try:
+            os.replace(temporario, definitivo)
+            return
+        except PermissionError:
+            if tentativa == tentativas - 1:
+                raise
+            time.sleep(espera * (tentativa + 1))
 
 
 def achar_cena(tour, cena_id):

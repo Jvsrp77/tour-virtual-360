@@ -318,6 +318,41 @@ Por que Node e não um verificador em Python: um scanner caseiro tropeçaria na 
 expressão regular com aspas dentro — e o painel tem uma, `/[&<>"']/g`. Se o Node não
 estiver instalado, o teste avisa que pulou em vez de fingir que passou.
 
+## A gravação que falhava no Windows
+
+Ao rodar a suíte inteira, 1 de 40 contatos simultâneos se perdia — e só na suíte
+completa, nunca no teste isolado. A instrumentação mostrou a causa:
+
+```
+PermissionError [WinError 5]: tour.json.tmp -> tour.json
+```
+
+No Windows, `MoveFileEx` **recusa a troca enquanto o destino tiver um handle aberto**. As
+escritas eram serializadas pela trava, mas as leituras não — de propósito, para o visitante
+não esperar. Bastava um GET com o arquivo aberto no instante da troca. No Linux isso não
+acontece: lá o rename é atômico mesmo com leitores.
+
+**O conserto foi mover a trava para a camada de dados**: `carregar_tour` e `salvar_tour`
+pegam a trava do imóvel. Assim nenhuma thread nossa tem o arquivo aberto na hora da troca.
+Custa pouco — ler é questão de microssegundos, e as rotas pesadas continuam fora da trava.
+
+### O teste era fraco, e por isso quase passou
+
+O defeito aparecia em 1 execução a cada 3. O teste tinha só escritores; **quem provoca o
+erro é o leitor**. Agora ele roda 4 visitantes lendo o tour sem parar enquanto os 40
+contatos chegam. Com isso o defeito virou determinístico: sem a trava na leitura, 38 a 40
+dos 40 se perdem, em 3 de 3 execuções.
+
+Fica a lição: o teste existia e passava, mas não reproduzia a condição real. Teste de
+concorrência sem a outra ponta da concorrência é teste de nada.
+
+### O retry ficou, mas não é o conserto
+
+Havia também um retry no `os.replace`. Depois da trava, medi: **a suíte passa sem ele**.
+Ele ficou para os handles que não são nossos — antivírus varrendo o arquivo recém-escrito,
+indexador do Windows, ferramenta de backup. Nenhum teste aqui produz isso, então está no
+código como precaução declarada, não como conserto medido.
+
 ## Testes
 
 ```bash
