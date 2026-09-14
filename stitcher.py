@@ -569,7 +569,10 @@ def preencher_teto(equi, graus_sem_dado):
 def _nivelar(panorama):
     """Endireita o horizonte, engolindo a falha: cena sem quinas nao tem prumo."""
     try:
-        return nivelamento.nivelar(panorama)
+        img, info = nivelamento.nivelar(panorama)
+        # o vetor de prumo e detalhe interno e nao sobrevive ao json.dump do tour
+        info.pop("direcao", None)
+        return img, info
     except nivelamento.ErroNivelamento as e:
         return panorama, {"aplicado": False, "motivo": str(e)}
     except Exception:
@@ -662,13 +665,57 @@ def costurar(caminhos, pasta_saida, relatar=None):
 
 
 def importar_equirretangular(caminho_origem, pasta_saida):
-    """Aceita uma foto 360 ja pronta (camera 360 ou app de celular)."""
+    """
+    Aceita uma foto 360 ja pronta (camera 360 ou app de celular).
+
+    Passa pelo mesmo nivelamento e reconstrucao de teto da costura: o modo
+    Panorama do celular sai torto com a mesma frequencia, e quem gira o aparelho
+    na mao raramente alcanca o zenite. As duas correcoes se protegem sozinhas —
+    o nivelamento ignora desvios abaixo de 0,8 grau e o teto so age quando falta
+    mais de 4 graus de foto —, entao uma imagem ja boa sai intacta.
+
+    Exposicao fica de fora de proposito: o CLAHE e incondicional e uma foto que
+    ja veio tratada pela camera so teria a perder.
+    """
     img = _ler_imagem(caminho_origem)
     img = _redimensionar(img, LARGURA_MAX_SAIDA)
+    info = {"nivelamento": {"aplicado": False}, "teto": 0.0}
+    if eh_equirretangular(img.shape[1], img.shape[0]):
+        img, info["nivelamento"] = _nivelar(img)
+        info["teto"] = limite_do_teto(img)
+        img = preencher_teto(img, info["teto"])
     nome = "cena_%s.jpg" % uuid.uuid4().hex[:12]
     _salvar(img, os.path.join(pasta_saida, nome))
     h, w = img.shape[:2]
     return nome, w, h
+
+
+def reprocessar(caminho_panorama):
+    """
+    Reaplica nivelamento e reconstrucao de teto num panorama ja gravado.
+
+    Cenas montadas por versoes anteriores do pipeline ficaram com o horizonte
+    torto e com o leque de cunhas no teto. Recostura-las exigiria as fotos
+    originais, que o sistema apaga depois de montar a cena; estas duas correcoes
+    trabalham sobre o equirretangular pronto, entao ainda dao para aplicar.
+
+    Exposicao nao entra: o CLAHE ja foi aplicado uma vez e repetir escureceria
+    o resultado a cada passagem.
+    """
+    img = _ler_imagem(caminho_panorama)
+    if not eh_equirretangular(img.shape[1], img.shape[0]):
+        raise ErroCostura("Só dá para corrigir panorama 360 completo (proporção 2:1).")
+
+    img, nivel = _nivelar(img)
+    graus = limite_do_teto(img)
+    antes = img
+    img = preencher_teto(img, graus)
+    _salvar(img, caminho_panorama)
+    return {
+        "nivelamento": nivel,
+        "teto_graus": round(float(graus), 1),
+        "teto_aplicado": bool(graus >= 4 and img is not antes),
+    }
 
 
 def importar_varredura(caminho_origem, pasta_saida, haov_graus=360.0):
@@ -719,6 +766,8 @@ def importar_varredura(caminho_origem, pasta_saida, haov_graus=360.0):
     nivel = {"aplicado": False}
     if haov_graus >= 359.0:
         equi, nivel = _nivelar(equi)
+        # a varredura sobe pouco: o topo fica tao esticado quanto na costura
+        equi = preencher_teto(equi, limite_do_teto(equi))
     nome = "cena_%s.jpg" % uuid.uuid4().hex[:12]
     _salvar(equi, os.path.join(pasta_saida, nome))
 

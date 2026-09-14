@@ -140,7 +140,8 @@ _TRAVAS = {}
 _TRAVA_MESTRA = threading.Lock()
 
 ROTAS_PESADAS = {"api.api_costurar", "api.api_importar_varredura",
-                 "api.api_importar_360", "api.api_gerar_profundidade"}
+                 "api.api_importar_360", "api.api_gerar_profundidade",
+                 "api.api_corrigir_cena"}
 
 
 def trava_do_imovel(imovel_id):
@@ -936,6 +937,83 @@ def api_gerar_profundidade(cena_id):
         return {"cena": atual}
 
     tid = tarefas.criar(imovel, "profundidade", "Profundidade de %s" % cena["nome"])
+    tarefas.enfileirar(tid, trabalho)
+    return jsonify({"ok": True, "tarefa": tid}), 202
+
+
+@api.route("/cenas/<cena_id>/corrigir", methods=["POST"])
+def api_corrigir_cena(cena_id):
+    """
+    Reaplica nivelamento e reconstrucao de teto numa cena ja gravada.
+
+    Cenas montadas antes destas correcoes existirem ficaram com o horizonte torto
+    e com o leque de cunhas no teto — bem visivel no modo de caminhada, onde a
+    textura esticada vira geometria quebrada. As fotos originais ja foram
+    apagadas, mas as duas correcoes trabalham sobre o equirretangular pronto.
+
+    O mapa de profundidade e refeito junto: nivelar gira o panorama, e o mapa
+    antigo passaria a apontar para as direcoes erradas.
+    """
+    tour = carregar_tour()
+    cena = achar_cena(tour, cena_id)
+    if not cena:
+        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
+    if not cena.get("panorama_completo"):
+        return jsonify({"ok": False, "erro":
+                        "Só dá para corrigir cenas com 360 completo."}), 422
+    if os.path.exists(os.path.join(pasta_cenas(), "orig_" + cena["arquivo"])):
+        return jsonify({"ok": False, "erro":
+                        "Tire a marca do chão antes de corrigir: ela seria "
+                        "reaplicada sobre a imagem antiga."}), 422
+
+    imovel = g.imovel
+    destino = pasta_cenas()
+    panorama = os.path.join(destino, cena["arquivo"])
+    tinha_profundidade = bool(cena.get("profundidade"))
+
+    def trabalho(relatar):
+        relatar(10, "endireitando e refazendo o teto")
+        info = stitcher.reprocessar(panorama)
+
+        relatar(45, "refazendo miniatura e abertura")
+        mini = gerar_miniatura(imovel, cena["arquivo"])
+        esboco = gerar_esboco(imovel, cena)
+
+        prof = previa = None
+        if tinha_profundidade and profundidade.modelo_disponivel():
+            # o panorama girou: o mapa antigo apontaria para as direcoes erradas
+            def repassar(pct, txt):
+                relatar(55 + int(pct * 0.4), txt)
+            disp, img_previa = profundidade.gerar(panorama, relatar=repassar)
+            prof = "prof_%s.png" % cena_id
+            profundidade.salvar(disp, os.path.join(destino, prof))
+            previa = "prev_%s.jpg" % cena_id
+            ok, buf = cv2.imencode(".jpg", img_previa, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                buf.tofile(os.path.join(destino, previa))
+
+        relatar(97, "gravando")
+        with trava_do_imovel(imovel):
+            tour = carregar_tour(imovel)
+            atual = achar_cena(tour, cena_id)
+            if not atual:
+                raise RuntimeError("A cena foi removida durante a correção.")
+            if mini:
+                atual["miniatura"] = mini
+            if esboco:
+                atual["esboco"] = esboco
+            if prof:
+                atual["profundidade"] = prof
+                atual["previa_profundidade"] = previa
+            atual["correcao"] = info
+            # a metragem sai do mapa de profundidade, que acabou de ser refeito:
+            # o numero publicado antes da correcao nao vale mais sem conferencia
+            if atual.get("area"):
+                atual["area"]["revisar"] = True
+            salvar_tour(tour, imovel)
+        return {"cena": atual, "correcao": info}
+
+    tid = tarefas.criar(imovel, "correcao", "Corrigindo %s" % cena["nome"])
     tarefas.enfileirar(tid, trabalho)
     return jsonify({"ok": True, "tarefa": tid}), 202
 

@@ -174,6 +174,56 @@ lugar dele fica uma pílula discreta *"carregando em alta definição"*), e a ca
 *"Loading..."* do próprio Pannellum ficava por cima anunciando que não havia nada na
 tela — justamente quando já havia.
 
+## Corrigir cenas antigas
+
+O pipeline ganhou nivelamento e reconstrução de teto no meio do caminho. Cenas montadas
+antes disso ficaram com o horizonte torto e com o **leque de cunhas** no teto — riscos
+escuros que convergem no zênite, muito visíveis no modo de caminhada, onde a textura
+esticada vira geometria quebrada. As fotos originais já foram apagadas, mas as duas
+correções trabalham sobre o equirretangular pronto.
+
+Botão **Endireitar e refazer o teto** no painel. No quarto de teste:
+
+| | Antes | Depois |
+|---|---|---|
+| Energia de cunha no teto | 22,79 | 6,45 (−72%) |
+| Horizonte fora do prumo | 4,86° | 0,82° |
+| Chão fora do nível (aferição independente) | 3,29° | 1,88° |
+
+A última linha é a verificação que importa: medir o nivelamento com o próprio detector de
+verticais é circular, então o prumo foi conferido ajustando um plano aos pontos de chão do
+mapa de profundidade — um caminho que não compartilha nada com o detector.
+
+Refaz a profundidade junto, porque endireitar gira o panorama e o mapa antigo passaria a
+apontar para as direções erradas.
+
+### Todo caminho de entrada recebe o mesmo tratamento
+
+A costura já aplicava exposição, nivelamento e teto. Os outros dois não:
+
+| Entrada | Exposição | Nivelamento | Teto |
+|---|---|---|---|
+| Costura de fotos | sim | sim | sim |
+| Varredura | sim | sim | **faltava** |
+| Foto 360 pronta | não | **faltava** | **faltava** |
+
+Quem enviava uma foto 360 do modo Panorama do celular não recebia correção nenhuma.
+Agora recebe nivelamento e teto — as duas se protegem sozinhas (o nivelamento ignora
+desvios abaixo de 0,8° e o teto só age quando falta mais de 4° de foto), então uma
+imagem já boa sai intacta. Exposição fica de fora de propósito: o CLAHE é incondicional
+e uma foto já tratada pela câmera só teria a perder.
+
+### O chão não recebe a mesma correção
+
+O leque existe igual no polo inferior, e a mesma função aplicada lá derruba a energia de
+cunha de 28,46 para 3,93. **Mesmo assim foi rejeitada:** o número melhora e a imagem
+piora. O buraco embaixo é maior (55° contra 43°) e ali existe conteúdo real perto da
+câmera — a reconstrução apagou o piso, o tapete e o pé da cama, trocando tudo por um
+disco liso. Teto branco e liso é o caso fácil; chão texturizado não é.
+
+Para o nadir a resposta continua sendo a marca no chão: cobre a área sem informação com
+um logotipo declarado, em vez de inventar piso.
+
 ## Metragem
 
 Botão **Medir o ambiente**: estima comprimento, largura e m² a partir do mapa de
@@ -224,6 +274,31 @@ dimensões dentro de 2,3%. **O código estava certo; a referência é que estava
 
 Fica a lição: uma verificação vale o que vale o padrão de comparação. Antes de concluir
 que algo não funciona, confirme contra o que está sendo comparado.
+
+### E uma segunda lição, em sentido contrário
+
+Ao corrigir a cena de teste (nivelamento + teto), a mesma medição caiu de 13,9 para
+8,3 m². O nivelamento foi confirmado como **correto** por aferição independente — logo o
+frágil é a medição, não a correção.
+
+A causa é `_raio()`: a conversão de disparidade para metros usa constantes fixas
+(`1,542` e `0,125`) ajustadas a uma única imagem. A disparidade do modelo é relativa e
+sua distribuição muda a cada imagem, então o deslocamento fixo deforma a geometria de
+modo não uniforme — o comprimento caiu 30% e a largura só 12%. A calibração atual no
+nadir corrige apenas escala, e escala não desfaz deslocamento.
+
+Tentativa de conserto: ajustar os dois coeficientes por imagem, usando o próprio piso
+como régua (um plano a 1,5 m obedece `1/raio = sen(lat)/1,5`, o que é linear em
+disparidade). Os coeficientes saíram estáveis entre as variantes, mas a área piorou em
+todas (−26% a −44%). **Não foi embarcada.**
+
+O padrão que sobra: a largura sai perto do real em toda variante (2,47–2,61 m contra
+2,58), o comprimento é que desaba. Faz sentido — a ponta distante do cômodo é vista em
+ângulo raso, onde profundidade monocular erra mais.
+
+Conclusão honesta: **os +2,4% valiam para aquela imagem específica.** A medição não está
+validada de forma geral, e cena corrigida fica marcada para revisão no painel. Medir
+mais cômodos com LiDAR — quadrado, vazio, em L — continua sendo o que falta.
 
 ## Reconstrução do teto
 

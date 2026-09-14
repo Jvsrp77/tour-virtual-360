@@ -234,6 +234,14 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <div class="dica">360 = você deu a volta completa. Se fotografou só parte do cômodo,
         reduza até as paredes pararem de esticar.</div>
 
+      <h2 style="margin-top:20px">Corrigir distorções</h2>
+      <button style="width:100%" id="btCorrigir" onclick="corrigirCena()">Endireitar e refazer o teto</button>
+      <div id="blocoCorrecao"></div>
+      <div class="dica">Endireita o horizonte e reconstrói o teto. Use em cenas
+        montadas antes destas correções existirem — o sintoma é o teto abrir num
+        leque de riscos escuros quando você olha para cima. Refaz a profundidade
+        junto, porque endireitar gira o panorama.</div>
+
       <h2 style="margin-top:20px">Metragem</h2>
       <button style="width:100%" id="btArea" onclick="medirArea()">Medir o ambiente</button>
       <div id="blocoArea"></div>
@@ -450,6 +458,7 @@ function abrirCena(id){
            + ` · lente ${cap.fov_foto}°` : '');
   $('covHaov').value = Math.round(c.haov);
   desenharArea(c);
+  desenharCorrecao(c);
   desenharProfundidade(c);
   desenharHotspots(c);
   montarVisor(c);
@@ -626,9 +635,39 @@ function desenharArea(c){
         ${a.comprimento_m ? nBR(a.comprimento_m) + ' × ' + nBR(a.largura_m) + ' m · ' : ''}
         ${a.origem === 'informado' ? 'informado por você' : 'estimado pela profundidade'}
       </div>
+      ${a.revisar ? `<div class="dica" style="margin-top:6px;color:#e0a23f">
+        Publicada antes da correção da cena. O mapa de profundidade mudou —
+        meça de novo e republique antes de confiar neste número.</div>` : ''}
       <div class="dica" style="margin-top:6px">Aparece no tour e na lista de imóveis.</div>
       <button style="width:100%;margin-top:8px" onclick="removerArea()">Tirar do anúncio</button>
     </div>`;
+}
+
+function desenharCorrecao(c){
+  const r = c.correcao;
+  $('btCorrigir').disabled = !c.panorama_completo;
+  $('blocoCorrecao').innerHTML = !r ? '' : `
+    <div class="dica" style="margin-top:6px">Já corrigida:
+      ${r.nivelamento && r.nivelamento.aplicado
+          ? 'horizonte girado ' + nBR(r.nivelamento.inclinacao) + '°'
+          : 'horizonte já estava no prumo'}·
+      ${r.teto_aplicado ? 'teto refeito acima de ' + nBR(r.teto_graus) + '°'
+                        : 'teto não precisava'}</div>`;
+}
+
+async function corrigirCena(){
+  const bt = $('btCorrigir');
+  bt.disabled = true; bt.textContent = 'Corrigindo...';
+  try{
+    const j = await (await fetch(API + '/cenas/' + cenaAtual + '/corrigir',
+                                 {method: 'POST'})).json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    acompanhar(j.tarefa, async () => {
+      await carregar();
+      aviso('Cena corrigida. Olhe para cima no tour para conferir.', 'ok');
+    });
+  }catch(e){ aviso('Falha ao corrigir: ' + e, 'erro'); }
+  finally{ bt.disabled = false; bt.textContent = 'Endireitar e refazer o teto'; }
 }
 
 async function medirArea(){
