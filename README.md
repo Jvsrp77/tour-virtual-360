@@ -174,6 +174,41 @@ lugar dele fica uma pílula discreta *"carregando em alta definição"*), e a ca
 *"Loading..."* do próprio Pannellum ficava por cima anunciando que não havia nada na
 tela — justamente quando já havia.
 
+## Modelo de profundidade maior: testado e recusado
+
+A hipótese era direta: o relevo do modo de caminhada vem do Depth Anything V2 **Small**
+(94 MB). Trocar pelo **Base** (389 MB, 4× os parâmetros) deveria dar paralaxe melhor —
+e talvez consertar a metragem.
+
+Comparação justa exige calibrar cada modelo separadamente: as constantes de `_raio()`
+foram ajustadas à distribuição de disparidade do Small, e aplicá-las ao Base seria
+condená-lo de saída. Cada um recebeu sua própria calibração pelo plano do piso.
+
+| | Small (94 MB) | Base (389 MB) |
+|---|---|---|
+| Processamento | **3,7 s** | 9,1 s |
+| Chão fora do nível | **0,36°** | 1,28° |
+| Resíduo do plano | 0,1829 | **0,1658** |
+| Nitidez de borda | 0,6153 | **0,6451** |
+| Malha duvidosa | **2,9%** | 3,6% |
+| Dimensões (real 5,26 × 2,58) | 3,99 × 2,28 | 4,35 × 3,43 |
+
+O Base tem uma vantagem real e visível: o Small produz um **artefato** — uma mancha de
+objeto fantasma muito perto da câmera, que não existe no cômodo — e no Base ela some.
+
+Mas o veredito é não, por três razões. O ganho **não aparece no produto**: lado a lado,
+no mesmo ponto de vista, o modo de caminhada fica indistinguível. O chão fica **menos**
+nivelado (0,36° → 1,28°), que é a métrica mais próxima de "a geometria está certa", já
+que o panorama foi nivelado e o piso real é horizontal. E a metragem continua errada nos
+dois: os 14,9 m² do Base (+10%) saem de erros que se cancelam — 4,35 × 3,43 contra
+5,26 × 2,58 é comprimento 17% curto e largura 33% larga, não acerto.
+
+4× o tamanho e 2,5× o tempo por um ganho invisível não se paga. Para repetir o teste:
+baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
+
+Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
+repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
+
 ## O borrão ao caminhar: o que dá e o que não dá
 
 Andando pelo ambiente, algumas regiões esticam num borrão — tipicamente o chão atrás de
