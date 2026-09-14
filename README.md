@@ -174,6 +174,34 @@ lugar dele fica uma pílula discreta *"carregando em alta definição"*), e a ca
 *"Loading..."* do próprio Pannellum ficava por cima anunciando que não havia nada na
 tela — justamente quando já havia.
 
+## O borrão ao caminhar: o que dá e o que não dá
+
+Andando pelo ambiente, algumas regiões esticam num borrão — tipicamente o chão atrás de
+um móvel, ou o vão sob a mesa.
+
+**A causa não tem conserto por reprocessamento.** É oclusão: a foto foi tirada de um
+ponto só, e o que estava escondido atrás da mesa nunca foi registrado. A malha liga a
+borda da mesa à parede do fundo com um triângulo, e ao caminhar esse triângulo estica.
+Não existe algoritmo que recupere pixels que a câmera não viu — só outra foto, de outro
+ponto, veria ali.
+
+**O que dá para fazer é parar de fingir.** Um triângulo cujos vértices têm raios muito
+diferentes (salto acima de 18% do menor) não é superfície do cômodo: é o vão. Esses
+triângulos vão para um segundo grupo da malha, com material próprio.
+
+Por que não simplesmente apagá-los: **parado no ponto de captura a imagem é perfeita.**
+Ali esses triângulos estão de perfil, escondidos atrás das próprias superfícies. Apagá-los
+abre buracos numa vista que não tinha defeito nenhum — testei, e fica pior. O borrão
+nasce só quando a câmera sai do ponto.
+
+Então eles escurecem conforme você se afasta: intactos na origem, sombra a 1,6 m. E
+escurecem em vez de sumir, porque um furo na esfera deixaria ver a parede oposta através
+dele. No quarto de teste são 2,6% da malha, e o painel informa isso em vez de deixar a
+sombra sem explicação.
+
+**A solução de verdade é capturar de mais pontos.** O que um ponto não viu, o vizinho vê,
+e o sistema já encadeia pontos. Um cômodo com móvel no meio pede dois ou três.
+
 ## Corrigir cenas antigas
 
 O pipeline ganhou nivelamento e reconstrução de teto no meio do caminho. Cenas montadas
