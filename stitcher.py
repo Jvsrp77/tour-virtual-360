@@ -548,6 +548,8 @@ def preencher_teto(equi, graus_sem_dado):
     peso = cv2.GaussianBlur((buraco * 255).astype(np.uint8), (0, 0),
                             SUAVIDADE_TETO).astype(np.float32)[..., None] / 255.0
     vista = (vista * (1 - peso) + np.clip(saida, 0, 255) * peso).astype(np.uint8)
+    # mapa de "aqui eu mexi", em 8 bits para viajar pelo mesmo remap da imagem
+    mexido = (peso[..., 0] * 255).astype(np.uint8)
 
     # de volta para o equirretangular, so na calota de cima
     lon = (np.arange(W, dtype=np.float32) / W - 0.5) * 2 * np.pi
@@ -558,11 +560,18 @@ def preencher_teto(equi, graus_sem_dado):
     rr = thetaE / np.radians(ABERTURA_TETO)
     ux = (0.5 + 0.5 * rr * np.sin(lonG)) * (lado - 1)
     uy = (0.5 - 0.5 * rr * np.cos(lonG)) * (lado - 1)
+    volta_peso = cv2.remap(mexido, ux.astype(np.float32), uy.astype(np.float32),
+                           cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     volta = cv2.remap(vista, ux.astype(np.float32), uy.astype(np.float32),
                       cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
 
-    mistura = np.clip((np.radians(ABERTURA_TETO) - thetaE) /
-                      np.radians(10), 0, 1)[..., None] * dentro[..., None]
+    # So o que foi PREENCHIDO volta do disco. Misturar a calota inteira trocava
+    # pixel bom por pixel do disco de 640 px, que a 60 graus do polo tem 4,8 px
+    # por grau contra 14 do equirretangular — subamostragem de 3x, que aparecia
+    # como uma emenda serrilhada na junta do teto com a parede.
+    mistura = (volta_peso.astype(np.float32) / 255.0)
+    mistura *= np.clip((np.radians(ABERTURA_TETO) - thetaE) / np.radians(10), 0, 1)
+    mistura = (mistura * dentro)[..., None]
     return (equi * (1 - mistura) + volta * mistura).astype(np.uint8)
 
 

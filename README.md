@@ -393,6 +393,36 @@ achando que protegeu os dois. A checagem agora está dentro da própria rota.
 
 Matriz final: 20 verificações, 3 perfis (visitante, dona, outra imobiliária), 0 falhas.
 
+## A emenda serrilhada do teto
+
+Olhando para cima aparecia um degrau em ziguezague na junta do teto com a parede — bem
+visível no modo de caminhada.
+
+A causa não era o preenchimento, era a **volta**. O teto é reconstruído numa projeção
+azimutal de 640×640, e o resultado era misturado de volta sobre a **calota inteira** de
+70°, não apenas onde houve preenchimento. A 60° do polo esse disco tem 4,8 px por grau
+contra 14 do equirretangular: subamostragem de 3×. Pixel bom estava sendo trocado por
+pixel borrado, e a fronteira disso virava o serrilhado.
+
+Agora só volta o que foi preenchido: o peso do preenchimento viaja pelo mesmo `remap` da
+imagem e vira a máscara da mistura.
+
+| Alteração média fora do buraco | |
+|---|---|
+| Antes | 1,93 níveis |
+| Agora | **0,10 níveis** |
+
+Ou seja: fora da região sem foto, o panorama fica intacto.
+
+### E a tampa do chão baixou de 50° para 36°
+
+Pelo mesmo erro de método que já tinha me pegado: escolhi 50° porque a energia de cunha
+caía 71% contra 21%. Mas essa métrica mede **quanto do anel foi coberto**, não se o
+artefato saiu sem comer conteúdo — e na tela 50° apagava o piso e a base da cama.
+
+É a segunda vez que essa métrica engana neste mesmo problema. Fica o registro: no polo, a
+imagem manda na métrica.
+
 ## O chão sob a câmera: três tentativas e o que sobrou
 
 Olhando para baixo aparece um **leque de riscos escuros** — o "degradê preto". Causa: a

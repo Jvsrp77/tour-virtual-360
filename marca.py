@@ -63,7 +63,7 @@ def cor_do_piso(panorama, raio):
     return np.median(px[lum >= np.percentile(lum, 60)], axis=0).astype(np.float32)
 
 
-def tampar(panorama, raio_graus=46.0, suavidade=0.45):
+def tampar(panorama, raio_graus=36.0, suavidade=0.45):
     """
     Tapa o polo inferior com a cor do proprio piso.
 
@@ -73,8 +73,12 @@ def tampar(panorama, raio_graus=46.0, suavidade=0.45):
     da cor certa: nao inventa detalhe, so remove artefato.
 
     Nao recupera o piso. Para isso sao tres fileiras na captura, ou a marca da
-    imobiliaria cobrindo a area. Medido no quarto de teste, a energia de cunha cai
-    de 34,7 para 9,9 (-72%).
+    imobiliaria cobrindo a area.
+
+    36 graus e nao 50: a energia de cunha melhora ate 50 (-71% contra -21%), mas
+    a metrica engana — ela mede quanto do anel foi COBERTO, nao se o artefato saiu
+    sem comer conteudo. Na tela, 50 graus apagava o piso e a base da cama. Aqui a
+    imagem manda na metrica.
     """
     H, W = panorama.shape[:2]
     if abs(W / float(H) - 2.0) > 0.1:
