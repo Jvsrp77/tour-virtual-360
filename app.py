@@ -1192,13 +1192,11 @@ def api_marca_chao():
     raio = float(dados.get("raio") or marca.RAIO_PADRAO)
 
     tour = carregar_tour()
-    if ativo and not tour.get("logo"):
-        return jsonify({"ok": False, "erro":
-                        "Envie a logo da imobiliária antes de aplicar a marca."}), 422
-
     pasta = pasta_cenas()
     logo = None
-    if ativo:
+    # sem logotipo o polo e apenas tapado com a cor do piso: o leque de cunhas
+    # some do mesmo jeito, e quem ainda nao tem marca nao fica sem saida
+    if ativo and tour.get("logo"):
         caminho_logo = os.path.join(pasta, tour["logo"])
         logo = cv2.imdecode(np.fromfile(caminho_logo, dtype=np.uint8),
                             cv2.IMREAD_UNCHANGED)
@@ -1233,7 +1231,7 @@ def api_marca_chao():
             if not ok:
                 raise marca.ErroMarca("falha ao gravar")
             buf.tofile(atual)
-            cena["marca_chao"] = {"raio": raio}
+            cena["marca_chao"] = {"raio": raio, "com_logo": logo is not None}
             cena["miniatura"] = gerar_miniatura(g.imovel, cena["arquivo"])
             cena["esboco"] = gerar_esboco(g.imovel, cena)
             alteradas += 1

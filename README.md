@@ -209,6 +209,33 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## O chão sob a câmera: três tentativas e o que sobrou
+
+Olhando para baixo aparece um **leque de riscos escuros** — o "degradê preto". Causa: a
+captura de uma fileira não alcança o chão sob a câmera, e o preenchimento estica a cor de
+cada coluna, o que no polo vira um leque.
+
+Três abordagens testadas, todas medidas pela energia de cunha (34,72 no estado original):
+
+| Abordagem | Resultado | Veredito |
+|---|---|---|
+| Superfície suave (a do teto, invertida) | −86% | apaga piso, tapete e pé da cama |
+| LaMa por máscara de detalhe | −0% | a máscara erra: o leque **tem** gradiente |
+| LaMa por raio (38°/45°/52°) | −5% a −15% | troca leque por borrão escuro |
+| **Tampa na cor do piso** | **−72%** | **adotada** |
+
+Por que o LaMa falha aqui e ganhou atrás dos móveis: lá o buraco é pequeno e cercado de
+estrutura para continuar; aqui é 23–43% do disco, sem nada em volta para copiar. Polo é
+caso degenerado para inpainting — a conclusão do teto valia, e vale também para o chão.
+
+A tampa não recupera o piso. Ela troca um artefato por uma superfície lisa da cor certa,
+amostrada só na metade mais clara do anel em volta (a mediana crua puxa para cinza,
+porque o anel contém sombra e pé de móvel). Sem logo é o que dá para fazer; **com a logo
+da imobiliária fica melhor**, e é o que toda foto 360 profissional faz. O botão agora
+funciona nos dois casos.
+
+A solução de verdade continua sendo captura em **três fileiras**: aí o chão é real.
+
 ## Camada de fundo: reconstruir o que está atrás dos móveis
 
 Caminhando, o visitante enxerga além das bordas do que a foto registrou. Ali não há

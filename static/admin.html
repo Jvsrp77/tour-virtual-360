@@ -1045,17 +1045,22 @@ async function gerarDemo(){
 
 function desenharMarca(){
   const alvo = $('blocoMarca');
-  if (!tour.logo){ alvo.innerHTML = ''; return; }
   const temMarca = tour.cenas.some(c => c.marca_chao);
+  const comLogo = !!tour.logo;
   alvo.innerHTML = temMarca
     ? `<button style="width:100%;margin-top:8px" onclick="marcaChao(false)">
-         Remover marca do chão</button>
-       <div class="dica">A marca cobre o ponto abaixo da câmera, onde a captura de
-         uma fileira não alcança. O panorama original fica guardado.</div>`
+         ${comLogo ? 'Remover marca do chão' : 'Destapar o chão'}</button>
+       <div class="dica">Cobre o ponto abaixo da câmera, onde a captura de uma
+         fileira não alcança. O panorama original fica guardado.</div>`
     : `<button style="width:100%;margin-top:8px" onclick="marcaChao(true)">
-         Aplicar marca no chão</button>
-       <div class="dica">Cobre o borrão embaixo com a sua logo — é o que toda foto
-         360 profissional faz, porque ali fica o tripé ou o pé do fotógrafo.</div>`;
+         ${comLogo ? 'Aplicar marca no chão' : 'Tapar o chão'}</button>
+       <div class="dica">${comLogo
+          ? `Cobre o borrão embaixo com a sua logo — é o que toda foto 360
+             profissional faz, porque ali fica o tripé ou o pé do fotógrafo.`
+          : `Olhando para baixo aparece um leque de riscos escuros: a captura de
+             uma fileira não alcança o chão sob a câmera. Isto troca o leque por
+             uma superfície lisa da cor do piso. <b>Envie uma logo acima</b> para
+             cobrir com a sua marca, que fica melhor.`}</div>`;
 }
 
 async function marcaChao(ativo){

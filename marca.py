@@ -44,14 +44,66 @@ def _quadrado_do_logo(logo, lado):
     return tela
 
 
+def cor_do_piso(panorama, raio):
+    """
+    Cor do piso no anel em volta do polo, ignorando movel escuro e sombra.
+
+    A mediana crua do anel puxa para cinza: ali entram pe de cama, sombra e
+    rodape. So a metade mais clara do anel e piso de fato — medido no quarto de
+    teste, isso troca um disco cinza chapado por um disco da cor do piso.
+    """
+    H, W = panorama.shape[:2]
+    lat = (np.arange(H, dtype=np.float32) / H - 0.5) * np.pi
+    latG = np.repeat(lat[:, None], W, 1)
+    anel = (latG > (np.pi / 2 - raio * 1.45)) & (latG <= (np.pi / 2 - raio * 0.95))
+    px = panorama[anel].reshape(-1, 3)
+    if px.shape[0] < 100:
+        return np.array([60, 60, 60], np.float32)
+    lum = px.astype(np.float32) @ np.array([0.114, 0.587, 0.299], np.float32)
+    return np.median(px[lum >= np.percentile(lum, 60)], axis=0).astype(np.float32)
+
+
+def tampar(panorama, raio_graus=46.0, suavidade=0.45):
+    """
+    Tapa o polo inferior com a cor do proprio piso.
+
+    Uma captura em uma fileira nao alcanca o chao sob a camera, e o preenchimento
+    por esticamento deixa ali um leque de cunhas escuras — o "degrade preto" que
+    aparece ao olhar para baixo. Esta funcao troca o leque por uma superficie lisa
+    da cor certa: nao inventa detalhe, so remove artefato.
+
+    Nao recupera o piso. Para isso sao tres fileiras na captura, ou a marca da
+    imobiliaria cobrindo a area. Medido no quarto de teste, a energia de cunha cai
+    de 34,7 para 9,9 (-72%).
+    """
+    H, W = panorama.shape[:2]
+    if abs(W / float(H) - 2.0) > 0.1:
+        raise ErroMarca("Só vale para panorama 360 completo (2:1).")
+    raio = np.radians(max(20.0, min(70.0, float(raio_graus))))
+    cor = cor_do_piso(panorama, raio)
+
+    lat = (np.arange(H, dtype=np.float32) / H - 0.5) * np.pi
+    latG = np.repeat(lat[:, None], W, 1)
+    t = np.clip((latG - (np.pi / 2 - raio)) / raio, 0, 1)
+    peso = np.clip(t / suavidade, 0, 1)
+    peso = (peso * peso * (3 - 2 * peso))[..., None]     # dissolve nas duas pontas
+    saida = panorama.astype(np.float32) * (1 - peso) + cor.reshape(1, 1, 3) * peso
+    return np.clip(saida, 0, 255).astype(np.uint8)
+
+
 def aplicar(panorama, logo, raio_graus=RAIO_PADRAO, cor_fundo=(28, 30, 34)):
     """
     Devolve o panorama com um disco no polo inferior.
+
+    Sem logotipo (`logo=None`) tapa o polo com a cor do piso: serve para quem
+    ainda nao tem marca, e o leque de cunhas some do mesmo jeito.
 
     O disco e desenhado direto no equirretangular: cada pixel da faixa de baixo
     vira coordenada polar no chao — a distancia ao polo virou raio, a longitude
     virou angulo. E o inverso da projecao que o visualizador faz.
     """
+    if logo is None:
+        return tampar(panorama, raio_graus)
     H, W = panorama.shape[:2]
     if abs(W / float(H) - 2.0) > 0.1:
         raise ErroMarca("A marca no chão só vale para panorama 360 completo (2:1).")
