@@ -122,6 +122,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
           style="padding:8px 12px">&larr; Imóveis</button>
   <h1 id="tituloImovel">Tour Virtual <span>·</span> Painel</h1>
   <div class="crescer"></div>
+  <button onclick="sairDoPainel()">Sair</button>
   <button onclick="abrirGuia()">Guia de captura</button>
   <button onclick="verMetricas()">Métricas</button>
   <button onclick="verLeads()">Leads</button>
@@ -630,6 +631,11 @@ async function salvarPlanta(){
 
 const nBR = n => Number(n).toLocaleString('pt-BR');
 let medidaAtual = null;
+
+async function sairDoPainel(){
+  await fetch('/api/sair', {method: 'POST'});
+  location.href = '/entrar';
+}
 
 // Medir e publicar sao dois passos: o numero so vale no anuncio depois que
 // alguem confere. Sem isso a medida morria na tela e nao chegava a ninguem.

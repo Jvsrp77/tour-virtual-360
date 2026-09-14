@@ -16,8 +16,10 @@ import threading
 import traceback
 from datetime import datetime
 
+from datetime import timedelta
+
 from flask import (Flask, Blueprint, g, request, jsonify, send_from_directory,
-                   send_file, redirect, Response, abort)
+                   send_file, redirect, Response, abort, session)
 
 import cv2
 import numpy as np
@@ -28,6 +30,7 @@ import profundidade
 import tarefas
 import area
 import fundo
+import usuarios
 import marca
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -61,12 +64,15 @@ def imovel_existe(imovel_id):
     return bool(imovel_id) and os.path.exists(arq_tour(imovel_id))
 
 
-def listar_imoveis():
+def listar_imoveis(conta_id=None):
     itens = []
     for iid in sorted(os.listdir(PASTA_IMOVEIS)):
         if not imovel_existe(iid):
             continue
         tour = carregar_tour(iid)
+        dono = tour.get("conta") or ""
+        if conta_id is not None and dono and dono != conta_id:
+            continue
         capa = next((c.get("miniatura") or c["arquivo"] for c in tour["cenas"]), None)
         itens.append({
             "id": iid,
@@ -86,10 +92,36 @@ def listar_imoveis():
     return itens
 
 
-def criar_imovel(titulo):
+def adotar_imoveis_sem_dono():
+    """
+    Da os imoveis orfaos a primeira conta.
+
+    O acervo criado antes das contas existirem nao tem dono. Sem isso ele ficaria
+    visivel a qualquer conta nova — inclusive a de outra imobiliaria.
+    """
+    contas = usuarios.listar(PASTA_DADOS)
+    if not contas:
+        return 0
+    dono = contas[0]["id"]
+    adotados = 0
+    for iid in os.listdir(PASTA_IMOVEIS):
+        if not imovel_existe(iid):
+            continue
+        tour = carregar_tour(iid)
+        if not tour.get("conta"):
+            tour["conta"] = dono
+            salvar_tour(tour, iid)
+            adotados += 1
+    if adotados:
+        print("  %d imovel(is) sem dono adotado(s) pela primeira conta" % adotados)
+    return adotados
+
+
+def criar_imovel(titulo, conta_id=""):
     iid = uuid.uuid4().hex[:10]
     os.makedirs(os.path.join(pasta_imovel(iid), "scenes"), exist_ok=True)
     tour = json.loads(json.dumps(TOUR_PADRAO))
+    tour["conta"] = conta_id
     tour["titulo"] = titulo or "Imóvel sem título"
     tour["criado_em"] = datetime.now().isoformat(timespec="seconds")
     salvar_tour(tour, iid)
@@ -123,6 +155,23 @@ def migrar_formato_antigo():
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024   # 300 MB por requisicao
+app.secret_key = usuarios.segredo(PASTA_DADOS)
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
+                  PERMANENT_SESSION_LIFETIME=timedelta(days=30))
+
+# O tour publicado e o produto: ele fica aberto, e com ele o modo de caminhada,
+# as imagens das cenas e o registro de visita e de lead. Todo o resto — painel,
+# lista, metricas, exportacao e qualquer escrita — exige sessao.
+#
+# Rotas registradas no app NAO levam prefixo no nome do endpoint; so as do
+# Blueprint levam. Escrever "app.visualizador" aqui ja mandou o tour do cliente
+# para a tela de login uma vez.
+ROTAS_PUBLICAS = {
+    "visualizador", "andar", "arquivo_cena", "pagina_entrar", "estatico_raiz",
+    "static", "api_entrar", "api_estado_conta",
+    "api.api_obter_tour", "api.api_registrar_lead", "api.api_registrar_visita",
+    "api.api_embed",
+}
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
 # proprio caminho, entao nenhuma rota precisa receber o imovel como parametro.
@@ -153,6 +202,11 @@ def trava_do_imovel(imovel_id):
 @api.before_request
 def _exigir_imovel():
     if not imovel_existe(g.imovel):
+        return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
+    # Rota publica do tour nao exige conta; toda outra exige, e exige ser dona.
+    # "Nao encontrado" em vez de "sem permissao": quem nao e dono nao precisa
+    # descobrir que o imovel existe.
+    if request.endpoint not in ROTAS_PUBLICAS and not pode_ver(g.imovel):
         return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
     # Rotas pesadas (costura, profundidade) levam dezenas de segundos. Se
     # segurassem a trava o tempo todo, um visitante ficaria esperando a costura
@@ -497,6 +551,47 @@ def home():
     return redirect("/imoveis")
 
 
+def conta_atual():
+    """Conta logada, ou None. `id` e o que fica gravado no imovel."""
+    nome = session.get("usuario")
+    return usuarios.obter(PASTA_DADOS, nome) if nome else None
+
+
+@app.before_request
+def _exigir_sessao():
+    if request.endpoint in ROTAS_PUBLICAS or request.endpoint is None:
+        return
+    if conta_atual():
+        return
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "erro": "Faça login para continuar.",
+                        "login": True}), 401
+    return redirect("/entrar")
+
+
+def dono_do_imovel(imovel_id):
+    return (carregar_tour(imovel_id) or {}).get("conta") or ""
+
+
+def pode_ver(imovel_id):
+    """
+    Cada conta enxerga apenas os proprios imoveis.
+
+    Imovel sem dono e de quem chegou primeiro: e o acervo criado antes das contas
+    existirem, adotado na migracao. Depois disso todo imovel nasce com dono.
+    """
+    conta = conta_atual()
+    if not conta:
+        return False
+    dono = dono_do_imovel(imovel_id)
+    return (not dono) or dono == conta["id"]
+
+
+@app.route("/entrar")
+def pagina_entrar():
+    return send_from_directory("static", "entrar.html")
+
+
 @app.route("/imoveis")
 def pagina_imoveis():
     return send_from_directory("static", "imoveis.html")
@@ -504,7 +599,7 @@ def pagina_imoveis():
 
 @app.route("/painel/<imovel>")
 def painel(imovel):
-    if not imovel_existe(imovel):
+    if not imovel_existe(imovel) or not pode_ver(imovel):
         return redirect("/imoveis")
     return send_from_directory("static", "admin.html")
 
@@ -534,20 +629,75 @@ def arquivo_cena(imovel, nome):
 
 @app.route("/api/imoveis", methods=["GET"])
 def api_listar_imoveis():
-    return jsonify({"ok": True, "imoveis": listar_imoveis()})
+    conta = conta_atual()
+    return jsonify({"ok": True, "imoveis": listar_imoveis(conta["id"]),
+                    "imobiliaria": conta["imobiliaria"]})
 
 
 @app.route("/api/imoveis", methods=["POST"])
 def api_criar_imovel():
     titulo = (request.get_json(silent=True) or {}).get("titulo", "").strip()
-    iid = criar_imovel(titulo)
+    iid = criar_imovel(titulo, conta_atual()["id"])
     return jsonify({"ok": True, "id": iid})
+
+
+# ------------------------------------------------------------------- contas
+
+@app.route("/api/conta", methods=["GET"])
+def api_estado_conta():
+    """A tela de entrada pergunta se ja existe alguma conta neste servidor."""
+    conta = conta_atual()
+    return jsonify({"ok": True, "primeiro_acesso": not usuarios.ha_usuarios(PASTA_DADOS),
+                    "logado": bool(conta),
+                    "imobiliaria": conta["imobiliaria"] if conta else ""})
+
+
+@app.route("/api/entrar", methods=["POST"])
+def api_entrar():
+    """
+    Entrada e criacao da primeira conta.
+
+    Nao existe cadastro aberto: a primeira conta e criada no primeiro acesso ao
+    servidor, e as demais imobiliarias saem do `conta.py`, na mao de quem opera.
+    Cadastro publico num produto vendido a imobiliarias so serviria para estranho
+    criar conta no servidor do cliente.
+    """
+    d = request.get_json(silent=True) or {}
+    nome = (d.get("usuario") or "").strip().lower()
+    senha = d.get("senha") or ""
+
+    if not usuarios.ha_usuarios(PASTA_DADOS):
+        try:
+            usuarios.criar(PASTA_DADOS, nome, senha, d.get("imobiliaria") or "")
+        except usuarios.ErroUsuario as e:
+            return jsonify({"ok": False, "erro": str(e)}), 400
+        adotar_imoveis_sem_dono()
+    elif not usuarios.verificar(PASTA_DADOS, nome, senha):
+        time.sleep(1.0)                 # atrasa a tentativa em massa
+        return jsonify({"ok": False, "erro": "Usuário ou senha incorretos."}), 401
+
+    session.permanent = True
+    session["usuario"] = nome
+    conta = usuarios.obter(PASTA_DADOS, nome)
+    return jsonify({"ok": True, "imobiliaria": conta["imobiliaria"]})
+
+
+@app.route("/api/sair", methods=["POST"])
+def api_sair():
+    session.clear()
+    return jsonify({"ok": True})
 
 
 @app.route("/api/imoveis/<imovel>", methods=["DELETE"])
 def api_remover_imovel(imovel):
-    """Apaga o imovel inteiro: tour, cenas, mapas de profundidade e leads."""
-    if not imovel_existe(imovel):
+    """
+    Apaga o imovel inteiro: tour, cenas, mapas de profundidade e leads.
+
+    A checagem de posse esta aqui, e nao no before_request do Blueprint, porque
+    esta rota vive no `app`. Sem ela, uma conta apagava o acervo de outra so
+    sabendo o id — foi o que aconteceu no teste da matriz de acesso.
+    """
+    if not imovel_existe(imovel) or not pode_ver(imovel):
         return jsonify({"ok": False, "erro": "Imóvel não encontrado."}), 404
     for cena in carregar_tour(imovel)["cenas"]:
         if cena.get("lote"):
@@ -1382,9 +1532,11 @@ if __name__ == "__main__":
     completar_esbocos()
     limpar_uploads_orfaos()
     limpar_cenas_orfas()
-    if not listar_imoveis():
-        criar_imovel("Meu primeiro imóvel")
-        print("  nenhum imovel encontrado: criei um vazio para comecar")
+    primeira = usuarios.completar_ids(PASTA_DADOS)
+    if primeira:
+        adotar_imoveis_sem_dono()
+    if not usuarios.ha_usuarios(PASTA_DADOS):
+        print("  nenhuma conta ainda: a primeira e criada em /entrar")
     print("")
     print("  Tour Virtual rodando")
     print("  Imoveis: http://127.0.0.1:5000/imoveis")

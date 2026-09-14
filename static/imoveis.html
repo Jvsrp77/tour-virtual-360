@@ -67,6 +67,8 @@
 <header>
   <h1>Tour Virtual <span>·</span> Imóveis</h1>
   <div class="crescer"></div>
+  <span id="quemSou" style="color:#9aa2ad;font-size:12.5px;margin-right:4px"></span>
+  <button onclick="sair()">Sair</button>
   <button class="primario" onclick="abrirNovo()">+ Novo imóvel</button>
 </header>
 
@@ -95,9 +97,17 @@ const $ = id => document.getElementById(id);
 
 const nBR = n => Number(n).toLocaleString('pt-BR');
 
+async function sair(){
+  await fetch('/api/sair', {method: 'POST'});
+  location.href = '/entrar';
+}
+
 async function carregar(){
-  const j = await (await fetch('/api/imoveis')).json();
+  const r = await fetch('/api/imoveis');
+  if (r.status === 401){ location.href = '/entrar'; return; }
+  const j = await r.json();
   const lista = j.imoveis || [];
+  $('quemSou').textContent = j.imobiliaria || '';
 
   const totalAmb = lista.reduce((s, i) => s + i.ambientes, 0);
   const totalArea = lista.reduce((s, i) => s + (i.area_total || 0), 0);

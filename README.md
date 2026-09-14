@@ -209,6 +209,41 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Contas: uma por imobiliária
+
+O painel estava aberto: qualquer pessoa com a URL editava imóveis, apagava ambientes e
+lia os contatos capturados. Agora cada imobiliária tem a própria conta e enxerga apenas
+os próprios imóveis.
+
+**O tour publicado continua aberto** — é o produto. Ficam públicos o tour, o modo de
+caminhada, as imagens das cenas, o registro de visita e o envio de lead. Ficam protegidos
+a lista, o painel, as métricas, a exportação e toda escrita.
+
+**Não existe cadastro aberto.** A primeira conta nasce no primeiro acesso a `/entrar`; as
+demais saem do `conta.py`, na mão de quem opera o servidor. Num produto vendido a
+imobiliárias, uma tela pública de "criar conta" só serviria para um estranho abrir conta
+no servidor do cliente.
+
+```bash
+python conta.py criar imobiliaria2 "Nome da Imobiliária"
+python conta.py listar
+```
+
+O imóvel guarda o `id` da conta, não o nome de login — trocar o nome no futuro não orfana
+o acervo. Imóvel sem dono (o acervo criado antes das contas) é adotado pela primeira conta.
+
+### O furo que o teste encontrou
+
+A matriz de acesso passou em tudo, menos numa linha: **a conta B apagou o imóvel da conta
+A**. `DELETE /api/imoveis/<id>` está registrada no `app`, não no Blueprint — então escapou
+da checagem de posse que o `before_request` do Blueprint faz.
+
+É a mesma armadilha que o commit da autenticação anterior já documentava, em outra direção:
+rotas do `app` e rotas do Blueprint não se comportam igual, e é fácil proteger um grupo
+achando que protegeu os dois. A checagem agora está dentro da própria rota.
+
+Matriz final: 20 verificações, 3 perfis (visitante, dona, outra imobiliária), 0 falhas.
+
 ## O chão sob a câmera: três tentativas e o que sobrou
 
 Olhando para baixo aparece um **leque de riscos escuros** — o "degradê preto". Causa: a
