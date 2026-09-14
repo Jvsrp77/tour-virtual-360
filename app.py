@@ -455,9 +455,11 @@ def montar_cena(nome, arquivo, largura, altura, origem, info=None,
         completa = bool(info["fechada"])
     else:
         completa = stitcher.eh_equirretangular(largura, altura)
-        haov, vaov = stitcher.cobertura_angular(largura, altura)
         if completa:
             haov, vaov = 360.0, 180.0
+        else:
+            # nao e 2:1: estimar a cobertura em vez de espalhar pela volta inteira
+            haov, vaov = stitcher.cobertura_parcial(largura, altura)
 
     cena = {
         "id": uuid.uuid4().hex[:10],
@@ -739,8 +741,10 @@ def api_importar_360():
             cena = montar_cena(rotulo, arquivo, largura, altura, "equirretangular")
             if not cena["panorama_completo"]:
                 avisos.append(
-                    "A foto %s nao esta na proporcao 2:1 (esta %dx%d). Vai abrir como "
-                    "foto parcial, sem giro completo." % (rotulo, largura, altura))
+                    "A foto %s não está na proporção 2:1 (está %dx%d), então não é um "
+                    "360 completo. Estimei %.0f° de cobertura pelo formato; se as "
+                    "paredes parecerem esticadas ou espremidas, ajuste em "
+                    "“Cobertura horizontal”." % (rotulo, largura, altura, cena["haov"]))
             criadas.append(cena)
 
         with trava_do_imovel(g.imovel):

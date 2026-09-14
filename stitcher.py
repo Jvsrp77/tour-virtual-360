@@ -791,6 +791,26 @@ def eh_equirretangular(largura, altura):
     return abs((largura / float(altura)) - 2.0) < 0.1
 
 
+VAOV_CELULAR = 65.0      # campo vertical tipico de camera de celular
+
+
+def cobertura_parcial(largura, altura):
+    """
+    Cobertura estimada de uma foto que NAO esta em 2:1.
+
+    Assumir 360 graus aqui era um erro caro: um panorama 3:1 do celular cobre uns
+    195 graus na pratica, e espalha-lo pela volta inteira estica a cena 1,8 vez —
+    parede entortada, comodo parecendo maior do que e. Sem metadado nao da para
+    saber o angulo real, mas o campo vertical de camera de celular varia pouco,
+    entao partir dele erra muito menos do que partir de 360.
+
+    O painel tem o campo "Cobertura horizontal" para o corretor acertar na mao.
+    """
+    vaov = VAOV_CELULAR
+    haov = min(360.0, vaov * (largura / float(altura)))
+    return round(haov, 2), round(vaov, 2)
+
+
 def cobertura_angular(largura, altura, haov=None):
     """
     Em projecao esferica os graus por pixel sao constantes.
