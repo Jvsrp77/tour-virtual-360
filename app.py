@@ -34,7 +34,9 @@ import usuarios
 import marca
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
-PASTA_DADOS = os.path.join(RAIZ, "data")
+# TOUR_DADOS existe para os testes rodarem numa pasta descartavel: sem isso o
+# unico jeito de testar a matriz de acesso seria contra os dados de producao.
+PASTA_DADOS = os.environ.get("TOUR_DADOS") or os.path.join(RAIZ, "data")
 PASTA_UPLOADS = os.path.join(PASTA_DADOS, "uploads")
 PASTA_IMOVEIS = os.path.join(PASTA_DADOS, "imoveis")
 

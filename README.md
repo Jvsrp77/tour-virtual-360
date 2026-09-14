@@ -209,6 +209,48 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Testes
+
+```bash
+python testes.py        # 19 testes, ~8 s
+python mutacoes.py      # confere se os testes não estão cegos
+```
+
+Rodam numa pasta descartável (`TOUR_DADOS`), nunca sobre os dados reais, e usam o cliente
+de teste do Flask — não precisam de servidor no ar.
+
+**Cada teste existe porque o defeito correspondente aconteceu de verdade** durante o
+desenvolvimento, e só foi pego por verificação manual:
+
+| Teste | Defeito que ele guarda |
+|---|---|
+| `TestAcesso` | a conta B apagava o imóvel da conta A pelo `DELETE` registrado no `app` |
+| `TestAcesso` | o tour público devolvia `leads_capturados` a qualquer um com o link |
+| `TestConcorrencia` | 27 de 40 escritas simultâneas se perdiam antes das travas |
+| `TestCobertura` | foto 3:1 espalhada pela volta inteira, esticando a cena 1,8 vez |
+| `TestForaDoContexto` | `montar_cena` quebrava na thread da fila aos 92% da costura |
+| `TestSerializavel` | `ndarray` no `json.dump` estourava depois do trabalho pesado |
+| `TestBackup` | restauração comparada por SHA-256, arquivo por arquivo |
+| `TestContas` | senha em texto, senha curta, cadastro aberto |
+
+### Os testes foram testados
+
+Teste que passa em código quebrado é pior do que teste nenhum: dá confiança sem dar
+proteção. O `mutacoes.py` quebra cada proteção de propósito — uma por vez, no arquivo
+real — roda o teste que deveria pegar aquilo, e desfaz a mudança.
+
+```
+tira posse do DELETE de imovel     ACUSOU
+tira posse da API do imovel        ACUSOU
+tira a trava por imovel            ACUSOU
+tour publico devolve os leads      ACUSOU
+espalha foto parcial em 360        ACUSOU
+ndarray vaza para o JSON           ACUSOU
+sessao deixa de ser exigida        ACUSOU
+
+7 de 7 mutacoes detectadas
+```
+
 ## Backup
 
 São 42 MB numa pasta: tours, panoramas, mapas de profundidade, contas e os contatos
