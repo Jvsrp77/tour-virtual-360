@@ -5,26 +5,90 @@ navegável. Roda inteiro na máquina local, sem depender de Kuula, CloudPano ou 
 
 **Repositório:** https://github.com/Jvsrp77/tour-virtual-360 *(privado)*
 
+## Tecnologias
+
+### Backend — Python 3.11
+
+| | Versão | Para quê |
+|---|---|---|
+| Flask | 3.1 | servidor web e API |
+| Werkzeug | 3.1 | hash de senha (scrypt) e `ProxyFix` |
+| OpenCV | 5.0 | costura, nivelamento, teto, projeções |
+| NumPy | 2.3 | a matemática por trás disso |
+| ONNX Runtime | 1.30 | roda os modelos de IA, em CPU |
+| waitress | 3.0 | servidor de produção |
+
+São **seis dependências**, e isso é escolha. Não há banco de dados, ORM nem fila externa:
+os dados são JSON em disco com escrita atômica e trava por imóvel, e a fila é uma thread.
+Num produto que uma imobiliária vai rodar por anos, cada biblioteca a menos é uma
+atualização de segurança a menos para acompanhar.
+
+### Frontend — sem framework
+
+JavaScript puro, sem React, sem build, sem `npm install`.
+
+| | Versão | Para quê |
+|---|---|---|
+| Pannellum | 2.5.6 | visualizador 360 do tour |
+| three.js | r150 | WebGL do modo de caminhada |
+
+As duas são **vendorizadas** em `static/vendor/`, não vêm de CDN. O motivo foi prático: o
+CDN estava bloqueado no ambiente e o tour parava de funcionar. De quebra, o ZIP exportado
+roda offline.
+
+### Inteligência artificial — 292 MB, tudo local
+
+| Modelo | Tamanho | Para quê |
+|---|---|---|
+| Depth Anything V2 Small | 94 MB | profundidade → caminhada e metragem |
+| LaMa | 198 MB | reconstrói o que está atrás dos móveis |
+
+Rodam na própria máquina, via ONNX. Nenhuma chamada a API de terceiros, nenhum custo por
+uso, e nenhuma foto de imóvel saindo do servidor — o que também simplifica o lado da LGPD.
+
+**Três modelos foram testados e recusados por medição**, evitando ~700 MB de dependência
+sem ganho: o CLIP (nomear ambientes), o Depth Anything Base (4× maior, ganho invisível) e
+o próprio LaMa no teto (onde a técnica clássica ganhou). Os números estão nas seções
+correspondentes.
+
+### Infraestrutura e desenvolvimento
+
+Docker e Caddy 2 (HTTPS automático pelo Let's Encrypt). Testes em `unittest`, da
+biblioteca padrão. O Node v22 é usado **só para validar a sintaxe do JavaScript** das
+páginas nos testes — não é dependência de execução.
+
+### Tamanho
+
+4.686 linhas de Python em 16 arquivos, 2.665 de HTML/JS/CSS em 5 páginas.
+
 ## Clonar
 
 ```bash
 git clone https://github.com/Jvsrp77/tour-virtual-360.git
 ```
 
-Os modelos (~240 MB) não vêm no repositório. Depois de clonar, rode
-`python baixar_modelo.py` uma vez — sem eles tudo funciona, menos o modo "andar" e o
-reconhecimento de ambiente.
+Os modelos (292 MB) não vêm no repositório. Depois de clonar:
+
+```bash
+python baixar_modelo.py            # profundidade, 94 MB
+python baixar_modelo.py --fundo    # reconstrução do fundo, 198 MB (opcional)
+```
+
+Sem eles tudo funciona, menos o modo "andar pelo ambiente", a metragem e a camada de
+fundo.
 
 ## Como rodar
 
-Dê dois cliques em `iniciar.bat`. O navegador abre sozinho no painel.
-
-Manualmente:
+Dê dois cliques em `iniciar.bat`. O navegador abre sozinho no painel, na porta 5000.
 
 ```bash
 python -m pip install -r requirements.txt
-python app.py
+python app.py         # desenvolvimento, porta 5000
+python servidor.py    # produção, porta 8000, com backup automático
 ```
+
+No primeiro acesso a `/entrar` você cria a conta da sua imobiliária. O tour publicado
+continua aberto a quem tem o link; o login protege só o painel.
 
 Abra **http://localhost:5000/imoveis** — é a lista de imóveis, ponto de entrada do sistema.
 
