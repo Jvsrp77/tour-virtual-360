@@ -159,6 +159,14 @@ app.secret_key = usuarios.segredo(PASTA_DADOS)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
                   PERMANENT_SESSION_LIFETIME=timedelta(days=30))
 
+# Atras de um proxy que termina o TLS, o Flask so enxerga http e o IP do proxy.
+# Sem o ProxyFix o cookie de sessao nunca seria marcado como seguro e o log
+# registraria sempre o mesmo endereco.
+if os.environ.get("TOUR_ATRAS_DE_PROXY") == "1":
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    app.config.update(SESSION_COOKIE_SECURE=True)
+
 # O tour publicado e o produto: ele fica aberto, e com ele o modo de caminhada,
 # as imagens das cenas e o registro de visita e de lead. Todo o resto — painel,
 # lista, metricas, exportacao e qualquer escrita — exige sessao.
@@ -167,7 +175,7 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 # Blueprint levam. Escrever "app.visualizador" aqui ja mandou o tour do cliente
 # para a tela de login uma vez.
 ROTAS_PUBLICAS = {
-    "visualizador", "andar", "arquivo_cena", "pagina_entrar", "estatico_raiz",
+    "visualizador", "andar", "arquivo_cena", "pagina_entrar", "saude",
     "static", "api_entrar", "api_estado_conta",
     "api.api_obter_tour", "api.api_registrar_lead", "api.api_registrar_visita",
     "api.api_embed",
@@ -585,6 +593,15 @@ def pode_ver(imovel_id):
         return False
     dono = dono_do_imovel(imovel_id)
     return (not dono) or dono == conta["id"]
+
+
+@app.route("/saude")
+def saude():
+    """Usada pelo container e pelo proxy para saber se o processo esta de pe."""
+    return jsonify({"ok": True, "imoveis": len(os.listdir(PASTA_IMOVEIS))
+                    if os.path.isdir(PASTA_IMOVEIS) else 0,
+                    "modelos": {"profundidade": profundidade.modelo_disponivel(),
+                                "fundo": fundo.modelo_disponivel()}})
 
 
 @app.route("/entrar")
@@ -1526,19 +1543,30 @@ app.register_blueprint(api)
 tarefas.iniciar()
 
 
-if __name__ == "__main__":
+def inicializar():
+    """
+    Migracoes e faxina que precisam rodar antes de atender a primeira requisicao.
+
+    Ficava dentro do `if __name__ == "__main__"`, e por isso NAO rodava sob um
+    servidor WSGI — que importa o modulo em vez de executa-lo. Em producao as
+    miniaturas, os esbocos e a adocao de imoveis sem dono simplesmente nao
+    aconteciam. Agora os dois caminhos chamam esta funcao.
+    """
     migrar_formato_antigo()
     completar_miniaturas()
     completar_esbocos()
     limpar_uploads_orfaos()
     limpar_cenas_orfas()
-    primeira = usuarios.completar_ids(PASTA_DADOS)
-    if primeira:
+    if usuarios.completar_ids(PASTA_DADOS):
         adotar_imoveis_sem_dono()
     if not usuarios.ha_usuarios(PASTA_DADOS):
         print("  nenhuma conta ainda: a primeira e criada em /entrar")
+
+
+if __name__ == "__main__":
+    inicializar()
     print("")
-    print("  Tour Virtual rodando")
+    print("  Tour Virtual rodando (servidor de desenvolvimento)")
     print("  Imoveis: http://127.0.0.1:5000/imoveis")
     print("")
     # 127.0.0.1 de proposito, e nao localhost: no Windows o nome resolve para

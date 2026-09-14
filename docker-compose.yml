@@ -1,0 +1,43 @@
+# Tour Virtual em producao, com HTTPS.
+#
+# O Caddy na frente resolve o certificado sozinho (Let's Encrypt) e repassa para
+# o app. Sem ele o cookie de sessao viajaria em texto claro na rede — e sessao
+# de painel da acesso aos contatos capturados.
+#
+#   1. aponte o DNS do seu dominio para esta maquina
+#   2. troque tour.seudominio.com.br no Caddyfile
+#   3. docker compose up -d
+#   4. baixe os modelos uma vez (ver README)
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      # o Caddy termina o TLS: o app precisa saber disso para marcar o cookie
+      # como seguro e para registrar o IP real do visitante, nao o do proxy
+      TOUR_ATRAS_DE_PROXY: "1"
+      TOUR_THREADS: "16"
+    volumes:
+      # tours, panoramas, contas e leads. E o que precisa de backup.
+      - ./data:/app/data
+      # 302 MB de modelos, baixados uma vez e reaproveitados entre versoes
+      - ./modelos:/app/modelos
+    expose:
+      - "8000"
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_dados:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_dados:
+  caddy_config:

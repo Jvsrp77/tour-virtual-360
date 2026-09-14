@@ -209,6 +209,63 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Produção
+
+O `app.run()` do Flask é o servidor de desenvolvimento — o próprio Flask avisa para não
+usar em produção. Quem atende agora é o **waitress**: WSGI de verdade, em Python puro,
+que roda igual no Windows e no Linux (o gunicorn não roda no Windows).
+
+```bash
+python servidor.py            # local, porta 8000
+docker compose up -d          # produção, com HTTPS pelo Caddy
+```
+
+### Um processo, várias threads — e isso é requisito, não preferência
+
+| Estado | Onde vive | O que quebra com 2 processos |
+|---|---|---|
+| `_TRAVAS` | `app.py` | `threading.RLock` só serializa dentro do processo: duas requisições leem o mesmo `tour.json` e a segunda apaga o que a primeira gravou |
+| `_TAREFAS` | `tarefas.py` | a costura seria enfileirada num processo e consultada no outro — o painel esperaria por uma tarefa que nunca aparece |
+
+Escalar além de uma máquina exigiria trocar as travas por algo compartilhado (Redis,
+banco) e a fila por um worker separado. Até lá, o caminho de crescimento é **mais thread e
+mais CPU, não mais processo**.
+
+### A armadilha que quase passou
+
+As migrações rodavam dentro do `if __name__ == "__main__"` — bloco que um servidor WSGI
+**não executa**, porque ele importa o módulo em vez de rodá-lo. Em produção, miniaturas,
+esboços e a adoção de imóveis sem dono simplesmente não aconteceriam, sem erro nenhum.
+Agora estão em `inicializar()`, chamada pelos dois caminhos.
+
+### HTTPS
+
+O Caddy na frente resolve o certificado sozinho e repassa ao app. Não é enfeite: a sessão
+do painel dá acesso aos contatos capturados, e sem TLS o cookie viaja em texto claro.
+Com `TOUR_ATRAS_DE_PROXY=1` o app marca o cookie como seguro e passa a registrar o IP real
+do visitante em vez do IP do proxy.
+
+Os timeouts do proxy e do waitress vão a 900 s de propósito: uma costura de 30 fotos leva
+minutos, e o padrão de 120 s cortaria o envio no meio.
+
+### Volumes
+
+Os modelos (302 MB) e os dados ficam fora da imagem. Assim atualizar o código não reenvia
+os modelos, e os tours sobrevivem à troca de versão. Depois de subir, baixe os modelos uma
+vez:
+
+```bash
+docker compose exec app python baixar_modelo.py
+docker compose exec app python baixar_modelo.py --fundo
+```
+
+`/saude` responde sem login e diz se os modelos estão instalados — é o que o container e o
+proxy consultam.
+
+Verificado sob o waitress: matriz de acesso com 9 verificações em 2 perfis (dona e outra
+imobiliária), 0 falhas; e uma tarefa de fila completa — upload de 360, importação e
+profundidade — sem erro.
+
 ## Contas: uma por imobiliária
 
 O painel estava aberto: qualquer pessoa com a URL editava imóveis, apagava ambientes e

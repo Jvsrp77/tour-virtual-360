@@ -1,0 +1,5 @@
+data/
+modelos/
+.git/
+__pycache__/
+*.pyc

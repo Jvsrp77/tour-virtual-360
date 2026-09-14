@@ -1,0 +1,19 @@
+# Troque pelo seu dominio. O Caddy tira o certificado sozinho na primeira
+# subida, desde que o DNS ja aponte para esta maquina e as portas 80 e 443
+# estejam abertas.
+tour.seudominio.com.br {
+	encode gzip
+
+	# uma costura sobe dezenas de fotos e pode levar minutos; os padroes do
+	# proxy cortariam o envio no meio
+	request_body {
+		max_size 300MB
+	}
+
+	reverse_proxy app:8000 {
+		transport http {
+			read_timeout 900s
+			write_timeout 900s
+		}
+	}
+}
