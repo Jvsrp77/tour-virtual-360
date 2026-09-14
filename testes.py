@@ -14,9 +14,11 @@ Nao precisa de servidor: usa o cliente de teste do proprio Flask.
 import io
 import os
 import json
-import shutil
 import hashlib
 import tempfile
+import re
+import shutil
+import subprocess
 import threading
 import unittest
 import warnings
@@ -137,6 +139,59 @@ class TestAcesso(Base):
         # mas a dona ve
         leads = self.dona.get("/api/imoveis/%s/leads" % self.iid).get_json()["leads"]
         self.assertEqual(leads[0]["nome"], "Fulano")
+
+
+class TestPaginas(unittest.TestCase):
+    """
+    O JavaScript das paginas nao tinha teste nenhum, e isso cobrou o preco: um
+    \n\n virou quebra de linha crua dentro de uma string, a string ficou sem
+    fechar, e o painel INTEIRO parou de funcionar. Os 24 testes passaram, porque
+    exercitam a API e nao a pagina. So apareceu porque alguem foi abrir a tela.
+
+    Aqui o proprio Node conferre a sintaxe. Escrever um verificador em Python
+    tropecaria na primeira expressao regular com aspas dentro — e o painel tem
+    uma: /[&<>"']/g.
+    """
+
+    PADRAO = re.compile(r"<script(?![^>]*src=)[^>]*>(.*?)</script>", re.S | re.I)
+    HANDLER = re.compile(r'on(?:click|change|input|submit)="\s*([A-Za-z_$][\w$]*)\s*\(')
+    DEFINE = re.compile(r'(?:function\s+([A-Za-z_$][\w$]*)'
+                        r'|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=)')
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node") or shutil.which("nodejs")
+        cls.paginas = sorted(f for f in os.listdir("static") if f.endswith(".html"))
+
+    def _blocos(self, nome):
+        with io.open(os.path.join("static", nome), encoding="utf-8") as f:
+            return self.PADRAO.findall(f.read())
+
+    def test_javascript_das_paginas_compila(self):
+        if not self.node:
+            self.skipTest("node não encontrado: a sintaxe do JavaScript não foi conferida")
+        self.assertTrue(self.paginas, "nenhuma página em static/")
+        for nome in self.paginas:
+            for i, bloco in enumerate(self._blocos(nome)):
+                caminho = os.path.join(_TEMP, "%s-%d.mjs" % (nome.replace(".", "_"), i))
+                with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+                    f.write(bloco)
+                r = subprocess.run([self.node, "--check", caminho],
+                                   capture_output=True, text=True, errors="ignore")
+                self.assertEqual(r.returncode, 0,
+                                 "%s, bloco %d:\n%s" % (nome, i, (r.stderr or "")[:600]))
+
+    def test_handlers_do_html_tem_funcao(self):
+        """onclick apontando para funcao que nao existe so aparece ao clicar."""
+        for nome in self.paginas:
+            with io.open(os.path.join("static", nome), encoding="utf-8") as f:
+                html = f.read()
+            js = " ".join(self.PADRAO.findall(html))
+            definidas = {a or b for a, b in self.DEFINE.findall(js)}
+            faltando = sorted(h for h in set(self.HANDLER.findall(html))
+                              if h not in definidas)
+            self.assertEqual(faltando, [], "%s chama função inexistente: %s"
+                             % (nome, faltando))
 
 
 class TestLeads(Base):

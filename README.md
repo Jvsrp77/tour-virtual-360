@@ -235,7 +235,7 @@ decidem se o arquivo é usável pelo corretor ou não.
 titular consentiu, e esse texto muda com o tempo. Guardar só um `true` não diz a quê a
 pessoa concordou. Excluir também não é conveniência: é o direito de eliminação.
 
-### O painel quebrou inteiro, e quase passou
+### O painel quebrou inteiro, e quase passou — e agora tem teste
 
 Ao inserir esse código, um `
 
@@ -244,8 +244,15 @@ JavaScript. String não terminada, erro de sintaxe, **e o painel inteiro parou d
 funcionar** — não só o diálogo de contatos.
 
 Os testes não pegaram: eles exercitam a API, não o JavaScript da página. Só apareceu
-porque fui abrir a tela para conferir. Fica anotado como o buraco de cobertura que
-sobra — o `admin.html` tem 1.300 linhas de JavaScript sem teste nenhum.
+porque fui abrir a tela para conferir.
+
+**Esse buraco foi fechado.** O `TestPaginas` extrai cada bloco `<script>` das páginas e
+manda o próprio **Node** conferir a sintaxe, e checa que todo `onclick` do HTML aponta
+para uma função que existe. As duas mutações correspondentes acusam.
+
+Por que Node e não um verificador em Python: um scanner caseiro tropeçaria na primeira
+expressão regular com aspas dentro — e o painel tem uma, `/[&<>"']/g`. Se o Node não
+estiver instalado, o teste avisa que pulou em vez de fingir que passou.
 
 ## Testes
 

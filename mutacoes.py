@@ -53,6 +53,18 @@ MUT = [
      '    if request.path.startswith("/api/"):',
      "    if False:",
      "TestAcesso"),
+
+    # o defeito exato que derrubou o painel inteiro: quebra de linha crua dentro
+    # de uma string JavaScript, que os testes de API nao enxergavam
+    ("string JS sem fechar no painel", "static/admin.html",
+     "'Excluir o contato de ' + nome + '?\\n\\n'",
+     "'Excluir o contato de ' + nome + '?\n\n'",
+     "TestPaginas.test_javascript_das_paginas_compila"),
+
+    ("onclick sem funcao no painel", "static/admin.html",
+     'onclick="baixarLeads()"',
+     'onclick="baixarLeadsQueNaoExiste()"',
+     "TestPaginas.test_handlers_do_html_tem_funcao"),
 ]
 
 
