@@ -13,6 +13,7 @@ import shutil
 import zipfile
 import time
 import threading
+import re
 import traceback
 from datetime import datetime
 
@@ -1455,19 +1456,92 @@ def api_listar_leads():
 
 @api.route("/leads", methods=["POST"])
 def api_registrar_lead():
+    """
+    Recebe o contato do visitante.
+
+    Guarda o consentimento junto com o dado, e nao so a marca de que houve: a
+    LGPD pede que o titular saiba ao que consentiu, e o texto muda com o tempo.
+    """
     tour = carregar_tour()
     dados = request.get_json(force=True)
     visitas = tour.get("visitas", [])
     if visitas:
         visitas[-1]["virou_lead"] = True
     tour["leads_capturados"].append({
-        "nome": dados.get("nome", ""),
-        "telefone": dados.get("telefone", ""),
-        "email": dados.get("email", ""),
+        "id": uuid.uuid4().hex[:10],
+        "nome": (dados.get("nome") or "")[:120],
+        "telefone": (dados.get("telefone") or "")[:40],
+        "email": (dados.get("email") or "")[:160],
         "quando": dados.get("quando", ""),
+        "recebido_em": datetime.now().isoformat(timespec="seconds"),
+        "consentimento": (dados.get("consentimento") or "")[:400],
+        "atendido": False,
     })
     salvar_tour(tour)
     return jsonify({"ok": True})
+
+
+def _achar_lead(tour, lead_id):
+    for l in tour.get("leads_capturados", []):
+        if l.get("id") == lead_id:
+            return l
+    return None
+
+
+@api.route("/leads/<lead_id>", methods=["PUT", "DELETE"])
+def api_lead(lead_id):
+    """
+    Marca como atendido, ou apaga.
+
+    Apagar nao e conveniencia: e a LGPD. O titular pode pedir a exclusao dos
+    dados dele a qualquer momento, e sem este caminho a unica saida seria editar
+    o tour.json na mao.
+    """
+    tour = carregar_tour()
+    lead = _achar_lead(tour, lead_id)
+    if not lead:
+        return jsonify({"ok": False, "erro": "Contato não encontrado."}), 404
+
+    if request.method == "DELETE":
+        tour["leads_capturados"] = [l for l in tour["leads_capturados"]
+                                    if l.get("id") != lead_id]
+        salvar_tour(tour)
+        return jsonify({"ok": True})
+
+    dados = request.get_json(silent=True) or {}
+    if "atendido" in dados:
+        lead["atendido"] = bool(dados["atendido"])
+    salvar_tour(tour)
+    return jsonify({"ok": True, "lead": lead})
+
+
+@api.route("/leads.csv", methods=["GET"])
+def api_leads_csv():
+    """
+    Os contatos em CSV, para entrar no CRM da imobiliaria.
+
+    Sem isto o corretor le os contatos numa janelinha e digita a mao. Com 40
+    leads isso deixa de ser viavel — e e onde o sistema perde para uma planilha.
+    """
+    import csv
+    tour = carregar_tour()
+    saida = io.StringIO()
+    # ponto e virgula: o Excel em portugues abre virgula tudo numa coluna so
+    escritor = csv.writer(saida, delimiter=";")
+    escritor.writerow(["Nome", "Telefone", "E-mail", "Quando", "Atendido",
+                       "Consentimento"])
+    for l in tour.get("leads_capturados", []):
+        escritor.writerow([l.get("nome", ""), l.get("telefone", ""),
+                           l.get("email", ""),
+                           l.get("quando") or l.get("recebido_em", ""),
+                           "sim" if l.get("atendido") else "não",
+                           l.get("consentimento", "")])
+    nome = "contatos-%s.csv" % re.sub(r"[^a-zA-Z0-9]+", "-",
+                                      tour.get("titulo", "imovel"))[:40].strip("-").lower()
+    # BOM: sem ele o Excel no Windows estraga acento
+    corpo = "﻿" + saida.getvalue()
+    return Response(corpo, mimetype="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="%s"' % nome})
 
 
 # ------------------------------------------------------------------ exportar

@@ -139,6 +139,60 @@ class TestAcesso(Base):
         self.assertEqual(leads[0]["nome"], "Fulano")
 
 
+class TestLeads(Base):
+    """
+    O contato precisa SAIR do arquivo: sem exportar, sem marcar atendido e sem
+    excluir, o sistema perde para uma planilha — e a exclusao e exigencia da
+    LGPD, nao conveniencia.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("leads", imobiliaria="Imobiliária Leads")
+        self.iid = self.imovel(self.dona, "Com contatos")
+        self.visitante = self.app.test_client()
+        self.visitante.post("/api/imoveis/%s/leads" % self.iid,
+                            json={"nome": "Maria", "telefone": "(11) 98765-4321",
+                                  "email": "maria@exemplo.com",
+                                  "consentimento": "Autorizo o contato."})
+        self.lead = self.dona.get("/api/imoveis/%s/leads" % self.iid).get_json()["leads"][0]
+
+    def test_guarda_o_consentimento_e_nasce_pendente(self):
+        self.assertTrue(self.lead["id"])
+        self.assertFalse(self.lead["atendido"])
+        self.assertIn("Autorizo", self.lead["consentimento"])
+
+    def test_marcar_atendido_e_reabrir(self):
+        rota = "/api/imoveis/%s/leads/%s" % (self.iid, self.lead["id"])
+        self.assertTrue(self.dona.put(rota, json={"atendido": True}).get_json()["lead"]["atendido"])
+        self.assertFalse(self.dona.put(rota, json={"atendido": False}).get_json()["lead"]["atendido"])
+
+    def test_excluir_apaga_de_verdade(self):
+        rota = "/api/imoveis/%s/leads/%s" % (self.iid, self.lead["id"])
+        self.assertEqual(self.dona.delete(rota).status_code, 200)
+        self.assertEqual(self.dona.get("/api/imoveis/%s/leads" % self.iid)
+                         .get_json()["leads"], [])
+
+    def test_csv_abre_no_excel_em_portugues(self):
+        r = self.dona.get("/api/imoveis/%s/leads.csv" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        bruto = r.get_data()
+        self.assertTrue(bruto.startswith(bytes([0xEF, 0xBB, 0xBF])),
+                        "sem BOM o Excel estraga acento")
+        texto = bruto.decode("utf-8-sig")
+        self.assertIn(";", texto.splitlines()[0], "vírgula joga tudo numa coluna só")
+        self.assertIn("Maria", texto)
+        self.assertIn("attachment", r.headers.get("Content-Disposition", ""))
+
+    def test_contatos_so_para_a_dona(self):
+        outra = self.conta("leads_outra")
+        for cliente, esperado in ((self.visitante, 401), (outra, 404)):
+            self.assertEqual(cliente.get("/api/imoveis/%s/leads.csv" % self.iid).status_code,
+                             esperado)
+            self.assertEqual(
+                cliente.delete("/api/imoveis/%s/leads/%s" % (self.iid, self.lead["id"]))
+                .status_code, esperado)
+
+
 class TestConcorrencia(Base):
     """
     40 escritas simultaneas perdiam 27 antes das travas por imovel existirem:

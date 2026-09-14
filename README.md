@@ -209,6 +209,44 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## O contato sai do arquivo
+
+Antes o lead caía no `tour.json` e ficava lá: para vê-lo era preciso abrir o painel e
+clicar num botão. Sem responder, sem marcar o que já foi atendido, sem exportar e sem
+excluir. Com 40 leads isso deixa de ser viável — é onde o sistema perde para uma planilha.
+
+| | |
+|---|---|
+| **Responder** | botão WhatsApp com a mensagem já escrita, citando o nome e o imóvel |
+| **Atendido** | marca e reabre; o filtro mostra só os pendentes, com a contagem |
+| **Exportar** | CSV para o CRM da imobiliária |
+| **Excluir** | apaga o dado pessoal em definitivo |
+| **Consentimento** | o visitante autoriza, e o texto aceito fica gravado |
+
+**Por que WhatsApp e não e-mail:** o link `wa.me` não precisa de servidor de e-mail,
+credencial nem configuração — funciona no dia em que você instala. E-mail exigiria SMTP,
+que é uma decisão de infraestrutura sua.
+
+**Por que o CSV usa ponto e vírgula e leva BOM:** o Excel em português abre CSV com
+vírgula tudo numa coluna só, e sem o BOM ele estraga os acentos. São dois detalhes que
+decidem se o arquivo é usável pelo corretor ou não.
+
+**Por que guardar o texto do consentimento, e não só que houve:** a LGPD trata do que o
+titular consentiu, e esse texto muda com o tempo. Guardar só um `true` não diz a quê a
+pessoa concordou. Excluir também não é conveniência: é o direito de eliminação.
+
+### O painel quebrou inteiro, e quase passou
+
+Ao inserir esse código, um `
+
+` virou quebra de linha literal dentro de uma string
+JavaScript. String não terminada, erro de sintaxe, **e o painel inteiro parou de
+funcionar** — não só o diálogo de contatos.
+
+Os testes não pegaram: eles exercitam a API, não o JavaScript da página. Só apareceu
+porque fui abrir a tela para conferir. Fica anotado como o buraco de cobertura que
+sobra — o `admin.html` tem 1.300 linhas de JavaScript sem teste nenhum.
+
 ## Testes
 
 ```bash

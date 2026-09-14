@@ -365,6 +365,10 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 
 <dialog id="dlgLeads">
   <h3>Contatos capturados</h3>
+  <div class="linha" style="margin-bottom:10px">
+    <button onclick="baixarLeads()">Exportar CSV</button>
+    <button id="btPendentes" onclick="alternarPendentes()">Só os pendentes</button>
+  </div>
   <div id="corpoLeads"></div>
   <div class="fechar"><button class="primario" onclick="document.getElementById('dlgLeads').close()">Fechar</button></div>
 </dialog>
@@ -631,6 +635,12 @@ async function salvarPlanta(){
 
 const nBR = n => Number(n).toLocaleString('pt-BR');
 let medidaAtual = null;
+
+// nome e e-mail vem de visitante: sem escapar, um "<" quebra o painel
+function escapar(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 async function sairDoPainel(){
   await fetch('/api/sair', {method: 'POST'});
@@ -1189,17 +1199,71 @@ async function verMetricas(){
     <div class="dica">O ambiente no topo é por onde o corretor deve começar a conversa.</div>`;
 }
 
+// O contato precisa SAIR do arquivo. Antes ele era só lido numa janelinha:
+// sem responder, sem marcar atendido, sem exportar e sem excluir.
+let soPendentes = false;
+
+function soDigitos(tel){ return (tel || '').replace(/\D/g, ''); }
+
+function linkWhatsApp(l){
+  const num = soDigitos(l.telefone);
+  if (num.length < 10) return '';
+  // 55 = Brasil; o número vem como o visitante digitou
+  const completo = num.length <= 11 ? '55' + num : num;
+  const texto = encodeURIComponent(
+    'Olá ' + (l.nome || '') + '! Vi que você se interessou pelo imóvel '
+    + (tour.titulo || '') + '. Posso ajudar?');
+  return 'https://wa.me/' + completo + '?text=' + texto;
+}
+
 async function verLeads(){
   // os leads nao vem mais no tour: aquele endereco e publico e vazaria os
   // contatos para qualquer um com o link
   let leads = [];
   try{ leads = (await (await fetch(API + '/leads')).json()).leads || []; }
   catch(e){ leads = []; }
-  $('corpoLeads').innerHTML = leads.length
-    ? leads.map(l => `<div class="hs"><div class="crescer"><b>${l.nome}</b> · ${l.telefone} · ${l.email}</div></div>`).join('')
-    : '<div class="dica">Nenhum contato capturado ainda. Abra o tour e preencha o formulário para testar.</div>';
+
+  const pendentes = leads.filter(l => !l.atendido).length;
+  $('btPendentes').textContent = soPendentes
+    ? 'Mostrar todos' : `Só os pendentes (${pendentes})`;
+  const lista = soPendentes ? leads.filter(l => !l.atendido) : leads;
+
+  $('corpoLeads').innerHTML = lista.length ? lista.map(l => {
+    const wa = linkWhatsApp(l);
+    return `
+    <div class="hs" style="align-items:flex-start;${l.atendido ? 'opacity:.55' : ''}">
+      <div class="crescer">
+        <b>${escapar(l.nome)}</b>${l.atendido ? ' · <span class="dica">atendido</span>' : ''}
+        <div class="dica">${escapar(l.telefone || '—')} · ${escapar(l.email || '—')}</div>
+        <div class="dica">${escapar(l.quando || l.recebido_em || '')}</div>
+      </div>
+      ${wa ? `<button onclick="window.open('${wa}','_blank')" title="Responder no WhatsApp">WhatsApp</button>` : ''}
+      <button onclick="marcarLead('${l.id}', ${!l.atendido})">${l.atendido ? 'Reabrir' : 'Atendido'}</button>
+      <button class="perigo" onclick="excluirLead('${l.id}', ${JSON.stringify(l.nome)})">Excluir</button>
+    </div>`; }).join('')
+    : `<div class="dica">${soPendentes ? 'Nenhum contato pendente.'
+        : 'Nenhum contato capturado ainda. Abra o tour e preencha o formulário para testar.'}</div>`;
   $('dlgLeads').showModal();
 }
+
+function alternarPendentes(){ soPendentes = !soPendentes; verLeads(); }
+
+async function marcarLead(id, atendido){
+  await fetch(API + '/leads/' + id, {method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({atendido})});
+  verLeads();
+}
+
+async function excluirLead(id, nome){
+  if (!confirm('Excluir o contato de ' + nome + '?\n\n'
+             + 'Isso apaga o dado pessoal em definitivo — é o que a LGPD pede '
+             + 'quando o titular solicita.')) return;
+  await fetch(API + '/leads/' + id, {method: 'DELETE'});
+  verLeads();
+}
+
+function baixarLeads(){ window.open(API + '/leads.csv', '_blank'); }
 
 function abrirGuia(){ $('dlgGuia').showModal(); }
 
