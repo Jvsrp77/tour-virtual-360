@@ -209,6 +209,51 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Camada de fundo: reconstruir o que está atrás dos móveis
+
+Caminhando, o visitante enxerga além das bordas do que a foto registrou. Ali não há
+dado — a câmera nunca viu. Antes isso virava sombra escura; agora o vão pode ganhar
+conteúdo próprio, gerado por IA.
+
+**É conteúdo gerado, não o imóvel.** A cena fica marcada e o visualizador avisa na tela:
+*"11,31% reconstruído por IA (atrás dos móveis)"*.
+
+Primeiro a medição que justificou encarar: para andar 1 m, só **2,2%** do campo de visão
+precisa ser inventado; 3,3% em 1,5 m. Bem menos que a reconstrução de teto que o projeto
+já aceitava (43° da esfera).
+
+### LaMa ganhou — e isso contradiz o teste anterior
+
+| | cv2.inpaint | LaMa (208 MB) |
+|---|---|---|
+| Caneca sobre a mesa | vira cone borrado | removida limpa |
+| Violão na parede | desfigurado | reconstruído coerente |
+| Quina da mesa, piso | esborrachados | preservados |
+
+O mesmo LaMa **havia perdido** para a técnica clássica no teto (37,3 contra 2,58). A
+diferença é o caso: teto é polo, superfície lisa, sem estrutura a preservar — degenerado.
+Remover objeto de cena estruturada é exatamente o que o modelo aprendeu a fazer.
+
+Lição: aquela rejeição era específica do caso, não veredito sobre o modelo. Vale reabrir
+uma conclusão quando o problema muda de natureza.
+
+### Dois defeitos que só a tela revelou
+
+**A camada gerada nascia na frente da real.** O desfoque na profundidade do fundo puxava
+valores para perto. Invariante aplicada: `raio_fundo = max(raio_fundo, raio)` — o fundo
+nunca está mais perto do que a foto viu.
+
+**E ainda assim cobria a cena inteira.** Pintei a camada de vermelho para diagnosticar: a
+tela ficou toda vermelha. Medindo vértice a vértice, **71,4% do fundo estava à frente**. A
+causa era o slider "Profundidade do relevo": em 70% ele comprime a malha real em direção
+ao raio médio, enquanto o fundo usava o raio cru — duas regras diferentes, camadas
+entrelaçadas. Agora as duas passam pela mesma mistura; como ela é monótona no raio, a
+invariante sobrevive. Resultado: 0,0% à frente.
+
+Custo: ~3 min de processamento na fila, 200 KB de textura e 650 KB de profundidade por
+ambiente, só carregados no modo de caminhada. O modelo é opcional:
+`python baixar_modelo.py --fundo`.
+
 ## O borrão ao caminhar: o que dá e o que não dá
 
 Andando pelo ambiente, algumas regiões esticam num borrão — tipicamente o chão atrás de

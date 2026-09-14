@@ -246,6 +246,14 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <button style="width:100%" id="btArea" onclick="medirArea()">Medir o ambiente</button>
       <div id="blocoArea"></div>
 
+      <h2 style="margin-top:20px">Reconstruir atrás dos móveis</h2>
+      <button style="width:100%" id="btFundo" onclick="gerarFundo()">Gerar camada de fundo</button>
+      <div id="blocoFundo"></div>
+      <div class="dica">Caminhando, o visitante enxerga além das bordas do que a foto
+        registrou, e ali não há dado. Esta camada preenche o vão com IA.
+        <b>É conteúdo gerado, não o imóvel</b> — o visitante é avisado na tela.
+        Leva uns 3 minutos.</div>
+
       <h2 style="margin-top:20px">Andar pelo ambiente</h2>
       <div id="blocoProfundidade"></div>
       <div class="dica">Calcula a profundidade de cada ponto do panorama para o
@@ -459,6 +467,7 @@ function abrirCena(id){
   $('covHaov').value = Math.round(c.haov);
   desenharArea(c);
   desenharCorrecao(c);
+  desenharFundo(c);
   desenharProfundidade(c);
   desenharHotspots(c);
   montarVisor(c);
@@ -668,6 +677,44 @@ async function corrigirCena(){
     });
   }catch(e){ aviso('Falha ao corrigir: ' + e, 'erro'); }
   finally{ bt.disabled = false; bt.textContent = 'Endireitar e refazer o teto'; }
+}
+
+function desenharFundo(c){
+  const f = c.fundo;
+  $('btFundo').disabled = !c.profundidade;
+  $('btFundo').textContent = f ? 'Gerar de novo' : 'Gerar camada de fundo';
+  $('blocoFundo').innerHTML = !c.profundidade
+    ? '<div class="dica">Gere a profundidade antes: a camada de fundo sai dela.</div>'
+    : (!f ? '' : `
+    <div style="background:var(--painel2);border-radius:8px;padding:11px 13px;margin-top:8px">
+      <div style="font-size:15px;font-weight:600">${nBR(f.reconstruido)}% reconstruído</div>
+      <div class="dica" style="margin-top:2px">Gerado por IA. O visitante vê o aviso
+        no modo de caminhada.</div>
+      <button style="width:100%;margin-top:8px" onclick="removerFundo()">Remover</button>
+    </div>`);
+}
+
+async function gerarFundo(){
+  const bt = $('btFundo');
+  bt.disabled = true; bt.textContent = 'Reconstruindo...';
+  try{
+    const j = await (await fetch(API + '/cenas/' + cenaAtual + '/fundo',
+                                 {method: 'POST'})).json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    acompanhar(j.tarefa, async () => {
+      await carregar();
+      aviso('Camada de fundo pronta. Abra <b>Andar pelo ambiente</b> para ver.', 'ok');
+    });
+  }catch(e){ aviso('Falha: ' + e, 'erro'); }
+  finally{ bt.disabled = false; }
+}
+
+async function removerFundo(){
+  const j = await (await fetch(API + '/cenas/' + cenaAtual + '/fundo',
+                               {method: 'DELETE'})).json();
+  if (!j.ok) return aviso(j.erro || 'Falha ao remover.', 'erro');
+  await carregar();
+  aviso('Camada de fundo removida.', 'ok');
 }
 
 async function medirArea(){

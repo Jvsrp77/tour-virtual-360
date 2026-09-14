@@ -27,6 +27,7 @@ import cena_demo
 import profundidade
 import tarefas
 import area
+import fundo
 import marca
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -141,7 +142,7 @@ _TRAVA_MESTRA = threading.Lock()
 
 ROTAS_PESADAS = {"api.api_costurar", "api.api_importar_varredura",
                  "api.api_importar_360", "api.api_gerar_profundidade",
-                 "api.api_corrigir_cena"}
+                 "api.api_corrigir_cena", "api.api_fundo"}
 
 
 def trava_do_imovel(imovel_id):
@@ -395,6 +396,9 @@ def limpar_cenas_orfas():
                           "miniatura", "esboco"):
                 if cena.get(chave):
                     usados.add(cena[chave])
+            for chave in ("textura", "profundidade"):
+                if (cena.get("fundo") or {}).get(chave):
+                    usados.add(cena["fundo"][chave])
             if cena.get("arquivo"):
                 usados.add("orig_" + cena["arquivo"])   # pristino da marca no chao
 
@@ -816,6 +820,12 @@ def api_remover_cena(cena_id):
         return jsonify({"ok": False, "erro": "Cena nao encontrada."}), 404
 
     # o panorama e tambem o mapa de profundidade e a previa, senao ficam orfaos
+    for chave in ("textura", "profundidade"):
+        nome = (cena.get("fundo") or {}).get(chave)
+        if nome:
+            caminho = os.path.join(pasta_cenas(), nome)
+            if os.path.exists(caminho):
+                os.remove(caminho)
     for chave in ("arquivo", "profundidade", "previa_profundidade",
                   "miniatura", "esboco"):
         if chave == "arquivo":
@@ -1018,6 +1028,68 @@ def api_corrigir_cena(cena_id):
         return {"cena": atual, "correcao": info}
 
     tid = tarefas.criar(imovel, "correcao", "Corrigindo %s" % cena["nome"])
+    tarefas.enfileirar(tid, trabalho)
+    return jsonify({"ok": True, "tarefa": tid}), 202
+
+
+@api.route("/cenas/<cena_id>/fundo", methods=["POST", "DELETE"])
+def api_fundo(cena_id):
+    """
+    Gera (ou remove) a camada de fundo: o que provavelmente esta atras dos moveis.
+
+    Caminhando, o visitante enxerga alem das bordas do que a foto registrou. Ali
+    nao ha dado, e a malha esticava a textura. Esta camada da conteudo proprio ao
+    vao — CONTEUDO GERADO, nao o imovel — e por isso a cena fica marcada e o
+    visualizador avisa na tela.
+    """
+    tour = carregar_tour()
+    cena = achar_cena(tour, cena_id)
+    if not cena:
+        return jsonify({"ok": False, "erro": "Cena não encontrada."}), 404
+
+    if request.method == "DELETE":
+        cena.pop("fundo", None)
+        salvar_tour(tour)
+        return jsonify({"ok": True})
+
+    if not cena.get("profundidade"):
+        return jsonify({"ok": False, "erro":
+                        "Gere a profundidade antes: a camada de fundo sai dela."}), 422
+    if not fundo.modelo_disponivel():
+        return jsonify({"ok": False, "erro":
+                        "O modelo de reconstrução não está instalado. Rode "
+                        "'python baixar_modelo.py --fundo' uma vez (208 MB)."}), 422
+
+    imovel = g.imovel
+    destino = pasta_cenas()
+    panorama = os.path.join(destino, cena["arquivo"])
+    profundo = os.path.join(destino, cena["profundidade"])
+
+    def trabalho(relatar):
+        relatar(5, "procurando o que está na frente")
+        textura, disp, info = fundo.gerar(panorama, profundo, relatar=relatar)
+
+        relatar(96, "gravando a camada")
+        nome_tex = "fundotex_%s.jpg" % cena_id
+        ok, buf = cv2.imencode(".jpg", textura, [cv2.IMWRITE_JPEG_QUALITY, 86])
+        if not ok:
+            raise RuntimeError("falha ao gravar a textura de fundo")
+        buf.tofile(os.path.join(destino, nome_tex))
+
+        nome_prof = "fundoprof_%s.png" % cena_id
+        profundidade.salvar(disp, os.path.join(destino, nome_prof))
+
+        with trava_do_imovel(imovel):
+            tour = carregar_tour(imovel)
+            atual = achar_cena(tour, cena_id)
+            if not atual:
+                raise RuntimeError("A cena foi removida durante a reconstrução.")
+            atual["fundo"] = {"textura": nome_tex, "profundidade": nome_prof,
+                              "reconstruido": info["reconstruido"], "gerado_por_ia": True}
+            salvar_tour(tour, imovel)
+        return {"cena": atual, "info": info}
+
+    tid = tarefas.criar(imovel, "fundo", "Camada de fundo de %s" % cena["nome"])
     tarefas.enfileirar(tid, trabalho)
     return jsonify({"ok": True, "tarefa": tid}), 202
 
@@ -1273,6 +1345,12 @@ def api_exportar():
         for cena in tour["cenas"]:
             # o panorama, o poster de abertura, a miniatura do menu e — quando
             # existir — o mapa de profundidade que permite andar
+            f = cena.get("fundo") or {}
+            for chave in ("textura", "profundidade"):
+                if f.get(chave):
+                    caminho = os.path.join(pasta_cenas(), f[chave])
+                    if os.path.exists(caminho):
+                        z.write(caminho, "scenes/%s" % f[chave])
             for chave in ("arquivo", "profundidade", "miniatura", "esboco"):
                 nome = cena.get(chave)
                 if not nome:

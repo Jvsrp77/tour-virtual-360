@@ -15,6 +15,10 @@ DESTINO = os.path.join(PASTA, "depth.onnx")
 URL = ("https://huggingface.co/onnx-community/depth-anything-v2-small"
        "/resolve/main/onnx/model.onnx")
 
+# opcional: reconstroi o que esta atras dos moveis no modo de caminhada
+DESTINO_FUNDO = os.path.join(PASTA, "lama.onnx")
+URL_FUNDO = "https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx"
+
 
 def progresso(blocos, tamanho_bloco, total):
     if total <= 0:
@@ -24,7 +28,27 @@ def progresso(blocos, tamanho_bloco, total):
     sys.stdout.flush()
 
 
+def baixar(url, destino, rotulo, mb):
+    if os.path.exists(destino) and os.path.getsize(destino) > 1_000_000:
+        print("%s ja esta instalado em %s" % (rotulo, destino))
+        return 0
+    os.makedirs(PASTA, exist_ok=True)
+    print("Baixando %s (%d MB)..." % (rotulo, mb))
+    try:
+        urllib.request.urlretrieve(url, destino + ".parcial", progresso)
+    except Exception as e:
+        print("\nFalhou: %s" % e)
+        print("Baixe manualmente de:\n  %s\ne salve como:\n  %s" % (url, destino))
+        return 1
+    os.replace(destino + ".parcial", destino)
+    print("\nPronto: %s (%.0f MB)" % (destino, os.path.getsize(destino) / 1e6))
+    return 0
+
+
 def main():
+    if "--fundo" in sys.argv:
+        return baixar(URL_FUNDO, DESTINO_FUNDO,
+                      "o modelo de reconstrucao de fundo", 208)
     if os.path.exists(DESTINO) and os.path.getsize(DESTINO) > 1_000_000:
         print("Modelo ja esta instalado em %s" % DESTINO)
         return 0

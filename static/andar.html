@@ -337,7 +337,9 @@ async function carregarPonto(p){
   p.raioMedio = soma / raios.length;
 
   p.malha = malha; p.direcoes = direcoes; p.raios = raios;
+  p.escalaFundo = escala;            // a camada de fundo usa a mesma calibracao
   p.carregando = false;
+  if (p.cena.fundo) carregarFundo(p).catch(() => {});
   p.usoEm = performance.now();
   aplicarForcaEm(p);
   limparAntigas();
@@ -351,8 +353,63 @@ function aplicarEstado(p, opacidade, escreveProfundidade){
   const d = posicao.distanceTo(p.mundo);
   const nitidez = Math.max(SOMBRA, 1 - d / ESCURECE_ATE);
   porMaterial(p.malha, m => { m.opacity = opacidade; m.depthWrite = escreveProfundidade; });
-  // escurecer multiplica a textura: o borrao vira sombra sem furar a esfera
-  p.malha.material[1].color.setScalar(nitidez);
+  if (p.fundo){
+    // com camada de fundo o vao tem conteudo: em vez de escurecer, some e
+    // deixa ver o que foi reconstruido atras
+    p.malha.material[1].color.setScalar(1);
+    p.malha.material[1].opacity = opacidade * Math.max(0, (nitidez - SOMBRA) / (1 - SOMBRA));
+    p.fundo.material.opacity = opacidade;
+    p.fundo.visible = p.malha.visible;
+  } else {
+    // sem ela, o borrao vira sombra: nao furar a esfera evita ver a parede oposta
+    p.malha.material[1].color.setScalar(nitidez);
+  }
+}
+
+// A camada de fundo e conteudo GERADO: o que provavelmente esta atras dos
+// moveis, que a foto nunca viu. Fica atras da camada real e so aparece pelas
+// frestas que o deslocamento abre — melhor do que o borrao que havia ali.
+async function carregarFundo(p){
+  const f = p.cena.fundo;
+  if (!f || p.fundo) return;
+  const [textura, prof] = await Promise.all([
+    carregarTextura(CENAS + f.textura),
+    carregarProfundidade(CENAS + f.profundidade)
+  ]);
+  const nv = (GRADE_L + 1) * (GRADE_A + 1);
+  const pos = new Float32Array(nv * 3), uvs = new Float32Array(nv * 2);
+  const raiosF = new Float32Array(nv);
+  let k = 0;
+  for (let j = 0; j <= GRADE_A; j++){
+    const v = j / GRADE_A, lat = (v - 0.5) * Math.PI;
+    for (let i = 0; i <= GRADE_L; i++){
+      const u = i / GRADE_L, lon = (u - 0.5) * 2 * Math.PI;
+      const px = Math.min(prof.largura-1, Math.round(u * prof.largura));
+      const py = Math.min(prof.altura-1,  Math.round(v * prof.altura));
+      raiosF[k] = raio(prof.dados[py * prof.largura + px]) * p.escalaFundo;
+      uvs[k*2] = u; uvs[k*2+1] = v;
+      k++;
+    }
+  }
+  const idx = [];
+  for (let j = 0; j < GRADE_A; j++)
+    for (let i = 0; i < GRADE_L; i++){
+      const a = j*(GRADE_L+1)+i, b = a+1, c = a+GRADE_L+1, d = c+1;
+      idx.push(a, c, b, b, c, d);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  g.setIndex(idx);
+  const malha = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    map: textura, side: THREE.DoubleSide, transparent: true, opacity: 1,
+    depthWrite: true
+  }));
+  malha.position.copy(p.mundo);
+  malha.renderOrder = -1;            // sempre atras da camada real
+  cena3d.add(malha);
+  p.fundo = malha; p.raiosFundo = raiosF;
+  aplicarForcaEm(p);                 // nasce com o mesmo relevo da camada real
 }
 
 function limparAntigas(){
@@ -363,6 +420,14 @@ function limparAntigas(){
     p.malha.geometry.dispose();
     p.malha.material[0].map.dispose();
     porMaterial(p.malha, m => m.dispose());
+    p.raiosFundo = null;
+    if (p.fundo){
+      cena3d.remove(p.fundo);
+      p.fundo.geometry.dispose();
+      p.fundo.material.map.dispose();
+      p.fundo.material.dispose();
+      p.fundo = null;
+    }
     p.malha = null; p.direcoes = null; p.raios = null;
   });
 }
@@ -380,6 +445,21 @@ function aplicarForcaEm(p){
   }
   p.malha.geometry.attributes.position.needsUpdate = true;
   p.malha.geometry.computeBoundingSphere();
+
+  // A camada de fundo tem de seguir a MESMA regra. Com o relevo em 70%, a malha
+  // real e comprimida em direcao ao raio medio; deixar o fundo no raio cru punha
+  // 71% dele NA FRENTE — a camada gerada cobria a cena inteira. Como a mistura e
+  // monotonica no raio, aplicar a mesma preserva "o fundo nunca esta na frente".
+  if (!p.fundo || !p.raiosFundo) return;
+  const pf = p.fundo.geometry.attributes.position.array;
+  for (let k = 0; k < p.raiosFundo.length; k++){
+    const r = (p.raioMedio * (1 - f) + p.raiosFundo[k] * f) * 1.01;
+    pf[k*3]   = p.direcoes[k*3]   * r;
+    pf[k*3+1] = p.direcoes[k*3+1] * r;
+    pf[k*3+2] = p.direcoes[k*3+2] * r;
+  }
+  p.fundo.geometry.attributes.position.needsUpdate = true;
+  p.fundo.geometry.computeBoundingSphere();
 }
 
 // ------------------------------------------------------------- movimentacao
@@ -442,9 +522,13 @@ function atualizarPainel(){
     : 'você pode se deslocar dentro do ambiente';
   // dizer quanto foi omitido e mais honesto do que deixar o vazio sem explicacao
   const dv = ativo.duvidosa;
-  $('subCena').textContent = base + (dv > 0.005
-    ? ' · ' + (dv*100).toFixed(1) + '% da cena é deduzido: a foto não viu atrás dos móveis'
-    : '');
+  const f = ativo.cena.fundo;
+  // quem olha um anuncio precisa saber o que e foto e o que foi gerado
+  $('subCena').textContent = base + (f
+    ? ' · ' + f.reconstruido + '% reconstruído por IA (atrás dos móveis)'
+    : (dv > 0.005
+        ? ' · ' + (dv*100).toFixed(1) + '% da cena é deduzido: a foto não viu atrás dos móveis'
+        : ''));
 }
 
 function recentrar(){ posicao.copy(ativo.mundo); }
@@ -568,8 +652,10 @@ function animar(){
   // Cada ponto e uma esfera que envolve a camera; se duas ficarem visiveis ao mesmo
   // tempo, uma tapa a outra e a tela fica preta pela metade. So o ponto atual aparece,
   // mais o anterior enquanto dura a transicao.
-  for (const p of pontos)
+  for (const p of pontos){
     if (p.malha) p.malha.visible = (p === ativo || p === saindo);
+    if (p.fundo) p.fundo.visible = (p === ativo || p === saindo);
+  }
 
   if (fade < 1){
     fade = Math.min(1, fade + 0.045);
