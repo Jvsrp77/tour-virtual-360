@@ -449,6 +449,49 @@ class TestContas(Base):
         self.assertIsNone(usuarios.obter(aplicacao.PASTA_DADOS, "intruso"))
 
 
+class TestConferenciaDaCaptura(unittest.TestCase):
+    """
+    A conferencia diz QUAL foto atrapalhou.
+
+    Antes a recusa era generica ("as fotos nao tem sobreposicao") e o corretor
+    nao sabia o que mudar. O risco novo e o oposto: aviso que aparece em captura
+    boa ensina a ignorar o aviso, entao o silencio no caso bom vale tanto quanto
+    o diagnostico no caso ruim.
+    """
+
+    def _liso(self, largura=900, altura=1200):
+        import numpy as np
+        return np.full((altura, largura, 3), 210, np.uint8)
+
+    def _texturado(self, deslocamento=0, largura=900, altura=1200):
+        import numpy as np
+        rnd = np.random.RandomState(7)
+        fundo = rnd.randint(0, 255, (altura, largura * 3, 3)).astype("uint8")
+        fundo = np.repeat(np.repeat(fundo[::6, ::6], 6, 0), 6, 1)[:altura, :largura * 3]
+        x = largura // 2 + deslocamento
+        return fundo[:, x:x + largura].copy()
+
+    def test_parede_lisa_e_apontada_pelo_numero(self):
+        imagens = [self._texturado(0), self._texturado(120), self._liso(),
+                   self._texturado(240)]
+        achados = " ".join(stitcher.conferir_captura(imagens))
+        self.assertIn("textura", achados.lower())
+        self.assertIn("Foto 3", achados, "precisa dizer QUAL foto: " + achados)
+
+    def test_captura_boa_nao_gera_aviso(self):
+        """Silencio no caso bom: aviso em captura boa ensina a ignorar avisos."""
+        imagens = [self._texturado(d) for d in (0, 90, 180, 270)]
+        self.assertEqual(stitcher.conferir_captura(imagens), [])
+
+    def test_uma_foto_so_nao_quebra(self):
+        self.assertEqual(stitcher.conferir_captura([self._texturado(0)]), [])
+
+    def test_diagnostico_entra_na_mensagem_de_erro(self):
+        self.assertIn("vi nas suas fotos",
+                      stitcher._com_conferencia("Recusado.", ["a foto 3 está lisa"]))
+        self.assertEqual(stitcher._com_conferencia("Recusado.", []), "Recusado.")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

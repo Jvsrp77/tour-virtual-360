@@ -665,6 +665,154 @@ def _nivelar(panorama):
         return panorama, {"aplicado": False, "motivo": "falha ao nivelar"}
 
 
+# --------------------------------------------------------- conferir a captura
+
+LARGURA_CONFERENCIA = 1000   # resolucao de trabalho da conferencia
+TEXTURA_MINIMA = 400         # pontos SIFT: abaixo disto a foto e superficie lisa
+SOBREPOSICAO_MINIMA = 25     # pares casados: abaixo disto as fotos mal se tocam
+PARALAXE_ALTA = 1.35         # inliers F/H: acima disto a camera saiu do lugar
+PARALAXE_LEVE = 1.15
+
+
+def _lista_de_numeros(numeros):
+    """[7, 8, 9] -> "7, 8 e 9" """
+    n = [str(x) for x in numeros]
+    if len(n) == 1:
+        return n[0]
+    return ", ".join(n[:-1]) + " e " + n[-1]
+
+
+def _com_conferencia(mensagem, achados):
+    """Junta o diagnostico por foto ao motivo generico da recusa."""
+    if not achados:
+        return mensagem
+    return mensagem + "\n\nO que eu vi nas suas fotos:\n" + "\n".join(
+        "- " + a for a in achados)
+
+
+def conferir_captura(imagens, relatar=None):
+    """
+    Diagnostica a captura ANTES de costurar, foto a foto e par a par.
+
+    A costura ja reprova captura ruim, mas so depois de minutos e sem dizer QUAL
+    foto atrapalhou: o usuario recebe "as fotos nao tem sobreposicao" e nao sabe
+    onde errou. Aqui o defeito sai com numero de foto.
+
+    Como se separa GIRO de PASSO sem conhecer a distancia de nada: camera que
+    apenas gira e explicada inteira por uma homografia, perto e longe igual.
+    Camera que anda produz paralaxe — o que esta perto se desloca mais que o
+    fundo — e entao a matriz fundamental, que admite translacao, casa bem mais
+    pontos que a homografia. A razao entre as duas denuncia o passo.
+
+    Medido nas 19 fotos do quarto: os pares limpos deram razao 1,03 e 1,14; os
+    pares em que a pessoa mudou de lugar deram de 1,31 a 1,95. As quatro fotos de
+    porta de armario lisa deram 69 a 167 pontos, contra 4038 da melhor foto.
+
+    So descreve; nao reprova nada. Um salto entre vizinhas nao condena a costura,
+    porque o alinhador compara TODOS os pares, e nao apenas os consecutivos — a
+    foto 3 pode fechar com a 9. Reprovar aqui criaria recusa falsa.
+    """
+    aviso = relatar or (lambda p, e: None)
+    if len(imagens) < 2:
+        return []
+
+    sift = cv2.SIFT_create(nfeatures=2000)
+    fotos = []
+    for i, img in enumerate(imagens):
+        cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        escala = LARGURA_CONFERENCIA / float(cinza.shape[1])
+        if escala < 1.0:
+            cinza = cv2.resize(cinza, (0, 0), fx=escala, fy=escala,
+                               interpolation=cv2.INTER_AREA)
+        kp, des = sift.detectAndCompute(cinza, None)
+        fotos.append({"pontos": len(kp), "kp": kp, "des": des,
+                      "nitidez": float(cv2.Laplacian(cinza, cv2.CV_64F).var())})
+        aviso(12 + int(6.0 * (i + 1) / len(imagens)), "conferindo a captura")
+
+    achados = []
+    melhor = max(f["pontos"] for f in fotos)
+
+    # 1. fotos sem textura: superficie lisa ocupando o quadro
+    lisas = [i + 1 for i, f in enumerate(fotos) if f["pontos"] < TEXTURA_MINIMA]
+    for i in lisas:
+        fotos[i - 1]["lisa"] = True
+    if lisas:
+        achados.append(
+            "Foto %s: quase sem textura (%s pontos de referência, contra %d da "
+            "melhor foto do lote). Parede ou porta lisa ocupando a tela inteira não "
+            "dá ao alinhamento onde se apoiar. Inclua uma quina, o rodapé ou a linha "
+            "do teto no quadro — ou afaste-se, que é o que acontece sozinho quando "
+            "você fotografa do meio do cômodo."
+            % (_lista_de_numeros(lisas),
+               _lista_de_numeros([fotos[i - 1]["pontos"] for i in lisas]),
+               melhor))
+
+    # 2. fotos tremidas: so entre as que TEM textura, senao a parede lisa, que e
+    #    naturalmente pouco nitida, seria acusada de tremida tambem
+    comTextura = [f for f in fotos if not f.get("lisa")]
+    if len(comTextura) >= 3:
+        mediana = float(np.median([f["nitidez"] for f in comTextura]))
+        # 0,3 e nao 0,4: em 0,4 uma foto apenas um pouco menos nitida que as
+        # vizinhas ja era acusada, e aviso que cai em foto boa ensina a ignorar
+        # o aviso. Na medida do quarto a tremida de verdade ficou em 0,18 da
+        # mediana, com folga larga para o limiar.
+        tremidas = [i + 1 for i, f in enumerate(fotos)
+                    if not f.get("lisa") and f["nitidez"] < 0.3 * mediana]
+        if tremidas:
+            achados.append(
+                "Foto %s: saiu tremida ou fora de foco, bem menos nítida que as "
+                "outras do lote. Cômodo com pouca luz faz o celular demorar no "
+                "clique; encoste o cotovelo no corpo e fique parado no disparo."
+                % _lista_de_numeros(tremidas))
+
+    # 3. par a par: sobreposicao e giro-vs-passo
+    bf = cv2.BFMatcher()
+    saltos, andou, razoes = [], [], []
+    for i in range(len(fotos) - 1):
+        a, b = fotos[i], fotos[i + 1]
+        aviso(18, "conferindo a captura")
+        if a["des"] is None or b["des"] is None:
+            continue
+        brutos = bf.knnMatch(a["des"], b["des"], k=2)
+        bons = [m for m, n in brutos if len(brutos[0]) == 2 and m.distance < 0.75 * n.distance]
+        if len(bons) < SOBREPOSICAO_MINIMA:
+            saltos.append((i + 1, i + 2, len(bons)))
+            continue
+        pa = np.float32([a["kp"][m.queryIdx].pt for m in bons])
+        pb = np.float32([b["kp"][m.trainIdx].pt for m in bons])
+        _, mascH = cv2.findHomography(pa, pb, cv2.RANSAC, 3.0)
+        _, mascF = cv2.findFundamentalMat(pa, pb, cv2.FM_RANSAC, 3.0, 0.99)
+        iH = int(mascH.sum()) if mascH is not None else 0
+        iF = int(mascF.sum()) if mascF is not None else 0
+        if iH < 20:
+            continue
+        razao = iF / float(iH)
+        razoes.append(razao)
+        if razao > PARALAXE_ALTA:
+            andou.append((i + 1, i + 2, razao))
+
+    if saltos:
+        achados.append(
+            "Entre as fotos %s quase não há sobreposição. Cada foto precisa repetir "
+            "uns 30%% do que aparece na anterior: a borda de uma tem que cair no meio "
+            "da seguinte. Gire menos a cada clique."
+            % _lista_de_numeros(["%d e %d" % (x, y) for x, y, _ in saltos]))
+
+    if andou:
+        piores = sorted(andou, key=lambda t: -t[2])[:4]
+        achados.append(
+            "Em %d de %d trechos a câmera saiu do lugar entre um clique e outro — os "
+            "objetos próximos se deslocaram em relação ao fundo, coisa que girar no "
+            "eixo não produz. Mais evidente entre as fotos %s. Não existe encaixe "
+            "correto para fotos tiradas de pontos diferentes: o alinhamento resolve "
+            "entortando. Marque um ponto no chão, mantenha os pés nele e gire em "
+            "volta do aparelho, não do corpo."
+            % (len(andou), len(fotos) - 1,
+               _lista_de_numeros(["%d e %d" % (x, y) for x, y, _ in piores])))
+
+    return achados
+
+
 def costurar(caminhos, pasta_saida, relatar=None):
     """
     Costura N fotos numa panoramica esferica.
@@ -680,6 +828,13 @@ def costurar(caminhos, pasta_saida, relatar=None):
     aviso(10, "lendo %d fotos" % len(caminhos))
     originais = [_ler_imagem(c) for c in caminhos]
 
+    # Conferir ANTES: o que for dito aqui explica tanto a falha quanto o torto que
+    # passa. Nunca reprova sozinho — ver conferir_captura.
+    try:
+        conferencia = conferir_captura(originais, aviso)
+    except Exception:
+        conferencia = []          # diagnostico e ajuda, nao pode derrubar a costura
+
     larguras = _larguras_a_tentar(len(caminhos))
     panorama = geo = None
     codigo, motivo = cv2.STITCHER_ERR_NEED_MORE_IMGS, None
@@ -692,25 +847,27 @@ def costurar(caminhos, pasta_saida, relatar=None):
     del originais
     if panorama is None:
         if motivo == "estreito":
-            raise ErroCostura(
+            base = (
                 "Consegui encaixar só uma faixa estreita das fotos — o resultado ficaria "
                 "quase do tamanho de uma foto só, sem servir como 360. Isso indica que as "
                 "fotos pegam pedaços diferentes do cômodo e mal se tocam. Fique parado no "
                 "mesmo ponto e tire de 8 a 12 fotos girando aos poucos.")
-        if motivo == "descartadas":
-            raise ErroCostura(
+        elif motivo == "descartadas":
+            base = (
                 "A maioria das fotos não encaixou com as vizinhas e ficou de fora, "
                 "então sobraria só um pedaço do cômodo. Isso costuma acontecer quando "
                 "a sequência tem saltos: você girou demais entre alguns cliques, ou "
                 "misturou fotos de ambientes diferentes no mesmo envio.")
-        if motivo == "deformado":
-            raise ErroCostura(
+        elif motivo == "deformado":
+            base = (
                 "As fotos até se encaixaram, mas o cômodo saiu torto: as paredes viraram "
                 "um arco e sobrou vazio em volta. Isso acontece quando as fotos são tiradas "
                 "de pontos diferentes do cômodo — ao mudar de lugar, os móveis se deslocam "
                 "uns em relação aos outros e não existe encaixe correto possível. "
                 "Refaça ficando parado no mesmo ponto, girando só o corpo, com 8 a 12 fotos.")
-        raise ErroCostura(_diagnostico(codigo, imagens))
+        else:
+            base = _diagnostico(codigo, imagens)
+        raise ErroCostura(_com_conferencia(base, conferencia))
 
     # O corte das bordas e a validacao ja aconteceram dentro de _tentar_costurar.
     # O acabamento vem depois de propositio: preencher as bordas deixaria a imagem
@@ -761,6 +918,9 @@ def costurar(caminhos, pasta_saida, relatar=None):
 
     info["vaov"] = 180.0 if info["fechada"] else info["haov"] * (h / float(w))
     info["exposicao"] = {"antes": antes, "depois": depois}
+    # captura que passou raspando tambem merece explicacao: o panorama sai, mas
+    # com o entorte que a conferencia ja tinha visto
+    info["conferencia"] = conferencia
     return nome, w, h, info
 
 

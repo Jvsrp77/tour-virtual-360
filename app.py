@@ -851,7 +851,9 @@ def api_costurar():
                     tour["cena_inicial"] = cena["id"]
                 salvar_tour(tour, imovel)
 
-            avisos = []
+            # o que a conferencia viu na captura vem primeiro: e o que o corretor
+            # precisa mudar na proxima vez
+            avisos = list(info.get("conferencia") or [])
             if not info["fechada"]:
                 avisos.append(
                     "Você cobriu %.0f graus, com um vão de %.0f graus sem foto. O "

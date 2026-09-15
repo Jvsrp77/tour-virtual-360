@@ -68,6 +68,18 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
+    # a conferencia so vale se ACUSAR: se ela calar, o corretor volta a receber
+    # "as fotos nao tem sobreposicao" sem saber qual foto trocar
+    ("conferencia nao ve parede lisa", "stitcher.py",
+     '    lisas = [i + 1 for i, f in enumerate(fotos) if f["pontos"] < TEXTURA_MINIMA]',
+     "    lisas = []",
+     "TestConferenciaDaCaptura.test_parede_lisa_e_apontada_pelo_numero"),
+
+    ("diagnostico nao chega no erro", "stitcher.py",
+     "    if not achados:\n        return mensagem",
+     "    if True:\n        return mensagem",
+     "TestConferenciaDaCaptura.test_diagnostico_entra_na_mensagem_de_erro"),
+
     ("onclick sem funcao no painel", "static/admin.html",
      'onclick="baixarLeads()"',
      'onclick="baixarLeadsQueNaoExiste()"',
