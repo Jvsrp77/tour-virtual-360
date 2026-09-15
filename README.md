@@ -273,6 +273,60 @@ baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
 Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
 repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
 
+## Alinhamento estável, e a resolução que ele destravou
+
+A mesma captura dava panoramas diferentes a cada tentativa. Medido com 34 fotos a
+1600 px, cinco execuções:
+
+```
+8269x4084 | recusado | 6645x2904 | recusado | 8123x3321     4 resultados distintos
+```
+
+Causa: o alinhamento do OpenCV usa RANSAC, que sorteia. `cv2.setRNGSeed()` antes de cada
+tentativa levou a **5 de 5 idênticos**, com custo zero.
+
+Rodar com uma thread só também daria determinismo, e foi testado: **5 de 5 recusados**.
+Seria trocar "imprevisivelmente bom" por "previsivelmente ruim".
+
+### A lógica da resolução estava invertida
+
+`_largura_trabalho` reduzia a resolução conforme o número de fotos crescia — quem
+capturava melhor era punido com menos nitidez. Com 34 fotos de iPhone o software usava
+1000 px de 3024 disponíveis: **11% dos pixels que a câmera capturou**.
+
+Agora é uma escada que começa alto e cai se o alinhamento não convergir. A queda não é
+luxo: o comportamento do OpenCV **não é monotônico na resolução** — 1600 aprovou, 2000 foi
+recusado por deformação, 2400 aprovou com o melhor preenchimento de todos (0,917).
+
+### Dois defeitos que a resolução maior revelou
+
+**A volta deixou de fechar.** A 2400 px o ajuste de feixe devolve uma focal fora da
+realidade, a estimativa cai para não-confiável, e o código recorria à **proporção da
+imagem** — critério que o próprio `_geometria` já documentava como errado para captura em
+fileiras, porque fileiras aumentam a altura. O panorama saiu 8000×3729 (proporção 2,15),
+a regra exigia 2,6, e a cena perdia esfera completa, teto refeito e caminhada.
+
+Conserto: julgar pelos **ângulos de giro**, que vêm das matrizes de rotação e não passam
+pela focal. Só a comparação antiga dependia dela.
+
+**Uma mancha preta no meio da imagem.** O buraco interior foi de 0,43% (a 1000 px) para
+**2,11%** (a 2400 px). A extensão de bordas não o cobria: ele tem conteúdo válido dos dois
+lados. Tapado com `cv2.inpaint` — e vale notar que é o mesmo `cv2.inpaint` **rejeitado**
+para tirar móvel da frente da parede. Lá a área é grande e ele vira borrão; aqui são
+buracos pequenos cercados de textura, que é para o que ele foi feito.
+
+### Resultado, nas 34 fotos do quarto
+
+| | Antes | Agora |
+|---|---|---|
+| Repetibilidade (5 execuções) | 4 resultados | **1** |
+| Volta fechada | False | **True** |
+| Resolução angular | 12,0 px/grau | **22,2 px/grau** |
+| Buraco interior | 2,11% | **0,01%** |
+| Tempo | 23 s | 76 s |
+
+O tempo triplicou, e isso é aceitável: a costura roda na fila, em segundo plano.
+
 ## O contato sai do arquivo
 
 Antes o lead caía no `tour.json` e ficava lá: para vê-lo era preciso abrir o painel e

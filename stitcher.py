@@ -29,19 +29,33 @@ LARGURA_MAX_SAIDA = 8000     # teto de seguranca da imagem final
 MINIMO_RECOMENDADO = 6       # abaixo disso a chance de sucesso cai muito
 
 
-def _largura_trabalho(quantidade):
+SEMENTE = 12345           # ver _tentar_costurar: e o que torna a costura repetivel
+LIMITE_GIRO_FECHADO = 55.0   # ver _geometria: fechamento sem depender da focal
+
+
+def _larguras_a_tentar(quantidade):
     """
-    Reduz a resolucao de trabalho conforme o numero de fotos cresce.
-    O custo da costura sobe com o total de pixels, entao sem isso um lote
-    grande leva minutos e consome memoria demais.
+    Larguras de trabalho, da maior para a menor.
+
+    Antes era uma largura so, escolhida pelo numero de fotos, e quanto mais fotos
+    MENOR ela ficava — a captura caprichada em 3 fileiras saia menos nitida que a
+    de uma fileira. Com 34 fotos de iPhone o software usava 1000 px de 3024: 11%
+    dos pixels que a camera capturou.
+
+    Agora comeca alto e cai se o alinhamento nao convergir. A queda nao e luxo: o
+    comportamento do OpenCV NAO e monotonico na resolucao. Medido nas 34 fotos do
+    quarto, com semente fixa: 1600 aprovou, 2000 foi recusado por deformacao, e
+    2400 aprovou com o melhor preenchimento de todos (0,917). Sem a queda, um lote
+    que calha de cair num vale desses falharia por inteiro.
+
+    Lotes grandes comecam mais baixo por memoria: 34 fotos a 2400 px ja ocupam
+    perto de 800 MB so nas imagens de entrada.
     """
-    if quantidade >= 30:      # captura em 3 fileiras
-        return 1000
-    if quantidade >= 20:      # 2 fileiras
-        return 1200
-    if quantidade >= 14:
-        return 1400
-    return 1600
+    if quantidade >= 45:
+        return (1600, 1200, 1000)
+    if quantidade >= 20:
+        return (2400, 1600, 1200)
+    return (2400, 1600, 1400)
 
 
 def _geometria(cameras, largura_foto):
@@ -71,6 +85,17 @@ def _geometria(cameras, largura_foto):
     # visao de uma foto - abaixo disso as imagens ainda se tocam e cobrem a esfera
     fechada = maior_buraco < fov * 0.95
 
+    # O mesmo julgamento SEM depender da focal. `maior_buraco` sai dos angulos de
+    # giro, que vem das matrizes de rotacao e nao passam pela estimativa de foco;
+    # so o `fov` da comparacao acima e que depende dela. Em resolucao alta o
+    # ajuste de feixe do OpenCV as vezes devolve uma focal fora da realidade, e ai
+    # a conta acima erra — mas os angulos continuam corretos.
+    #
+    # 55 graus e o piso do campo horizontal de celular (o codigo assume 50 a 80).
+    # Usar o piso e deliberado: erra para o lado de dizer "nao fechou", que custa
+    # um panorama parcial, em vez de esticar uma captura incompleta por 360 graus.
+    fechada_por_giro = maior_buraco < LIMITE_GIRO_FECHADO
+
     span_pitch = float(pitches.max() - pitches.min())
 
     # Camera de celular fica entre 50 e 80 graus de campo horizontal. Muito fora
@@ -86,6 +111,7 @@ def _geometria(cameras, largura_foto):
         "haov": 360.0 if fechada else min(360.0, (360.0 - maior_buraco) + fov),
         "vaov_real": vaov_real,
         "fechada": fechada,
+        "fechada_por_giro": fechada_por_giro,
         "maior_buraco": maior_buraco,
         "fov": fov,
         "confiavel": confiavel,
@@ -119,6 +145,47 @@ def _redimensionar(img, largura_alvo):
         return img
     escala = largura_alvo / float(w)
     return cv2.resize(img, (int(w * escala), int(h * escala)), interpolation=cv2.INTER_AREA)
+
+
+def _tapar_buracos_internos(img, limite=0.12):
+    """
+    Preenche buracos pretos CERCADOS de imagem, que a extensao de borda nao cobre.
+
+    `_preencher_bordas_irregulares` estende cada coluna do ultimo pixel valido para
+    fora, entao resolve o recorte ondulado das pontas — mas nao um vazio no meio,
+    que fica com conteudo valido dos dois lados. Esses vazios aparecem quando a
+    costura nao junta uma regiao, tipicamente perto do polo inferior.
+
+    Medido nas 34 fotos do quarto: a 1000 px o buraco interior era 0,43% da imagem;
+    a 2400 px subiu para 2,11%, e vira uma mancha preta visivel ao olhar para baixo.
+
+    Aqui o cv2.inpaint serve: sao buracos pequenos cercados de textura, que e para
+    o que ele foi feito. (O mesmo cv2.inpaint foi REJEITADO para tirar movel da
+    frente da parede, onde a area e grande e ele transforma caneca em borrao.)
+    O limite evita o caso patologico: se o vazio for enorme, nao e buraco, e
+    costura falhada — e ai inventar textura seria pior do que deixar claro.
+    """
+    cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    vazio = (cinza <= 6).astype(np.uint8)
+    if not vazio.any():
+        return img, 0.0
+
+    altura, largura = vazio.shape
+    interno = np.zeros_like(vazio)
+    for x in range(largura):
+        validos = np.where(vazio[:, x] == 0)[0]
+        if validos.size < 2:
+            continue
+        # so o que esta ENTRE o primeiro e o ultimo pixel valido da coluna
+        interno[validos[0]:validos[-1] + 1, x] = vazio[validos[0]:validos[-1] + 1, x]
+
+    fracao = float(interno.mean())
+    if fracao == 0 or fracao > limite:
+        return img, fracao
+
+    # dilata um pouco: a borda do buraco costuma ter pixels meio pretos da mistura
+    mascara = cv2.dilate(interno, np.ones((5, 5), np.uint8), iterations=1)
+    return cv2.inpaint(img, mascara, 6, cv2.INPAINT_TELEA), fracao
 
 
 def _cortar_bordas_pretas(img):
@@ -427,6 +494,16 @@ def _tentar_costurar(imagens):
     ultimo_codigo = cv2.STITCHER_ERR_NEED_MORE_IMGS
     motivo_recusa = None
 
+    # O alinhamento do OpenCV usa RANSAC, que sorteia. Sem semente fixa, o MESMO
+    # lote de fotos dava resultados diferentes a cada tentativa: medido nas 34
+    # fotos do quarto a 1600 px, 5 execucoes deram 4 resultados distintos —
+    # 8269x4084, recusado, 6645x2904, recusado, 8123x3321. Com semente, 5 de 5
+    # identicos. Custo zero.
+    #
+    # Rodar com uma thread so tambem daria determinismo, e foi testado: deu 5 de 5
+    # RECUSADOS. Seria trocar "imprevisivelmente bom" por "previsivelmente ruim".
+    cv2.setRNGSeed(SEMENTE)
+
     for modo, confianca in tentativas:
         st = cv2.Stitcher_create(modo)
         try:
@@ -601,11 +678,18 @@ def costurar(caminhos, pasta_saida, relatar=None):
     cv2.ocl.setUseOpenCL(False)
 
     aviso(10, "lendo %d fotos" % len(caminhos))
-    largura = _largura_trabalho(len(caminhos))
-    imagens = [_redimensionar(_ler_imagem(c), largura) for c in caminhos]
+    originais = [_ler_imagem(c) for c in caminhos]
 
-    aviso(25, "alinhando e costurando")
-    panorama, codigo, motivo, geo = _tentar_costurar(imagens)
+    larguras = _larguras_a_tentar(len(caminhos))
+    panorama = geo = None
+    codigo, motivo = cv2.STITCHER_ERR_NEED_MORE_IMGS, None
+    for i, largura in enumerate(larguras):
+        aviso(25, "alinhando e costurando" + (" (%d px)" % largura if i else ""))
+        imagens = [_redimensionar(img, largura) for img in originais]
+        panorama, codigo, motivo, geo = _tentar_costurar(imagens)
+        if panorama is not None:
+            break
+    del originais
     if panorama is None:
         if motivo == "estreito":
             raise ErroCostura(
@@ -638,14 +722,21 @@ def costurar(caminhos, pasta_saida, relatar=None):
 
     aviso(85, "acabamento das bordas")
     panorama = _preencher_bordas_irregulares(panorama)
+    panorama, _buracos = _tapar_buracos_internos(panorama)
 
     info = dict(geo)
     if not geo["confiavel"]:
-        # sem geometria confiavel, volta para a leitura pela proporcao: uma faixa
-        # bem mais larga que alta so acontece quando o giro deu quase a volta
-        proporcao = panorama.shape[1] / float(panorama.shape[0])
-        info["fechada"] = proporcao >= 2.6
-        info["haov"] = 360.0 if info["fechada"] else min(360.0, proporcao * 45.0)
+        # Sem focal confiavel, julga pelos ANGULOS DE GIRO, que nao dependem dela.
+        #
+        # Antes aqui caia na proporcao da imagem, e isso quebrava exatamente a
+        # captura caprichada: fileiras aumentam a ALTURA do panorama e derrubam a
+        # proporcao mesmo com o giro horizontal completo — defeito que o proprio
+        # _geometria ja documentava. Medido nas 34 fotos do quarto em 3 fileiras:
+        # o panorama saiu 8000x3729 (proporcao 2,15), a proporcao dizia "nao
+        # fechou", e a cena perdia esfera completa, teto refeito e caminhada.
+        info["fechada"] = geo["fechada_por_giro"]
+        info["haov"] = (360.0 if info["fechada"]
+                        else min(360.0, 360.0 - geo["maior_buraco"] + LIMITE_GIRO_FECHADO))
 
     # A esfera 2:1 so faz sentido quando o giro fechou a volta. Se a captura foi
     # parcial, esticar para 360 graus deformaria o comodo inteiro; nesse caso o
@@ -772,6 +863,7 @@ def importar_varredura(caminho_origem, pasta_saida, haov_graus=360.0):
 
     equi = ajustar_exposicao(equi)
     equi = _preencher_bordas_irregulares(equi)
+    equi, _ = _tapar_buracos_internos(equi)
     nivel = {"aplicado": False}
     if haov_graus >= 359.0:
         equi, nivel = _nivelar(equi)
