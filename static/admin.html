@@ -12,6 +12,29 @@
 const IMOVEL   = location.pathname.split('/').filter(Boolean)[1] || '';
 const URL_TOUR = window.__TOUR__  || ('/api/imoveis/' + IMOVEL + '/tour');
 const API      = '/api/imoveis/' + IMOVEL;
+
+// Sessao que cai no meio do trabalho deixava o painel MUDO: os botoes paravam de
+// responder e nada na tela dizia por que. Acontece de verdade — o cookie e por
+// endereco, entao entrar em localhost e abrir o painel em 127.0.0.1 ou no IP da
+// rede sao sessoes diferentes, e a pessoa jura que fez login.
+//
+// Envolver o fetch pega todos os pontos de chamada de uma vez; sao mais de
+// trinta espalhados pelo arquivo, e um esquecido traria o silencio de volta.
+(function(){
+  const original = window.fetch;
+  let avisando = false;
+  window.fetch = async function(...args){
+    const r = await original.apply(this, args);
+    if (r.status === 401 && !avisando){
+      avisando = true;
+      alert('Sua sessão expirou ou este endereço não está autenticado.\n\n'
+          + 'Você vai voltar para a tela de entrada e, depois do login, '
+          + 'para esta mesma página.');
+      location.href = '/entrar?proximo=' + encodeURIComponent(location.pathname);
+    }
+    return r;
+  };
+})();
 const CENAS    = window.__CENAS__ || ('/data/' + IMOVEL + '/scenes/');
 const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
 const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);

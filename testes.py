@@ -450,6 +450,101 @@ class TestContas(Base):
         self.assertIsNone(usuarios.obter(aplicacao.PASTA_DADOS, "intruso"))
 
 
+class TestAtalhoDeEdicao(Base):
+    """
+    O tour tem um atalho de volta para o painel, pedido por quem edita.
+
+    O risco e a pagina ser PUBLICA: o atalho nao pode aparecer para o cliente da
+    imobiliaria nem para corretor de outra conta. Quem decide isso e /api/imoveis,
+    que exige sessao e devolve apenas os imoveis da propria conta — entao o teste
+    guarda justamente esse contrato, que e do que o botao depende.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("atalhodona")
+        self.outra = self.conta("atalhooutra")
+        self.visitante = self.app.test_client()
+        self.iid = self.imovel(self.dona, "Casa com atalho")
+
+    def _ids(self, cliente):
+        r = cliente.get("/api/imoveis")
+        if r.status_code != 200:
+            return None
+        return [i["id"] for i in r.get_json()["imoveis"]]
+
+    def test_dona_reconhece_o_proprio_imovel(self):
+        self.assertIn(self.iid, self._ids(self.dona))
+
+    def test_visitante_nao_recebe_a_lista(self):
+        """Sem 401 aqui, o botao apareceria para o cliente da imobiliária."""
+        self.assertEqual(self.visitante.get("/api/imoveis").status_code, 401)
+        self.assertIsNone(self._ids(self.visitante))
+
+    def test_outra_imobiliaria_nao_ve_o_id(self):
+        self.assertNotIn(self.iid, self._ids(self.outra))
+
+    def test_paginas_publicas_nao_trazem_o_painel_pronto(self):
+        """
+        O botao nasce escondido e so o JavaScript revela. Se o HTML servido ja
+        viesse com ele visivel, o visitante o veria antes de qualquer checagem.
+        """
+        for pagina in ("viewer.html", "andar.html"):
+            with io.open(os.path.join("static", pagina), encoding="utf-8") as f:
+                html = f.read()
+            self.assertIn('id="btEditar"', html, pagina)
+            trecho = html[html.index('id="btEditar"') - 200:
+                          html.index('id="btEditar"') + 260]
+            self.assertIn("display:none", trecho,
+                          "%s: o botão de editar não nasce escondido" % pagina)
+
+
+class TestVoltaDepoisDoLogin(Base):
+    """
+    Abrir o link do painel sem sessao mandava para a lista de imoveis, e parecia
+    que "o login nao pegou" — a queixa real do usuario. Agora o destino viaja no
+    ?proximo=.
+
+    E o perigo que isso cria: destino vindo da URL, se aceito sem conferir,
+    transforma a tela de login numa ponte para site alheio, exibindo o endereco
+    do proprio corretor na barra. Por isso so caminho local passa.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("voltar")
+        self.iid = self.imovel(self.dona, "Casa")
+        self.visitante = self.app.test_client()
+
+    def test_painel_sem_sessao_guarda_o_destino(self):
+        r = self.visitante.get("/painel/%s" % self.iid)
+        self.assertEqual(r.status_code, 302)
+        destino = r.headers["Location"]
+        self.assertIn("/entrar", destino)
+        self.assertIn("proximo=", destino)
+        self.assertIn(self.iid, destino)
+
+    def test_api_sem_sessao_responde_json_e_nao_desvia(self):
+        """O painel precisa do 401 para avisar; desvio em XHR passaria mudo."""
+        r = self.visitante.get("/api/imoveis/%s/leads" % self.iid)
+        self.assertEqual(r.status_code, 401)
+        self.assertTrue(r.get_json()["login"])
+
+    def test_destino_externo_e_recusado(self):
+        for ruim in ("//evil.com/x", "http://evil.com", "/\\evil.com",
+                     "https://evil.com/a", "\\\\evil.com"):
+            self.assertEqual(aplicacao._proximo_para(ruim), "",
+                             "aceitou destino externo: %r" % ruim)
+
+    def test_destino_local_e_aceito_e_escapado(self):
+        saida = aplicacao._proximo_para("/painel/abc123")
+        self.assertEqual(saida, "?proximo=/painel/abc123")
+        # a barra continua barra; o resto que precisar de escape recebe escape
+        self.assertIn("%20", aplicacao._proximo_para("/painel/a b"))
+
+    def test_entrar_e_raiz_nao_viram_destino(self):
+        self.assertEqual(aplicacao._proximo_para("/entrar"), "")
+        self.assertEqual(aplicacao._proximo_para("/"), "")
+
+
 class TestVideo(unittest.TestCase):
     """
     O video existe para tirar do corretor a chance de errar o passo do giro.

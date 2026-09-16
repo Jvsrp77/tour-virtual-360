@@ -138,6 +138,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 </div>
 
 <div class="topo-dir">
+  <button class="bt" id="btEditar" onclick="irEditar()" style="display:none"
+          title="Voltar para a tela de edição deste imóvel">✎ Editar</button>
   <button class="bt" id="btAndar" onclick="andarAqui()" style="display:none"
           title="Deslocar-se dentro deste ambiente">Andar aqui</button>
   <button class="bt" onclick="telaCheia()" title="Tela cheia">⛶</button>
@@ -302,6 +304,31 @@ function andarAqui(){
   enviarVisita();
   location.href = URL_ANDAR + '?cena=' + atual;
 }
+
+function irEditar(){ location.href = '/painel/' + IMOVEL; }
+
+// O botao de editar so pode existir para a DONA do imovel: esta pagina e a que
+// o cliente da imobiliaria abre, e um atalho para o painel na tela dele seria
+// convite para mexer no anuncio alheio.
+//
+// A pergunta certa nao e "esta logado?", e sim "este imovel e seu?" — corretor
+// de outra imobiliaria esta logado e mesmo assim nao pode ver o botao.
+// /api/imoveis responde exatamente isso: exige sessao e devolve apenas os
+// imoveis da propria conta. Visitante leva 401 e o botao fica escondido, que e
+// o estado correto. No pacote exportado nao existe servidor e a chamada falha,
+// escondendo o botao tambem — igualmente correto.
+async function mostrarEditarSeDona(){
+  try{
+    const r = await fetch('/api/imoveis', {credentials: 'same-origin'});
+    if (!r.ok) return;
+    const j = await r.json();
+    if ((j.imoveis || []).some(i => i.id === IMOVEL)){
+      const b = document.getElementById('btEditar');
+      if (b) b.style.display = '';
+    }
+  }catch(e){ /* sem servidor ou sem sessao: fica escondido */ }
+}
+mostrarEditarSeDona();
 
 function atualizarBotaoAndar(){
   const c = tour.cenas.find(x => x.id === atual);

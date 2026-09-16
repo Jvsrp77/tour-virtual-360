@@ -16,6 +16,7 @@ import threading
 import re
 import traceback
 from datetime import datetime
+from urllib.parse import quote
 
 from datetime import timedelta
 
@@ -618,7 +619,23 @@ def _exigir_sessao():
     if request.path.startswith("/api/"):
         return jsonify({"ok": False, "erro": "Faça login para continuar.",
                         "login": True}), 401
-    return redirect("/entrar")
+    # Leva junto para onde a pessoa ia. Sem isto, abrir o link do painel sem
+    # sessao jogava para a lista de imoveis e parecia que "o login nao pegou".
+    return redirect("/entrar" + _proximo_para(request.path))
+
+
+def _proximo_para(caminho):
+    """
+    Monta ?proximo=<caminho> so para destino LOCAL.
+
+    Caminho vindo de fora nao entra aqui sem conferencia: aceitar "//sitedele"
+    ou "http://..." transformaria a tela de login numa ponte para site alheio,
+    com o endereco do proprio corretor na barra.
+    """
+    if (not caminho or not caminho.startswith("/") or caminho.startswith("//")
+            or "\\" in caminho or caminho in ("/entrar", "/")):
+        return ""
+    return "?proximo=" + quote(caminho, safe="/")
 
 
 def dono_do_imovel(imovel_id):

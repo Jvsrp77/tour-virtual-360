@@ -102,6 +102,13 @@ async function enviar(){
 
   $('acao').disabled = true;
   recado('Verificando...', 'info');
+  // fecha o ciclo aberto pelo servidor em ?proximo=; a conferencia se repete
+  // aqui porque quem navega e o navegador, e "//sitedele" sairia do servidor
+  function destinoDepoisDoLogin(){
+    const p = new URLSearchParams(location.search).get('proximo') || '';
+    return (p.startsWith('/') && !p.startsWith('//') && !p.includes('\\'))
+      ? p : '/imoveis';
+  }
   try{
     const corpo = {usuario, senha};
     if (primeiroAcesso) corpo.imobiliaria = $('imobiliaria').value.trim();
@@ -109,7 +116,7 @@ async function enviar(){
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(corpo)})).json();
     if (!j.ok){ recado(j.erro, 'erro'); $('acao').disabled = false; return; }
-    location.href = '/imoveis';
+    location.href = destinoDepoisDoLogin();
   }catch(e){
     recado('Não consegui falar com o servidor.', 'erro');
     $('acao').disabled = false;

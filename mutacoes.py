@@ -68,6 +68,14 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
+    # o ?proximo= existe para a pessoa voltar onde estava; sem a conferencia ele
+    # vira ponte para site alheio, com o endereco do corretor na barra
+    ("proximo aceita destino externo", "app.py",
+     'if (not caminho or not caminho.startswith("/") or caminho.startswith("//")\n'
+     '            or "\\\\" in caminho or caminho in ("/entrar", "/")):',
+     "if not caminho:",
+     "TestVoltaDepoisDoLogin.test_destino_externo_e_recusado"),
+
     # o defeito que so apareceu na costura de ponta a ponta: escolher "o mais
     # nitido da janela" faz o ruido de nitidez decidir, e o espacamento angular
     # vai de 4,8 a 36 graus onde o uniforme era 18 — costura recusada por

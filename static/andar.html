@@ -96,6 +96,9 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 
 <div class="topo-dir">
   <a class="bt" id="btVoltar" href="#">Voltar ao tour</a>
+  <button class="bt" id="btEditar" style="display:none"
+          onclick="location.href='/painel/' + IMOVEL"
+          title="Voltar para a tela de edição deste imóvel">✎ Editar</button>
   <button class="bt primario" onclick="recentrar()">Centralizar</button>
 </div>
 
@@ -532,6 +535,22 @@ function atualizarPainel(){
 }
 
 function recentrar(){ posicao.copy(ativo.mundo); }
+
+// Mesma regra do visualizador: o atalho para o painel so aparece para a DONA.
+// /api/imoveis exige sessao e devolve apenas os imoveis da propria conta, entao
+// visitante e corretor de outra imobiliaria nao veem o botao.
+async function mostrarEditarSeDona(){
+  try{
+    const r = await fetch('/api/imoveis', {credentials: 'same-origin'});
+    if (!r.ok) return;
+    const j = await r.json();
+    if ((j.imoveis || []).some(i => i.id === IMOVEL)){
+      const b = document.getElementById('btEditar');
+      if (b) b.style.display = '';
+    }
+  }catch(e){ /* sem servidor ou sem sessao: fica escondido */ }
+}
+mostrarEditarSeDona();
 
 function ligarControles(){
   const alvo = renderizador.domElement;
