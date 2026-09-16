@@ -450,6 +450,59 @@ class TestContas(Base):
         self.assertIsNone(usuarios.obter(aplicacao.PASTA_DADOS, "intruso"))
 
 
+class TestFormatoDeEnvio(Base):
+    """
+    iPhone grava em HEIC por padrao, e o sistema nao abre HEIC.
+
+    A rota trocava a extensao para .jpg e seguia; a costura morria minutos depois
+    com "Não consegui abrir o arquivo", que culpa o arquivo e nao diz o que fazer.
+    Quem tem iPhone batia nisso no primeiro uso, e a captura pelo celular e
+    justamente o caminho que o produto recomenda.
+    """
+
+    def _heic(self):
+        """Cabecalho ISO-BMFF com marca heic, como o iPhone grava."""
+        return b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + b"\x00" * 64
+
+    def _mov(self):
+        return b"\x00\x00\x00\x14ftypqt  \x00\x00\x02\x00qt  " + b"\x00" * 64
+
+    def test_heic_e_recusado_com_o_caminho_da_solucao(self):
+        caminho = os.path.join(_TEMP, "foto.jpg")       # ja renomeado, como a rota faz
+        with io.open(caminho, "wb") as f:
+            f.write(self._heic())
+        recado = aplicacao.formato_recusado(caminho, "IMG_9629.HEIC")
+        self.assertIsNotNone(recado, "HEIC passou batido")
+        self.assertIn("HEIC", recado)
+        self.assertIn("Mais Compatível", recado, "não diz como resolver no iPhone")
+
+    def test_video_no_campo_de_fotos_e_recusado(self):
+        caminho = os.path.join(_TEMP, "video.jpg")
+        with io.open(caminho, "wb") as f:
+            f.write(self._mov())
+        recado = aplicacao.formato_recusado(caminho, "IMG_9629.MOV")
+        self.assertIsNotNone(recado)
+        self.assertIn("vídeo", recado)
+
+    def test_jpeg_de_verdade_passa(self):
+        caminho = os.path.join(_TEMP, "boa.jpg")
+        with io.open(caminho, "wb") as f:
+            f.write(_imagem(400, 300))
+        self.assertIsNone(aplicacao.formato_recusado(caminho, "boa.jpg"))
+
+    def test_a_rota_recusa_antes_de_enfileirar(self):
+        """Falhar na hora é o ponto: minutos de costura para nada seria pior."""
+        dona = self.conta("heic")
+        iid = self.imovel(dona, "Casa HEIC")
+        r = dona.post("/api/imoveis/%s/cenas/costurar" % iid,
+                      data={"fotos": [(io.BytesIO(self._heic()), "IMG_1.HEIC"),
+                                      (io.BytesIO(self._heic()), "IMG_2.HEIC")],
+                            "nome": "Quarto"},
+                      content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("HEIC", r.get_json()["erro"])
+
+
 class TestLimiaresDoVao(unittest.TestCase):
     """
     Dois arquivos precisam concordar sobre o que e "degrau de profundidade", e o

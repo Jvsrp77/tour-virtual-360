@@ -68,6 +68,13 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
+    # iPhone grava HEIC por padrao; sem esta checagem a costura morre minutos
+    # depois com "nao consegui abrir o arquivo", culpando o arquivo
+    ("heic passa batido no envio", "app.py",
+     '    if len(cabeca) >= 12 and cabeca[4:8] == b"ftyp":',
+     "    if False:",
+     "TestFormatoDeEnvio.test_heic_e_recusado_com_o_caminho_da_solucao"),
+
     # o valor exato que causava o rasgo preto: o visualizador apaga acima de
     # 1,18 e o fundo so reconstruia acima de 1,20, deixando a faixa descoberta
     ("fundo mais exigente que o visor", "fundo.py",

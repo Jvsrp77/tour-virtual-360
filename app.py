@@ -555,6 +555,42 @@ def limpar_uploads_orfaos():
         print("  faxina: %.0f MB de fotos originais orfas apagados" % (liberado / 1e6))
 
 
+def formato_recusado(caminho, nome_original=""):
+    """
+    Devolve um recado se o arquivo nao for imagem que o OpenCV abre, ou None.
+
+    O caso que motivou isto: o iPhone grava em HEIC POR PADRAO. A rota trocava a
+    extensao para .jpg e seguia, e o conteudo continuava HEIC — a costura morria
+    la na frente com "Não consegui abrir o arquivo: foto_00.jpg", que culpa o
+    arquivo sem dizer o que fazer. Corretor de iPhone batia nisso no primeiro uso.
+
+    A conferencia e pelos bytes, nao pela extensao: quem renomeia .heic para .jpg
+    continua enviando HEIC, e e justamente quem mais precisa do recado certo.
+    """
+    try:
+        with open(caminho, "rb") as f:
+            cabeca = f.read(16)
+    except OSError:
+        return None
+
+    rotulo = os.path.basename(nome_original or caminho)
+    # ISO-BMFF: "ftyp" no byte 4, e a marca do formato logo depois
+    if len(cabeca) >= 12 and cabeca[4:8] == b"ftyp":
+        marca = cabeca[8:12]
+        if marca in (b"heic", b"heix", b"hevc", b"heim", b"heis", b"mif1", b"msf1"):
+            return ("O arquivo %s está em HEIC, o formato que o iPhone usa por "
+                    "padrão, e o sistema ainda não abre esse formato. No iPhone: "
+                    "Ajustes › Câmera › Formatos › Mais Compatível. As fotos "
+                    "passam a sair em JPEG e basta tirar de novo. Para as que já "
+                    "existem, abra a foto e use Compartilhar › Opções › Formato "
+                    "JPEG." % rotulo)
+        if marca in (b"qt  ", b"isom", b"mp42", b"M4V "):
+            return ("O arquivo %s é um vídeo, não uma foto. Se quer montar o "
+                    "ambiente a partir de vídeo, use o campo de vídeo em vez do "
+                    "de fotos." % rotulo)
+    return None
+
+
 def montar_cena(nome, arquivo, largura, altura, origem, info=None,
                 imovel_id=None):
     """
@@ -851,6 +887,9 @@ def api_costurar():
                 ext = ".jpg"
             destino = os.path.join(lote, "foto_%02d%s" % (i, ext))
             f.save(destino)
+            recado = formato_recusado(destino, f.filename)
+            if recado:
+                return jsonify({"ok": False, "erro": recado}), 400
             temporarios.append(destino)
 
         imovel = g.imovel
