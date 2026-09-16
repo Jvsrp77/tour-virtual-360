@@ -44,6 +44,20 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .bt:hover{background:rgba(40,44,52,.95)}
   .bt.primario{background:var(--acento);color:#1a1207;border-color:var(--acento);font-weight:600}
 
+  /* Setas de salto, como as do Street View: ficam sobre o chao, apontando para
+     os outros pontos de captura. Camada de DOM em vez de objeto 3D porque nao
+     precisam de profundidade — sao interface, e assim herdam o estilo do resto. */
+  #setas{position:absolute;inset:0;z-index:9;pointer-events:none}
+  .seta{position:absolute;transform:translate(-50%,-50%);pointer-events:auto;
+    display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;
+    background:none;border:0;padding:0;font:inherit}
+  .seta .disco{width:44px;height:44px;border-radius:50%;font-size:19px;
+    background:rgba(14,16,20,.7);border:2px solid rgba(255,255,255,.78);
+    backdrop-filter:blur(8px);color:#fff;line-height:40px;text-align:center}
+  .seta:hover .disco{background:var(--acento);color:#1a1207;border-color:var(--acento)}
+  .seta .nome{font-size:11px;color:#fff;background:rgba(14,16,20,.7);
+    border-radius:6px;padding:2px 7px;white-space:nowrap}
+
   #mapa{position:absolute;bottom:16px;left:16px;z-index:10;border-radius:11px;
     background:rgba(14,16,20,.88);border:1px solid rgba(255,255,255,.14);
     backdrop-filter:blur(12px);cursor:pointer}
@@ -85,10 +99,14 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <input type="range" id="forca" min="0" max="100" value="70">
 
   <label>Alcance a partir de cada ponto</label>
-  <input type="range" id="alcance" min="50" max="250" value="130">
+  <!-- 100 cm e nao 130: o esticamento cresce rapido com a distancia do ponto, e
+       a partir de 1,3 m ja aparece na borda dos moveis. Quem quiser explorar
+       mais abre no controle; o padrao protege quem so olha o anuncio. -->
+  <input type="range" id="alcance" min="50" max="250" value="100">
 
   <div class="teclas">
-    <div><b>W A S D</b> caminhar</div>
+    <div><b>▲ seta</b> ir ao ponto</div>
+    <div><b>W A S D</b> ajustar</div>
     <div><b>arrastar</b> olhar em volta</div>
     <div><b>R</b> voltar ao ponto</div>
   </div>
@@ -101,6 +119,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
           title="Voltar para a tela de edição deste imóvel">✎ Editar</button>
   <button class="bt primario" onclick="recentrar()">Centralizar</button>
 </div>
+
+<div id="setas"></div>
 
 <canvas id="mapa" width="190" height="190"></canvas>
 <div class="aviso" id="aviso"></div>
@@ -189,6 +209,7 @@ async function iniciar(){
   catch(e){ return falhar('Falha ao carregar: ' + e.message); }
 
   aplicarEstado(inicial, 1, true);
+  criarSetas();
   atualizarPainel();
   $('carregando').style.display = 'none';
   $('painel').style.display = 'block';
@@ -540,6 +561,68 @@ function atualizarPainel(){
 
 function recentrar(){ posicao.copy(ativo.mundo); }
 
+// ------------------------------------------------------- setas entre pontos
+//
+// O Street View NAO caminha dentro de uma esfera: ele pula de uma para outra e
+// disfarca o salto com dissolvencia. Caminhar livre para longe do ponto e
+// justamente o que estica a imagem, porque ali ninguem fotografou — quanto mais
+// longe, mais o software deduz.
+//
+// Entao a seta passa a ser a forma principal de se locomover, e o WASD vira
+// ajuste fino. A dissolvencia (`fade`) e a troca de ponto (`trocarAtivo`) ja
+// existiam: o que faltava era convidar o visitante a usa-las.
+
+const _proj = new THREE.Vector3();
+const ALTURA_DA_SETA = 1.1;      // metros abaixo da camera: poisa a seta no chao
+
+function criarSetas(){
+  const caixa = $('setas');
+  caixa.innerHTML = '';
+  for (const p of pontos){
+    const b = document.createElement('button');
+    b.className = 'seta';
+    b.title = 'Ir para ' + p.cena.nome;
+    b.innerHTML = '<div class="disco">▲</div><div class="nome"></div>';
+    b.querySelector('.nome').textContent = p.cena.nome;
+    b.onclick = () => irAoPonto(p);
+    b.style.display = 'none';
+    caixa.appendChild(b);
+    p.seta = b;
+  }
+}
+
+function irAoPonto(p){
+  if (p === ativo) return;
+  carregarPonto(p)
+    .then(() => { posicao.copy(p.mundo); trocarAtivo(p); })
+    .catch(() => avisar('Não consegui carregar ' + p.cena.nome));
+}
+
+function atualizarSetas(){
+  const tela = renderizador.domElement;
+  const L = tela.clientWidth, A = tela.clientHeight;
+  for (const p of pontos){
+    if (!p.seta) continue;
+    if (p === ativo || p === saindo){ p.seta.style.display = 'none'; continue; }
+
+    _proj.copy(p.mundo);
+    _proj.y -= ALTURA_DA_SETA;
+    _proj.project(camera);
+
+    // z > 1 e ponto atras da camera: projetado, ele apareceria espelhado na tela
+    const x = (_proj.x * 0.5 + 0.5) * L;
+    const y = (-_proj.y * 0.5 + 0.5) * A;
+    const fora = _proj.z > 1 || x < 24 || x > L - 24 || y < 24 || y > A - 24;
+    if (fora){
+      p.seta.style.display = 'none';
+    } else {
+      p.seta.style.display = '';
+      p.seta.style.left = Math.round(x) + 'px';
+      p.seta.style.top = Math.round(y) + 'px';
+    }
+  }
+}
+
 // Mesma regra do visualizador: o atalho para o painel so aparece para a DONA.
 // /api/imoveis exige sessao e devolve apenas os imoveis da propria conta, entao
 // visitante e corretor de outra imobiliaria nao veem o botao.
@@ -671,6 +754,8 @@ function animar(){
     if (perto.ponto.malha) trocarAtivo(perto.ponto);
     else carregarPonto(perto.ponto).then(() => trocarAtivo(perto.ponto)).catch(()=>{});
   }
+
+  atualizarSetas();
 
   // Cada ponto e uma esfera que envolve a camera; se duas ficarem visiveis ao mesmo
   // tempo, uma tapa a outra e a tela fica preta pela metade. So o ponto atual aparece,
