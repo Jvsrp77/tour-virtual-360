@@ -848,13 +848,24 @@ function desenharProfundidade(c){
     return;
   }
   if (c.profundidade){
+    // Explica a ausencia do botao no tour: sem isso o corretor gera a
+    // profundidade, nao ve "Andar aqui" no anuncio e acha que quebrou.
+    const navegaveis = tour.cenas.filter(x => x.profundidade && x.posicao).length;
+    const aviso = navegaveis >= 2 ? '' :
+      `<div class="dica" style="margin-top:8px">
+         <b>O visitante ainda não vê "Andar aqui".</b> Com um ponto de captura só,
+         caminhar estica a imagem na borda dos móveis, porque ninguém fotografou
+         de outro lugar. O botão aparece no anúncio quando houver
+         <b>2 ou mais ambientes com profundidade e posição na planta</b>.
+         Você continua podendo testar pelo botão abaixo.
+       </div>`;
     alvo.innerHTML =
       `<img src="${CENAS}${c.previa_profundidade}?t=${Date.now()}"
             style="width:100%;border-radius:7px;margin-bottom:8px">
        <div class="linha">
          <button class="primario" onclick="window.open(URL_ANDAR + '?cena=${c.id}','_blank')">Andar</button>
          <button onclick="gerarProfundidade()">Refazer</button>
-       </div>`;
+       </div>${aviso}`;
   } else {
     alvo.innerHTML = `<button class="primario" style="width:100%"
                         onclick="gerarProfundidade()">Gerar profundidade</button>`;

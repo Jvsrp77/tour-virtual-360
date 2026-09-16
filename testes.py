@@ -503,6 +503,49 @@ class TestFormatoDeEnvio(Base):
         self.assertIn("HEIC", r.get_json()["erro"])
 
 
+class TestQuandoOferecerCaminhada(unittest.TestCase):
+    """
+    O visitante so recebe "Andar aqui" onde caminhar fica bom.
+
+    Com UM ponto de captura, andar e extrapolar de um unico ponto de vista: 11%
+    da cena fica numa rampa de profundidade que estica a textura na borda dos
+    moveis. Nao ha ajuste que conserte — filtro guiado e bilateral cruzado foram
+    medidos e falharam, porque o modelo nao estima a silhueta, entrega uma bolha.
+
+    Entao a regra e de produto, nao de software: quem capturou um ponto entrega o
+    tour 360, que gira sem distorcao nenhuma. O botao aparece a partir de dois
+    pontos posicionados na planta, que e quando existe para onde pular.
+    """
+
+    def _regra(self):
+        with io.open(os.path.join("static", "viewer.html"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_o_botao_exige_dois_pontos_na_planta(self):
+        html = self._regra()
+        self.assertIn("pontosNavegaveis", html)
+        self.assertIn("pontosNavegaveis() >= 2", html,
+                      "o botão de caminhar não está exigindo 2 pontos")
+
+    def test_conta_so_cena_com_profundidade_E_posicao(self):
+        """
+        Profundidade sem posicao na planta nao serve: sao ilhas soltas, sem
+        setas entre elas, e o visitante cai de novo no caminhar extrapolado.
+        """
+        html = self._regra()
+        trecho = html[html.index("function pontosNavegaveis"):]
+        trecho = trecho[:trecho.index("}")]
+        self.assertIn("c.profundidade", trecho)
+        self.assertIn("c.posicao", trecho)
+
+    def test_o_painel_explica_a_ausencia(self):
+        """Sem explicação, o corretor gera a profundidade e acha que quebrou."""
+        with io.open(os.path.join("static", "admin.html"), encoding="utf-8") as f:
+            painel = f.read()
+        self.assertIn("ainda não vê", painel)
+        self.assertIn("posição na planta", painel)
+
+
 class TestLimiaresDoVao(unittest.TestCase):
     """
     Dois arquivos precisam concordar sobre o que e "degrau de profundidade", e o

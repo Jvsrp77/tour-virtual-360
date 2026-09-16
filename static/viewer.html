@@ -330,9 +330,25 @@ async function mostrarEditarSeDona(){
 }
 mostrarEditarSeDona();
 
+// Quantos pontos de captura o visitante tem para pular entre eles.
+//
+// Caminhar so fica bom quando ha PARA ONDE ir. Com um ponto de captura, andar e
+// extrapolar de um unico ponto de vista: a malha estica na borda dos moveis,
+// porque ninguem fotografou dali. Medido nas cenas de teste, 11% da imagem fica
+// numa rampa de profundidade que estica ao inves de abrir vao — e nao ha ajuste
+// de software que conserte, so captura de outro ponto.
+//
+// Entao o botao so aparece quando o imovel foi capturado com dois ou mais
+// pontos posicionados na planta. Quem capturou um ponto so entrega o tour 360,
+// que gira sem distorcao nenhuma. O visitante nunca ve o caso feio.
+function pontosNavegaveis(){
+  return (tour.cenas || []).filter(c => c.profundidade && c.posicao).length;
+}
+
 function atualizarBotaoAndar(){
   const c = tour.cenas.find(x => x.id === atual);
-  $('btAndar').style.display = (c && c.profundidade) ? 'block' : 'none';
+  const vale = c && c.profundidade && pontosNavegaveis() >= 2;
+  $('btAndar').style.display = vale ? 'block' : 'none';
 }
 
 function telaCheia(){
