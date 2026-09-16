@@ -450,6 +450,45 @@ class TestContas(Base):
         self.assertIsNone(usuarios.obter(aplicacao.PASTA_DADOS, "intruso"))
 
 
+class TestLimiaresDoVao(unittest.TestCase):
+    """
+    Dois arquivos precisam concordar sobre o que e "degrau de profundidade", e o
+    defeito de discordarem e invisivel ate alguem caminhar.
+
+    O visualizador APAGA o triangulo cujo degrau passa de SALTO_MAX; a camada de
+    fundo so RECONSTROI o que passa de SALTO. Se o fundo for mais exigente, a
+    faixa entre os dois some sem ter nada atras, e o visitante ve rasgo preto.
+    Foi o que aconteceu: andar.html em 1,18 e fundo.py em 1,20 deixavam a faixa
+    de 18% a 20% descoberta, com a camada gerada e tudo.
+
+    Nao da para compartilhar a constante entre Python e JavaScript, entao o teste
+    le as duas do arquivo e compara.
+    """
+
+    def _salto_max_do_visualizador(self):
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            m = re.search(r"const\s+SALTO_MAX\s*=\s*([0-9.]+)", f.read())
+        self.assertIsNotNone(m, "não achei SALTO_MAX no andar.html")
+        return 1.0 + float(m.group(1))
+
+    def test_o_fundo_cobre_tudo_que_o_visualizador_apaga(self):
+        import fundo
+        apaga = self._salto_max_do_visualizador()
+        self.assertLessEqual(
+            fundo.SALTO, apaga,
+            "fundo.SALTO=%.3f é mais exigente que o visualizador (%.3f): a faixa "
+            "entre os dois vira rasgo preto ao caminhar" % (fundo.SALTO, apaga))
+
+    def test_a_margem_nao_e_exagerada(self):
+        """
+        Margem demais tambem custa: tudo que entra na mascara vira conteudo
+        inventado por IA, e o anuncio fica mais gerado do que precisa.
+        """
+        import fundo
+        self.assertGreater(fundo.SALTO, 1.05,
+                           "margem larga demais: reconstrói imagem à toa")
+
+
 class TestAtalhoDeEdicao(Base):
     """
     O tour tem um atalho de volta para o painel, pedido por quem edita.

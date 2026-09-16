@@ -30,7 +30,20 @@ import numpy as np
 LADO = 512                 # o modelo so aceita 512x512
 PASSO = 384                # sobreposicao entre ladrilhos, para nao marcar emenda
 LARGURA_FUNDO = 2048       # o fundo aparece so por frestas: nao precisa da resolucao cheia
-SALTO = 1.20               # quanto um vizinho precisa estar mais longe para ser degrau
+# Quanto um vizinho precisa estar mais longe para contar como degrau.
+#
+# TEM DE ACOMPANHAR `SALTO_MAX` do static/andar.html, e sempre por BAIXO. La o
+# triangulo vira duvidoso com degrau acima de 18% (SALTO_MAX = 0.18) e SOME da
+# camada real; aqui se decide o que a IA reconstroi para aparecer no lugar. Com
+# este valor em 1.20, o degrau entre 18% e 20% sumia sem ter nada atras — e o
+# visitante via um rasgo preto, exatamente o defeito que a camada existe para
+# eliminar. Medido na cena do quarto: rasgos pretos ao caminhar 1,4 m, mesmo com
+# a camada gerada.
+#
+# 1.15 deixa margem: tudo que o visualizador apaga tem conteudo por tras. O preco
+# e reconstruir um pouco mais da imagem, e isso e conteudo GERADO — por isso a
+# porcentagem sobe e o visualizador continua avisando na tela.
+SALTO = 1.15
 SESSAO = None
 
 

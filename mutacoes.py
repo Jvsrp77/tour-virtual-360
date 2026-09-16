@@ -68,6 +68,13 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
+    # o valor exato que causava o rasgo preto: o visualizador apaga acima de
+    # 1,18 e o fundo so reconstruia acima de 1,20, deixando a faixa descoberta
+    ("fundo mais exigente que o visor", "fundo.py",
+     "SALTO = 1.15",
+     "SALTO = 1.20",
+     "TestLimiaresDoVao.test_o_fundo_cobre_tudo_que_o_visualizador_apaga"),
+
     # o ?proximo= existe para a pessoa voltar onde estava; sem a conferencia ele
     # vira ponte para site alheio, com o endereco do corretor na barra
     ("proximo aceita destino externo", "app.py",
