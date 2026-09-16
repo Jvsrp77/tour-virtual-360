@@ -660,6 +660,26 @@ def _exigir_sessao():
     return redirect("/entrar" + _proximo_para(request.path))
 
 
+@app.after_request
+def _nao_guardar_api(resposta):
+    """
+    Resposta de API nunca pode ficar em cache do navegador.
+
+    Sem nenhum cabecalho de cache, o navegador decide sozinho — e decide guardar.
+    O sintoma: o corretor cadastra um imovel, a lista continua mostrando os
+    antigos, e parece que o cadastro se perdeu. Aconteceu de verdade: tres
+    imoveis no servidor, um so na tela.
+
+    As imagens das cenas continuam como estao (revalidadas por ETag): sao
+    arquivos grandes que quase nunca mudam, e guardar vale a pena. O que nao
+    pode envelhecer e a LISTA do que existe.
+    """
+    if request.path.startswith("/api/"):
+        resposta.headers["Cache-Control"] = "no-store, must-revalidate"
+        resposta.headers["Pragma"] = "no-cache"
+    return resposta
+
+
 def _proximo_para(caminho):
     """
     Monta ?proximo=<caminho> so para destino LOCAL.

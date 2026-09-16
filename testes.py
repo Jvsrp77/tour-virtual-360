@@ -503,6 +503,80 @@ class TestFormatoDeEnvio(Base):
         self.assertIn("HEIC", r.get_json()["erro"])
 
 
+class TestImagemIntegra(unittest.TestCase):
+    """
+    No ponto de captura a imagem tem de ser a foto, sem deformacao nenhuma.
+
+    A malha de profundidade desloca os vertices RADIALMENTE. Visto do centro da
+    esfera, deslocamento radial nao muda a direcao de nenhum pixel — entao,
+    parado no ponto, o que se ve e exatamente o panorama original. O borrao so
+    nasce ao SAIR do ponto, porque ali ninguem fotografou e a malha estica para
+    cobrir o vao.
+
+    Dai o padrao de passeio livre ser ZERO: o visitante fica sempre em um ponto e
+    anda pelas setas, como no Street View, e nunca ve a imagem deformada. Quem
+    quiser o paralaxe abre o controle e aceita a troca.
+    """
+
+    def _andar(self):
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_passeio_livre_nasce_desligado(self):
+        html = self._andar()
+        m = re.search(r'id="alcance"[^>]*value="(\d+)"', html)
+        self.assertIsNotNone(m, "não achei o controle de alcance")
+        self.assertEqual(m.group(1), "0",
+                         "o passeio livre não nasce em zero: o visitante vê o borrão")
+
+    def test_o_controle_permite_zero(self):
+        """Se o minimo nao for 0, nao da para desligar e o borrao e inevitavel."""
+        html = self._andar()
+        m = re.search(r'id="alcance"[^>]*min="(\d+)"', html)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), "0")
+
+    def test_parado_no_ponto_nada_se_move(self):
+        """
+        `podeEstar` e quem barra: com alcance 0, qualquer passo cai fora e a
+        posicao fica colada no ponto de captura.
+        """
+        html = self._andar()
+        self.assertIn("if (d > alcance) return false;", html,
+                      "a regra que prende ao ponto sumiu")
+
+
+class TestCacheDaApi(Base):
+    """
+    A lista do que existe nao pode envelhecer no navegador.
+
+    Sem cabecalho de cache, o navegador guarda por conta propria: o corretor
+    cadastra um imovel, a lista continua mostrando os antigos e parece que o
+    cadastro se perdeu. Aconteceu: tres imoveis no servidor, um so na tela.
+    """
+
+    def test_api_manda_nao_guardar(self):
+        dona = self.conta("cache")
+        iid = self.imovel(dona, "Casa")
+        for rota in ("/api/imoveis", "/api/conta",
+                     "/api/imoveis/%s/tour" % iid):
+            r = dona.get(rota)
+            cc = r.headers.get("Cache-Control", "")
+            self.assertIn("no-store", cc, "%s pode ficar em cache: %r" % (rota, cc))
+
+    def test_imagem_de_cena_continua_podendo_ser_guardada(self):
+        """
+        Panorama tem megabytes e quase nunca muda: guardar vale a pena, e a
+        revalidacao por ETag ja cobre a troca. Sem no-store aqui.
+        """
+        dona = self.conta("cache2")
+        iid = self.imovel(dona, "Casa 2")
+        r = dona.get("/api/imoveis/%s/tour" % iid)
+        self.assertIn("no-store", r.headers.get("Cache-Control", ""))
+        # a rota das imagens nao vive sob /api/, entao nao recebe o no-store
+        self.assertFalse("/data/".startswith("/api/"))
+
+
 class TestQuandoOferecerCaminhada(unittest.TestCase):
     """
     O visitante so recebe "Andar aqui" onde caminhar fica bom.

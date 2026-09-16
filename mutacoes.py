@@ -56,9 +56,13 @@ MUT = [
      "        pass",
      "TestSerializavel"),
 
+    # a linha do caminho /api/ aparece duas vezes no arquivo (aqui e no cabecalho
+    # de cache); a ancora leva a linha seguinte para nao ficar ambigua
     ("sessao deixa de ser exigida", "app.py",
-     '    if request.path.startswith("/api/"):',
-     "    if False:",
+     '    if request.path.startswith("/api/"):\n'
+     '        return jsonify({"ok": False, "erro": "Faça login para continuar.",',
+     "    if False:\n"
+     '        return jsonify({"ok": False, "erro": "Faça login para continuar.",',
      "TestAcesso"),
 
     # o defeito exato que derrubou o painel inteiro: quebra de linha crua dentro
@@ -74,6 +78,13 @@ MUT = [
      '    if len(cabeca) >= 12 and cabeca[4:8] == b"ftyp":',
      "    if False:",
      "TestFormatoDeEnvio.test_heic_e_recusado_com_o_caminho_da_solucao"),
+
+    # sem isto o navegador guarda a lista de imoveis por conta propria: o corretor
+    # cadastra e a tela continua mostrando os antigos
+    ("api pode ficar em cache", "app.py",
+     '        resposta.headers["Cache-Control"] = "no-store, must-revalidate"',
+     "        pass",
+     "TestCacheDaApi.test_api_manda_nao_guardar"),
 
     # o valor exato que causava o rasgo preto: o visualizador apaga acima de
     # 1,18 e o fundo so reconstruia acima de 1,20, deixando a faixa descoberta

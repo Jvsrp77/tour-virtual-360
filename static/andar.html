@@ -98,16 +98,24 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <label>Profundidade do relevo</label>
   <input type="range" id="forca" min="0" max="100" value="70">
 
-  <label>Alcance a partir de cada ponto</label>
-  <!-- 100 cm e nao 130: o esticamento cresce rapido com a distancia do ponto, e
-       a partir de 1,3 m ja aparece na borda dos moveis. Quem quiser explorar
-       mais abre no controle; o padrao protege quem so olha o anuncio. -->
-  <input type="range" id="alcance" min="50" max="250" value="100">
+  <label>Passeio livre — em zero, imagem sem deformação</label>
+  <!--
+    Padrao ZERO: o visitante fica sempre EM um ponto de captura e anda pelas setas.
+
+    No ponto exato da captura a imagem e a foto original, sem nenhuma deformacao —
+    a malha desloca os vertices radialmente, e visto do centro da esfera o
+    deslocamento radial nao muda a direcao de nenhum pixel. Sair do ponto e o que
+    estica, porque ali ninguem fotografou e a malha precisa inventar o vao.
+
+    E o modelo do Street View: pula-se de esfera em esfera, nunca se fica no meio.
+    Quem quiser o paralaxe de se inclinar abre o controle e aceita o borrao.
+  -->
+  <input type="range" id="alcance" min="0" max="250" value="0">
 
   <div class="teclas">
     <div><b>▲ seta</b> ir ao ponto</div>
-    <div><b>W A S D</b> ajustar</div>
     <div><b>arrastar</b> olhar em volta</div>
+    <div><b>W A S D</b> só com passeio livre</div>
     <div><b>R</b> voltar ao ponto</div>
   </div>
 </div>
