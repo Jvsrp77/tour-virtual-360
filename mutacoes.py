@@ -68,6 +68,18 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
+    # o video so ganha da foto porque escolhe o quadro nitido da vizinhanca; se
+    # pegar o primeiro que aparecer, entrega tremido e vira um jeito novo de errar
+    ("video pega quadro qualquer", "video.py",
+     "        melhor = max(perto, key=lambda k: nitidez[k])",
+     "        melhor = perto[0]",
+     "TestVideo.test_quadros_tremidos_sao_descartados"),
+
+    ("video nao avisa resolucao baixa", "video.py",
+     "    if largura >= 2000:\n        return None",
+     "    if True:\n        return None",
+     "TestVideo.test_resolucao_baixa_avisa_e_4k_nao"),
+
     # a conferencia so vale se ACUSAR: se ela calar, o corretor volta a receber
     # "as fotos nao tem sobreposicao" sem saber qual foto trocar
     ("conferencia nao ve parede lisa", "stitcher.py",

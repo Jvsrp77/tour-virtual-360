@@ -148,6 +148,18 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
         Para teto e chão reais, faça 3 voltas (nivelado, inclinado para cima e para
         baixo) e envie as ~30 fotos juntas. Veja o <b>Guia de captura</b>.</div>
 
+      <label>Ou envie um vídeo girando no eixo</label>
+      <input type="text" id="nomeVideo" placeholder="Nome do ambiente (ex: Quarto)">
+      <input type="file" id="arquivoVideo" accept="video/*" style="margin-top:8px">
+      <button class="primario" style="width:100%;margin-top:8px" onclick="costurarVideo()">
+        Extrair quadros e costurar
+      </button>
+      <div class="dica">Fique parado num ponto e gire devagar, dando a volta
+        completa em 20 a 30 segundos. O sistema escolhe sozinho os melhores quadros
+        e descarta os tremidos — não tem como girar demais.
+        <b>Grave em 4K e com o celular de pé</b>: vídeo tem menos resolução que foto,
+        e em 1080p boa parte do detalhe se perde.</div>
+
       <label>Já tenho a foto 360 pronta</label>
       <input type="file" id="fotos360" multiple accept="image/*">
       <button style="width:100%;margin-top:8px" onclick="importar360()">
@@ -354,6 +366,26 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <p style="color:#9aa2ad;font-size:12.5px;margin:6px 0 0">
     Resultado: teto e chão reais. A cobertura vertical passa de ~80° para ~150°.
     Leva cerca de 20 segundos para processar.</p>
+
+  <h4 style="margin:16px 0 6px;font-size:14px;color:#e07b39">Por vídeo — à prova de errar o passo</h4>
+  <ol>
+    <li>Celular <b>de pé</b>, gravando em <b>4K</b>. Em 1080p metade do detalhe se perde.</li>
+    <li>Parado no mesmo ponto, gire <b>devagar</b>, volta completa em 20 a 30 segundos.</li>
+    <li>Termine <b>onde começou</b> antes de parar a gravação, senão a volta não fecha.</li>
+    <li>Envie o arquivo. O sistema mede o giro, escolhe os melhores quadros e
+        descarta os tremidos.</li>
+  </ol>
+  <p style="color:#9aa2ad;font-size:12.5px;margin:6px 0 0">
+    Troca resolução por segurança: não tem como girar demais e abrir vão. Bom
+    quando a captura por fotos vem falhando.</p>
+
+  <h4 style="margin:16px 0 6px;font-size:14px;color:#e07b39">Para caminhar sem borrão</h4>
+  <p style="color:#9aa2ad;font-size:13px;margin:0">
+    Nenhum dos modos acima resolve isso, porque todos capturam de <b>um ponto só</b> —
+    e de um ponto só ninguém vê atrás do armário. Faça
+    <b style="color:#e07b39">2 ou 3 capturas por cômodo</b>, em lugares diferentes,
+    gere profundidade em cada uma e posicione todas na planta. Aí caminhar deixa de
+    ser dedução e vira andar entre fotos de verdade.</p>
   <div class="fechar"><button class="primario" onclick="document.getElementById('dlgGuia').close()">Entendi</button></div>
 </dialog>
 
@@ -973,6 +1005,40 @@ async function excluirCena(){
   if (visor){ visor.destroy(); visor = null; }
   $('visor').innerHTML = '<div class="vazio" id="vazio"><b>Nenhum ambiente selecionado</b></div>';
   await carregar();
+}
+
+async function costurarVideo(){
+  const arq = $('arquivoVideo').files[0];
+  if (!arq){ aviso('Selecione um vídeo do cômodo.', 'erro'); return; }
+  const fd = new FormData();
+  fd.append('nome', $('nomeVideo').value.trim() || 'Ambiente');
+  fd.append('video', arq);
+
+  const botao = document.querySelector('button[onclick="costurarVideo()"]');
+  if (botao){ botao.disabled = true; botao.textContent = 'Processando...'; }
+
+  aviso('Enviando o vídeo (' + (arq.size/1048576).toFixed(1) + ' MB)...', 'mira');
+  progresso(10);
+  try{
+    const j = await (await fetch(API + '/cenas/video', {method: 'POST', body: fd})).json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    $('arquivoVideo').value = ''; $('nomeVideo').value = '';
+
+    await acompanhar(j.tarefa, async res => {
+      cenaAtual = res.cena.id;
+      await carregar();
+      const cap = res.cena.captura || {};
+      const resumo = `Panorama criado com ${res.fotos_usadas} quadros do vídeo · `
+        + (cap.volta_fechada ? 'volta fechada, 360 completo' : 'captura parcial');
+      aviso([resumo].concat(res.avisos || []).join('<br>'),
+            (res.avisos && res.avisos.length) ? 'mira' : 'ok');
+    });
+  }catch(e){
+    progresso(0);
+    aviso('Falha ao enviar o vídeo: ' + e, 'erro');
+  }finally{
+    if (botao){ botao.disabled = false; botao.textContent = 'Extrair quadros e costurar'; }
+  }
 }
 
 async function costurar(){

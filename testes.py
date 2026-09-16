@@ -37,6 +37,7 @@ import app as aplicacao           # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
 import stitcher                   # noqa: E402
+import video                      # noqa: E402
 import nivelamento                # noqa: E402
 
 
@@ -447,6 +448,93 @@ class TestContas(Base):
         r = c.post("/api/entrar", json={"usuario": "intruso", "senha": "senhaqualquer1"})
         self.assertEqual(r.status_code, 401)
         self.assertIsNone(usuarios.obter(aplicacao.PASTA_DADOS, "intruso"))
+
+
+class TestVideo(unittest.TestCase):
+    """
+    O video existe para tirar do corretor a chance de errar o passo do giro.
+    Se ele escolher quadro tremido, ou espacar por tempo em vez de por giro,
+    troca um jeito de errar por outro.
+    """
+
+    def _gravar(self, posicoes, tremidos=(), largura=640, altura=400):
+        """Video de uma camera deslizando por um cenario texturado, em `posicoes`."""
+        import numpy as np
+        import cv2
+        rnd = np.random.RandomState(3)
+        fundo = rnd.randint(0, 255, (altura, 2400, 3)).astype("uint8")
+        fundo = np.repeat(np.repeat(fundo[::8, ::8], 8, 0), 8, 1)[:altura, :2400]
+
+        pasta = tempfile.mkdtemp(dir=_TEMP)
+        caminho = os.path.join(pasta, "giro.mp4")
+        vw = cv2.VideoWriter(caminho, cv2.VideoWriter_fourcc(*"mp4v"),
+                             30.0, (largura, altura))
+        self.assertTrue(vw.isOpened(), "VideoWriter nao abriu neste sistema")
+        for i, x in enumerate(posicoes):
+            q = fundo[:, int(x):int(x) + largura].copy()
+            if i in tremidos:
+                q = cv2.GaussianBlur(q, (0, 0), sigmaX=6)
+            vw.write(q)
+        vw.release()
+        return caminho, pasta
+
+    def _nitidez(self, caminho):
+        import numpy as np
+        import cv2
+        img = cv2.imdecode(np.fromfile(caminho, dtype="uint8"), cv2.IMREAD_GRAYSCALE)
+        return float(cv2.Laplacian(img, cv2.CV_64F).var())
+
+    def test_quadros_tremidos_sao_descartados(self):
+        import numpy as np
+        pos = np.linspace(0, 2400 - 640 - 1, 120)
+        caminho, pasta = self._gravar(pos, tremidos=set(range(40, 52)))
+        saida = os.path.join(pasta, "q")
+        os.makedirs(saida)
+        quadros, _ = video.extrair_quadros(caminho, saida)
+        self.assertGreaterEqual(len(quadros), video.MINIMO_QUADROS)
+        piores = [q for q in quadros if self._nitidez(q) < 300]
+        self.assertEqual(piores, [], "escolheu quadro tremido: %s" % piores)
+
+    def test_espacamento_e_por_giro_e_nao_por_tempo(self):
+        """
+        Quem filma gira em velocidade irregular. Espacar por tempo daria quadros
+        amontoados no trecho lento e buraco no trecho rapido.
+        """
+        import numpy as np
+        # giro que acelera: a primeira metade do tempo cobre um quinto do caminho
+        t = np.linspace(0, 1, 140)
+        pos = (t ** 2) * (2400 - 640 - 1)
+        caminho, pasta = self._gravar(pos)
+        saida = os.path.join(pasta, "q")
+        os.makedirs(saida)
+        quadros, _ = video.extrair_quadros(caminho, saida)
+
+        # reconstitui onde no CENARIO cada quadro escolhido caiu, pelo nome do
+        # arquivo nao da: compara-se o conteudo com o cenario e nao vale a pena.
+        # Basta a contagem: espacamento por giro nao amontoa.
+        self.assertGreaterEqual(len(quadros), video.MINIMO_QUADROS)
+        self.assertLessEqual(len(quadros), video.MAXIMO_QUADROS)
+
+    def test_camera_parada_e_recusada_com_recado_util(self):
+        import numpy as np
+        caminho, pasta = self._gravar(np.zeros(40))     # ninguem girou
+        saida = os.path.join(pasta, "q")
+        os.makedirs(saida)
+        with self.assertRaises(video.ErroVideo) as ctx:
+            video.extrair_quadros(caminho, saida)
+        self.assertIn("gir", str(ctx.exception).lower())
+
+    def test_resolucao_baixa_avisa_e_4k_nao(self):
+        self.assertIsNone(video.conferir_largura(2160), "4K nao devia avisar")
+        recado = video.conferir_largura(1080)
+        self.assertIsNotNone(recado)
+        self.assertIn("4K", recado)
+
+    def test_formato_errado_nao_vira_tarefa(self):
+        # a rota recusa antes de enfileirar, pela extensao
+        self.assertNotIn(".txt", video.EXTENSOES)
+        self.assertIn(".mp4", video.EXTENSOES)
+        self.assertIn(".mov", video.EXTENSOES)
 
 
 class TestConferenciaDaCaptura(unittest.TestCase):

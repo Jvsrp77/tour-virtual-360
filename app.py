@@ -26,6 +26,7 @@ import cv2
 import numpy as np
 
 import stitcher
+import video
 import cena_demo
 import profundidade
 import tarefas
@@ -200,7 +201,8 @@ def _pegar_imovel(endpoint, valores):
 _TRAVAS = {}
 _TRAVA_MESTRA = threading.Lock()
 
-ROTAS_PESADAS = {"api.api_costurar", "api.api_importar_varredura",
+ROTAS_PESADAS = {"api.api_costurar", "api.api_costurar_video",
+                 "api.api_importar_varredura",
                  "api.api_importar_360", "api.api_gerar_profundidade",
                  "api.api_corrigir_cena", "api.api_fundo"}
 
@@ -883,6 +885,75 @@ def api_costurar():
             return {"cena": cena, "fotos_usadas": len(temporarios), "avisos": avisos}
 
         tid = tarefas.criar(imovel, "costura", "Costurando %s" % nome)
+        tarefas.enfileirar(tid, trabalho)
+        return jsonify({"ok": True, "tarefa": tid}), 202
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "erro": "Erro inesperado: %s" % e}), 500
+
+
+@api.route("/cenas/video", methods=["POST"])
+def api_costurar_video():
+    """
+    Recebe um video girando no mesmo ponto e costura os melhores quadros.
+
+    Video nao rende panorama melhor que foto — rende panorama mais dificil de
+    errar: a sobreposicao e continua, entao nao existe "girei demais". O preco e
+    resolucao, e video.conferir_largura avisa quando ela nao da.
+    """
+    arquivo = (request.files.get("video") or
+               (request.files.getlist("fotos") or [None])[0])
+    nome = (request.form.get("nome") or "Ambiente").strip()
+
+    if arquivo is None or not arquivo.filename:
+        return jsonify({"ok": False, "erro": "Selecione um vídeo do ambiente."}), 400
+
+    ext = os.path.splitext(arquivo.filename)[1].lower()
+    if ext not in video.EXTENSOES:
+        return jsonify({"ok": False, "erro":
+                        "Formato não suportado (%s). Envie MP4 ou MOV, que é o que "
+                        "o celular grava." % (ext or "sem extensão")}), 400
+
+    try:
+        nome_lote = uuid.uuid4().hex[:10]
+        lote = os.path.join(PASTA_UPLOADS, nome_lote)
+        os.makedirs(lote, exist_ok=True)
+        origem = os.path.join(lote, "video" + ext)
+        arquivo.save(origem)
+
+        imovel = g.imovel
+        destino = pasta_cenas()
+
+        def trabalho(relatar):
+            quadros, avisos_video = video.extrair_quadros(origem, lote, relatar)
+            arq, largura, altura, info = stitcher.costurar(quadros, destino, relatar)
+
+            with trava_do_imovel(imovel):
+                tour = carregar_tour(imovel)
+                cena = montar_cena(nome, arq, largura, altura, "video", info,
+                                   imovel_id=imovel)
+                cena["lote"] = nome_lote
+                tour["cenas"].append(cena)
+                if not tour["cena_inicial"]:
+                    tour["cena_inicial"] = cena["id"]
+                salvar_tour(tour, imovel)
+
+            # o video ja virou quadros; guardar o original so ocupa disco
+            try:
+                os.remove(origem)
+            except OSError:
+                pass
+
+            avisos = list(avisos_video) + list(info.get("conferencia") or [])
+            if not info["fechada"]:
+                avisos.append(
+                    "Você cobriu %.0f graus, com um vão de %.0f graus sem imagem. "
+                    "Para fechar a volta, gire até voltar ao ponto de partida antes "
+                    "de parar a gravação." % (info["haov"], info["maior_buraco"]))
+            return {"cena": cena, "fotos_usadas": len(quadros), "avisos": avisos}
+
+        tid = tarefas.criar(imovel, "video", "Vídeo de %s" % nome)
         tarefas.enfileirar(tid, trabalho)
         return jsonify({"ok": True, "tarefa": tid}), 202
 
