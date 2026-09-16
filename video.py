@@ -35,6 +35,7 @@ PASSO = 0.35               # passo em fracao da largura: deixa ~65% de sobreposi
 MAXIMO_QUADROS = 24        # acima disto a costura fica cara sem ganhar cobertura
 MINIMO_QUADROS = 6         # abaixo disto nao da panorama
 LARGURA_POBRE = 1400       # ver stitcher._larguras_a_tentar: o degrau mais baixo
+NITIDEZ_ACEITAVEL = 0.7    # ver _escolher: so foge do alvo por borrao de verdade
 EXTENSOES = (".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm")
 
 
@@ -113,10 +114,20 @@ def _medir(captura, relatar):
 
 def _escolher(nitidez, andado, passo):
     """
-    Um quadro a cada `passo` percorrido, e o mais nitido da vizinhanca.
+    Um quadro a cada `passo` percorrido; desvia do alvo so para fugir de borrao.
 
-    A janela e meio passo para cada lado: mais larga que isso e o quadro escolhido
-    deixa de estar onde o espacamento pedia, e a sobreposicao vira loteria.
+    O criterio e "o mais PROXIMO do alvo entre os aceitavelmente nitidos", e nao
+    "o mais nitido da vizinhanca". A diferenca nao e sutil: medido num giro de
+    velocidade constante, escolher o mais nitido da janela dava espacamento de
+    4,8 a 36 graus onde o uniforme era 18 — porque num video sem borrao todos os
+    candidatos tem nitidez praticamente igual, e o maximo cai em qualquer ponto
+    da janela por ruido. Com 36 graus de vao e 50 de campo, a sobreposicao cai
+    para 28% e o alinhamento se desmancha; o panorama saiu recusado por
+    deformacao enquanto os MESMOS angulos, entregues direto, costuravam limpo.
+
+    Com o filtro de nitidez relativo, video limpo escolhe sempre o quadro do alvo
+    — espacamento uniforme — e so o trecho realmente borrado empurra a escolha
+    para o vizinho.
     """
     if not andado:
         return []
@@ -129,15 +140,22 @@ def _escolher(nitidez, andado, passo):
     alvos = np.linspace(0.0, total, quantos)
 
     andado = np.asarray(andado)
-    janela = passo * 0.5
+    # a janela acompanha o espacamento real, que e maior que `passo` quando o
+    # teto de quadros corta a conta
+    espaco = float(alvos[1] - alvos[0]) if len(alvos) > 1 else passo
+    janela = espaco * 0.5
+
     escolhidos = []
     for alvo in alvos:
         perto = np.where(np.abs(andado - alvo) <= janela)[0]
         if not len(perto):
-            perto = [int(np.argmin(np.abs(andado - alvo)))]
-        melhor = max(perto, key=lambda k: nitidez[k])
-        if melhor not in escolhidos:
-            escolhidos.append(int(melhor))
+            perto = np.array([int(np.argmin(np.abs(andado - alvo)))])
+        melhor_nitidez = max(nitidez[k] for k in perto)
+        aceitaveis = [k for k in perto
+                      if nitidez[k] >= NITIDEZ_ACEITAVEL * melhor_nitidez]
+        escolhido = min(aceitaveis, key=lambda k: abs(andado[k] - alvo))
+        if escolhido not in escolhidos:
+            escolhidos.append(int(escolhido))
     return sorted(escolhidos)
 
 

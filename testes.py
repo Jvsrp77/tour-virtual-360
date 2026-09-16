@@ -508,12 +508,59 @@ class TestVideo(unittest.TestCase):
         saida = os.path.join(pasta, "q")
         os.makedirs(saida)
         quadros, _ = video.extrair_quadros(caminho, saida)
-
-        # reconstitui onde no CENARIO cada quadro escolhido caiu, pelo nome do
-        # arquivo nao da: compara-se o conteudo com o cenario e nao vale a pena.
-        # Basta a contagem: espacamento por giro nao amontoa.
         self.assertGreaterEqual(len(quadros), video.MINIMO_QUADROS)
         self.assertLessEqual(len(quadros), video.MAXIMO_QUADROS)
+
+    def test_video_limpo_sai_com_espacamento_uniforme(self):
+        """
+        O defeito que escapou aos outros testes e so apareceu na costura de ponta
+        a ponta: escolhendo "o mais nitido da janela", um video SEM borrao tinha a
+        escolha decidida por ruido de nitidez, e o espacamento ia de 4,8 a 36 graus
+        onde o uniforme era 18. A costura foi recusada por deformacao enquanto os
+        mesmos angulos, entregues direto, costuravam limpo.
+
+        Espacamento torto nao aparece na contagem de quadros nem na nitidez deles:
+        so medindo o intervalo.
+        """
+        import numpy as np
+        n = 150
+        pos = np.linspace(0, 2400 - 640 - 1, n)     # giro de velocidade constante
+        caminho, pasta = self._gravar(pos)
+        cap = video._abrir(caminho)
+        try:
+            nitidez, andado, _ = video._medir(cap, None)
+        finally:
+            cap.release()
+        escolhidos = video._escolher(nitidez, andado,
+                                     video.PASSO * video.LARGURA_ANALISE)
+        self.assertGreaterEqual(len(escolhidos), video.MINIMO_QUADROS)
+        intervalos = np.diff(escolhidos)
+        medio = intervalos.mean()
+        # giro constante: os intervalos tem que bater com o medio de perto
+        self.assertLess(intervalos.max(), medio * 1.6,
+                        "vao grande demais: %s" % intervalos.tolist())
+        self.assertGreater(intervalos.min(), medio * 0.5,
+                           "quadros amontoados: %s" % intervalos.tolist())
+
+    def test_borrao_ainda_e_evitado_apesar_do_espacamento(self):
+        """
+        A correcao do espacamento nao pode ter custado a fuga do borrao: sao os
+        dois motivos de existir do modulo, e um nao vale sem o outro.
+        """
+        import numpy as np
+        n = 150
+        pos = np.linspace(0, 2400 - 640 - 1, n)
+        borrados = set(range(60, 72))
+        caminho, pasta = self._gravar(pos, tremidos=borrados)
+        cap = video._abrir(caminho)
+        try:
+            nitidez, andado, _ = video._medir(cap, None)
+        finally:
+            cap.release()
+        escolhidos = video._escolher(nitidez, andado,
+                                     video.PASSO * video.LARGURA_ANALISE)
+        dentro = sorted(borrados.intersection(escolhidos))
+        self.assertEqual(dentro, [], "escolheu quadro borrado: %s" % dentro)
 
     def test_camera_parada_e_recusada_com_recado_util(self):
         import numpy as np

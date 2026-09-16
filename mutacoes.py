@@ -68,12 +68,21 @@ MUT = [
      "'Excluir o contato de ' + nome + '?\n\n'",
      "TestPaginas.test_javascript_das_paginas_compila"),
 
-    # o video so ganha da foto porque escolhe o quadro nitido da vizinhanca; se
-    # pegar o primeiro que aparecer, entrega tremido e vira um jeito novo de errar
-    ("video pega quadro qualquer", "video.py",
-     "        melhor = max(perto, key=lambda k: nitidez[k])",
-     "        melhor = perto[0]",
-     "TestVideo.test_quadros_tremidos_sao_descartados"),
+    # o defeito que so apareceu na costura de ponta a ponta: escolher "o mais
+    # nitido da janela" faz o ruido de nitidez decidir, e o espacamento angular
+    # vai de 4,8 a 36 graus onde o uniforme era 18 — costura recusada por
+    # deformacao. Contar quadros ou medir nitidez deles nao pega isso.
+    ("video escolhe pelo pico de nitidez", "video.py",
+     "        escolhido = min(aceitaveis, key=lambda k: abs(andado[k] - alvo))",
+     "        escolhido = max(perto, key=lambda k: nitidez[k])",
+     "TestVideo.test_video_limpo_sai_com_espacamento_uniforme"),
+
+    # o outro lado da mesma moeda: sem o filtro relativo, o quadro do alvo entra
+    # mesmo estando borrado
+    ("video aceita quadro borrado", "video.py",
+     "NITIDEZ_ACEITAVEL = 0.7",
+     "NITIDEZ_ACEITAVEL = 0.0",
+     "TestVideo.test_borrao_ainda_e_evitado_apesar_do_espacamento"),
 
     ("video nao avisa resolucao baixa", "video.py",
      "    if largura >= 2000:\n        return None",
