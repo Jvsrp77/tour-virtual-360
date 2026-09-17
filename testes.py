@@ -18,6 +18,7 @@ import hashlib
 import tempfile
 import re
 import shutil
+import sys
 import subprocess
 import threading
 import unittest
@@ -261,6 +262,46 @@ class TestConcorrencia(Base):
        tempo: sem eles o defeito so aparecia em 1 execucao a cada 3.
     """
 
+    def test_a_leitura_do_tour_pega_a_trava(self):
+        """
+        Verificacao DETERMINISTICA da trava de leitura.
+
+        O outro teste desta classe depende de uma corrida acontecer, e corrida
+        nao acontece sob encomenda: com a maquina carregada ele passava mesmo com
+        a trava removida, e a checagem de mutacao flagrou isso — "teste cego" na
+        protecao contra PERDA DE DADOS, que e a pior de todas para ficar sem
+        verificacao.
+
+        Aqui nao ha aposta: segura-se a trava do imovel numa thread e cobra-se
+        que `carregar_tour` fique esperando. Sem trava na leitura, ela passa
+        direto e o teste falha na hora, sempre.
+        """
+        dona = self.conta("travaleitura")
+        iid = self.imovel(dona, "Trava")
+
+        trava = aplicacao.trava_do_imovel(iid)
+        terminou = threading.Event()
+
+        def ler():
+            with aplicacao.app.test_request_context():
+                aplicacao.carregar_tour(iid)
+            terminou.set()
+
+        trava.acquire()
+        try:
+            t = threading.Thread(target=ler, daemon=True)
+            t.start()
+            passou_direto = terminou.wait(timeout=1.0)
+            self.assertFalse(
+                passou_direto,
+                "a leitura do tour NÃO pegou a trava: no Windows o os.replace da "
+                "gravação falha com o arquivo aberto, e contatos se perdem")
+        finally:
+            trava.release()
+
+        self.assertTrue(terminou.wait(timeout=10.0),
+                        "a leitura ficou presa depois da trava ser solta")
+
     def test_escritas_simultaneas_nao_se_perdem(self):
         dona = self.conta("concorrencia")
         iid = self.imovel(dona, "Concorrência")
@@ -501,6 +542,71 @@ class TestFormatoDeEnvio(Base):
                       content_type="multipart/form-data")
         self.assertEqual(r.status_code, 400)
         self.assertIn("HEIC", r.get_json()["erro"])
+
+
+class TestVigiaDoServidor(unittest.TestCase):
+    """
+    O servidor precisa voltar sozinho.
+
+    Sem isto ele morre com a janela que o abriu e nao volta depois que a maquina
+    reinicia — o link enviado a imobiliaria abre em nada, e ninguem percebe ate o
+    cliente reclamar.
+
+    Os testes vigiam um processo de MENTIRA, nunca o servidor de verdade: subir
+    servidor dentro de teste disputaria a porta com o que esta rodando.
+    """
+
+    def _com_alvo(self, corpo, **extra):
+        """Escreve um programa curto e faz o vigia vigiar ELE."""
+        alvo = os.path.join(_TEMP, "falso_%d.py" % abs(hash(corpo)))
+        with io.open(alvo, "w", encoding="utf-8") as f:
+            f.write(corpo)
+        ambiente = dict(os.environ, TOUR_COMANDO=alvo, **extra)
+        return alvo, ambiente
+
+    def test_reinicia_quando_o_processo_morre(self):
+        import subprocess
+        alvo, ambiente = self._com_alvo(
+            "import sys, time\n"
+            "open(sys.argv[0] + '.contador', 'a').write('x')\n"
+            "time.sleep(0.2)\n")
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import servico; servico.ESPERA_MINIMA = 0.05; servico.DE_PE = 0.01;\n"
+             "print(servico.vigiar(limite_de_quedas=3))"],
+            cwd=os.getcwd(), env=ambiente, capture_output=True, text=True,
+            errors="ignore", timeout=90)
+        self.assertEqual(r.returncode, 0, r.stderr[-800:])
+        with io.open(alvo + ".contador", encoding="utf-8") as f:
+            subidas = len(f.read())
+        self.assertGreaterEqual(subidas, 3,
+                                "o vigia não reiniciou: subiu só %d vez(es)" % subidas)
+
+    def test_espera_cresce_quando_cai_logo(self):
+        """
+        Queda imediata em laco apertado consome a maquina e enche o disco. A
+        espera dobra; se ele se aguenta de pe, volta ao minimo.
+        """
+        import servico
+        self.assertLess(servico.ESPERA_MINIMA, servico.ESPERA_MAXIMA)
+        self.assertGreater(servico.DE_PE, servico.ESPERA_MINIMA)
+
+    def test_processo_travado_tambem_e_derrubado(self):
+        """
+        Processo vivo que nao responde e pior que processo morto: segura a porta
+        e parece saudavel. A checagem de saude existe por isso.
+        """
+        with io.open("servico.py", encoding="utf-8") as f:
+            codigo = f.read()
+        self.assertIn("proc.kill()", codigo)
+        self.assertIn("TOLERANCIA_TRAVADO", codigo)
+        self.assertIn("def responde", codigo)
+
+    def test_nao_derruba_durante_o_arranque(self):
+        """Costura e modelos demoram a subir; cobrar saude cedo mataria em laco."""
+        with io.open("servico.py", encoding="utf-8") as f:
+            codigo = f.read()
+        self.assertIn("time.time() - inicio < 20", codigo)
 
 
 class TestImagemIntegra(unittest.TestCase):
