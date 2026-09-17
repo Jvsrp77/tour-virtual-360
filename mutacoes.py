@@ -86,6 +86,14 @@ MUT = [
      "        pass",
      "TestCacheDaApi.test_api_manda_nao_guardar"),
 
+    # o defeito que a primeira versao da medida tinha: sem exigir borda na foto,
+    # parede lisa era acusada e quarto vazio saia pior que sala mobiliada — numero
+    # errado dando respaldo para trocar cena boa por pior
+    ("escorrido conta parede lisa", "profundidade.py",
+     "    fracao = float((rampa & forte).mean())",
+     "    fracao = float(rampa.mean())",
+     "TestPrevisaoDeEscorrido.test_parede_lisa_nao_e_acusada"),
+
     # o valor exato que causava o rasgo preto: o visualizador apaga acima de
     # 1,18 e o fundo so reconstruia acima de 1,20, deixando a faixa descoberta
     ("fundo mais exigente que o visor", "fundo.py",

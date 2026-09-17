@@ -1298,6 +1298,15 @@ def api_gerar_profundidade(cena_id):
         if ok:
             buf.tofile(os.path.join(destino, nome_previa))
 
+        # Previsao de escorrido: o corretor precisa saber se a captura presta
+        # ANTES de publicar, e nao descobrir pelo cliente. Sai de graca aqui,
+        # porque o panorama e a profundidade ja estao na mao.
+        try:
+            escorrido = profundidade.medir_escorrido(
+                stitcher._ler_imagem(panorama), disp)
+        except Exception:
+            escorrido = None          # medida e informacao, nao pode derrubar a tarefa
+
         with trava_do_imovel(imovel):
             tour = carregar_tour(imovel)     # relê: pode ter mudado durante o calculo
             atual = achar_cena(tour, cena_id)
@@ -1305,6 +1314,8 @@ def api_gerar_profundidade(cena_id):
                 raise RuntimeError("A cena foi removida durante o cálculo.")
             atual["profundidade"] = nome
             atual["previa_profundidade"] = nome_previa
+            if escorrido:
+                atual["escorrido"] = escorrido
             salvar_tour(tour, imovel)
         return {"cena": atual}
 

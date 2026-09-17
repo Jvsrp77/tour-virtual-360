@@ -188,3 +188,55 @@ def salvar(disparidade, caminho_png):
     if not ok:
         raise ErroProfundidade("Falha ao gravar o mapa de profundidade.")
     buf.tofile(caminho_png)
+
+
+# ------------------------------------------------- previsao de escorrido
+
+# Faixas calibradas nas cenas reais deste projeto, medidas na mesma convencao
+# desta funcao: sala de estar 0,77% (melhor), quarto 2 1,31%, cozinha 1,49%,
+# quarto real 2,35%, suite 2,49% (pior). As duas acima de 2% sao exatamente as
+# duas de que o usuario reclamou na tela, o que e a validacao de que a medida
+# corresponde ao que se ve.
+ESCORRIDO_OTIMO = 0.010
+ESCORRIDO_ACEITAVEL = 0.020
+
+
+def medir_escorrido(panorama_bgr, disparidade):
+    """
+    Estima quanto a imagem vai ESCORRER quando o visitante caminhar.
+
+    O que estica ao andar e a rampa de profundidade na BORDA DE UM OBJETO: ali
+    existe coisa na frente de outra, deveria haver degrau, e a rampa faz a
+    textura derramar pelo vao. Acima de certo degrau o visualizador ja apaga o
+    triangulo e a camada de fundo assume; abaixo dele a malha estica em silencio.
+
+    So conta rampa que cai em borda da FOTO. A primeira versao desta medida
+    contava qualquer variacao suave e dava 21% num quarto vazio — parede lisa
+    produz gradiente suave ao longo de toda a sua extensao, o que e inofensivo,
+    porque a parede e mesmo continua e nao ha nada atras dela para revelar.
+    Aquela versao teria trocado cenas boas por piores com um numero dando
+    respaldo.
+    """
+    raio = 1.0 / (1.542 * disparidade + 0.125)
+    jan = np.ones((3, 3), np.float32)
+    menor = cv2.erode(raio, jan)
+    degrau = (cv2.dilate(raio, jan) - menor) / np.maximum(menor, 1e-6)
+    rampa = (degrau > 0.04) & (degrau <= 0.18)
+
+    cinza = cv2.cvtColor(cv2.resize(panorama_bgr,
+                                    (disparidade.shape[1], disparidade.shape[0]),
+                                    interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+    borda = np.hypot(cv2.Sobel(cinza, cv2.CV_32F, 1, 0, 3),
+                     cv2.Sobel(cinza, cv2.CV_32F, 0, 1, 3))
+    forte = borda > np.percentile(borda, 90)
+
+    fracao = float((rampa & forte).mean())
+    if fracao <= ESCORRIDO_OTIMO:
+        leitura = "otimo"
+    elif fracao <= ESCORRIDO_ACEITAVEL:
+        leitura = "aceitavel"
+    else:
+        leitura = "ruim"
+    return {"fracao": round(fracao, 5),
+            "porcento": round(100 * fracao, 2),
+            "leitura": leitura}

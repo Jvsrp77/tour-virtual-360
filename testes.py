@@ -544,6 +544,94 @@ class TestFormatoDeEnvio(Base):
         self.assertIn("HEIC", r.get_json()["erro"])
 
 
+class TestPrevisaoDeEscorrido(unittest.TestCase):
+    """
+    O corretor precisa saber se a captura presta ANTES de publicar.
+
+    A armadilha desta medida ja aconteceu: a primeira versao contava QUALQUER
+    variacao suave de profundidade e dava 21% num quarto vazio, pior que uma sala
+    mobiliada. Parede lisa produz gradiente suave ao longo de toda a extensao, o
+    que e inofensivo — a parede e mesmo continua e nao ha nada atras para
+    revelar. Aquela versao teria trocado cenas boas por piores com um numero
+    dando respaldo.
+
+    Por isso os testes cobrem os DOIS lados: acusar o que escorre e ficar calado
+    no que nao escorre.
+    """
+
+    def _cena(self, com_objeto):
+        """
+        Reproduz o caso real: foto com borda NITIDA, profundidade BORRADA.
+
+        E assim que o defeito nasce. O modelo monocular nao entrega a silhueta do
+        movel, entrega uma bolha — a transicao vira rampa larga onde deveria ser
+        degrau, e e a rampa que derrama a textura ao caminhar. Degrau abrupto nao
+        serve para testar: acima do limite o visualizador ja apaga o triangulo e
+        a camada de fundo assume.
+        """
+        import numpy as np
+        import cv2
+        A, L = 256, 512
+        disp = np.linspace(0.25, 0.55, A, dtype=np.float32)[:, None].repeat(L, 1)
+        rnd = np.random.RandomState(5)
+        foto = (np.full((A, L, 3), 160, np.int16)
+                + rnd.randint(-12, 12, (A, L, 3))).clip(0, 255).astype(np.uint8)
+        if com_objeto:
+            disp[120:190, 150:330] = 0.62        # movel um pouco a frente
+            foto[120:190, 150:330] = 40          # e bem visivel na foto
+            # a bolha do modelo: borda de profundidade borrada, foto intacta
+            disp = cv2.GaussianBlur(disp, (0, 0), sigmaX=7)
+        return foto, disp
+
+    def test_objeto_na_frente_e_acusado(self):
+        import profundidade
+        foto, disp = self._cena(com_objeto=True)
+        com = profundidade.medir_escorrido(foto, disp)["fracao"]
+        foto2, disp2 = self._cena(com_objeto=False)
+        sem = profundidade.medir_escorrido(foto2, disp2)["fracao"]
+        self.assertGreater(com, sem,
+                           "não distinguiu cena com objeto de cena sem objeto")
+
+    def test_parede_lisa_nao_e_acusada(self):
+        """
+        O erro exato da primeira versão: contar variação de profundidade onde a
+        FOTO não tem borda. Quarto vazio saía pior que sala mobiliada, e eu quase
+        troquei uma cena boa por uma pior confiando nesse número.
+
+        O caso precisa ser calibrado com cuidado: um degradê muito suave nem
+        chega ao limite de rampa, e aí o teste passaria dos dois jeitos — cego.
+        Aqui a profundidade tem rampa de verdade (0,089 da imagem sem a exigência
+        de borda) e a foto é lisa, então a medida correta tem de dar zero.
+        """
+        import numpy as np
+        import cv2
+        import profundidade
+        A, L = 256, 512
+        disp = np.full((A, L), 0.30, np.float32)
+        disp[100:180, 140:360] = 0.75            # variação forte de profundidade
+        disp = cv2.GaussianBlur(disp, (0, 0), sigmaX=9)   # a bolha do modelo
+        foto = np.full((A, L, 3), 200, np.uint8)          # e nenhuma borda na foto
+        m = profundidade.medir_escorrido(foto, disp)
+        self.assertLess(m["fracao"], 0.005,
+                        "acusou parede lisa: a medida voltou a contar variação "
+                        "onde a foto não tem borda, e isso já quase trocou cena "
+                        "boa por pior")
+
+    def test_leitura_em_palavras(self):
+        import profundidade
+        self.assertLessEqual(profundidade.ESCORRIDO_OTIMO,
+                             profundidade.ESCORRIDO_ACEITAVEL)
+        foto, disp = self._cena(com_objeto=False)
+        self.assertIn(profundidade.medir_escorrido(foto, disp)["leitura"],
+                      ("otimo", "aceitavel", "ruim"))
+
+    def test_o_painel_mostra_a_nota(self):
+        with io.open(os.path.join("static", "admin.html"), encoding="utf-8") as f:
+            painel = f.read()
+        self.assertIn("notaDeEscorrido", painel)
+        self.assertIn("escorrido ao caminhar", painel)
+
+
 class TestVigiaDoServidor(unittest.TestCase):
     """
     O servidor precisa voltar sozinho.

@@ -840,6 +840,34 @@ async function removerArea(){
   aviso('Metragem retirada do anúncio.', 'ok');
 }
 
+// Quanto esta cena vai ESCORRER quando o visitante caminhar.
+//
+// O corretor precisa saber disso ANTES de publicar, e nao descobrir pelo
+// cliente. A medida conta rampa de profundidade que cai em borda de objeto —
+// e ali que a textura derrama ao sair do ponto de captura.
+//
+// As faixas vem das cenas reais deste projeto: as duas que passaram de 2% foram
+// exatamente as duas que incomodaram na tela.
+function notaDeEscorrido(c){
+  const e = c.escorrido;
+  if (!e) return '';
+  const cores = {otimo: '#3fa46a', aceitavel: '#e07b39', ruim: '#d9534f'};
+  const textos = {
+    otimo: 'Captura muito boa. Caminhar sai limpo.',
+    aceitavel: 'Captura boa. Um leve borrão na borda dos móveis ao caminhar.',
+    ruim: 'Os móveis vão escorrer ao caminhar. Vale refazer a captura de um '
+        + 'ponto mais central, com o caminho do meio livre.'
+  };
+  const cor = cores[e.leitura] || '#9aa2ad';
+  return `<div style="background:var(--painel2);border-left:3px solid ${cor};
+                      border-radius:7px;padding:9px 11px;margin-bottom:8px">
+            <div style="font-size:13px;color:${cor};font-weight:600">
+              ${nBR(e.porcento)}% de escorrido ao caminhar</div>
+            <div style="font-size:12px;color:#a9b0ba;margin-top:3px">
+              ${textos[e.leitura] || ''}</div>
+          </div>`;
+}
+
 function desenharProfundidade(c){
   const alvo = $('blocoProfundidade');
   if (!c.panorama_completo){
@@ -862,6 +890,7 @@ function desenharProfundidade(c){
     alvo.innerHTML =
       `<img src="${CENAS}${c.previa_profundidade}?t=${Date.now()}"
             style="width:100%;border-radius:7px;margin-bottom:8px">
+       ${notaDeEscorrido(c)}
        <div class="linha">
          <button class="primario" onclick="window.open(URL_ANDAR + '?cena=${c.id}','_blank')">Andar</button>
          <button onclick="gerarProfundidade()">Refazer</button>
