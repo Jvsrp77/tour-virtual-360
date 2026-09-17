@@ -4,3 +4,7 @@ __pycache__/
 fotos_exemplo_costura/
 backups/
 *.log
+
+# pacotes temporarios de transferencia para servidor
+*_servidor.zip
+casa_demo_servidor.zip
