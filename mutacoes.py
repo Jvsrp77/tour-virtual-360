@@ -86,6 +86,15 @@ MUT = [
      "        pass",
      "TestCacheDaApi.test_api_manda_nao_guardar"),
 
+    # o defeito exato que eu cometi ao escrever a confianca: tratar o retangulo
+    # como centrado na camera. Quem fotografa quase nunca esta no meio do comodo,
+    # e isso dava aderencia ZERO em tudo — inclusive na cena conferida com LiDAR
+    ("area supoe camera no centro", "area.py",
+     "        ate_u = np.where(du > 1e-6, u_mais / du,\n"
+     "                         np.where(du < -1e-6, -u_menos / du, np.inf))",
+     "        ate_u = np.where(np.abs(du) > 1e-6, u_mais / np.abs(du), np.inf)",
+     "TestConfiancaDaArea.test_a_camera_fora_do_centro_nao_derruba_sozinha"),
+
     # o defeito que a primeira versao da medida tinha: sem exigir borda na foto,
     # parede lisa era acusada e quarto vazio saia pior que sala mobiliada — numero
     # errado dando respaldo para trocar cena boa por pior
@@ -160,13 +169,24 @@ def main():
     print("  %-38s %-16s %s" % ("MUTACAO", "TESTE", "RESULTADO"))
     print("  " + "-" * 76)
     bons = ruins = 0
-    for nome, arq, velho, novo, alvo in MUT:
+    for nome, arq, velho, novo_txt, alvo in MUT:
         orig = io.open(arq, encoding="utf-8").read()
+        # Se este script for morto no meio (fechar o terminal, cancelar a tarefa),
+        # o finally la embaixo nao roda e o arquivo fica com a sabotagem gravada.
+        # Aconteceu: o app.py passou a recusar HEIC nunca mais, e na rodada
+        # seguinte isso aparecia so como "ANCORA 0", que se le como ancora velha.
+        # Ficar calado ai e o pior caso possivel — o fonte quebrado segue para o
+        # commit. Entao: se o texto original sumiu e o mutado esta no lugar dele,
+        # desfaz e diz em voz alta.
+        if orig.count(velho) == 0 and orig.count(novo_txt) == 1:
+            orig = orig.replace(novo_txt, velho, 1)
+            io.open(arq, "w", encoding="utf-8", newline="").write(orig)
+            print("  %-38s %-16s FONTE ESTAVA MUTADO — desfeito" % (nome, ""))
         if orig.count(velho) != 1:
             print("  %-38s %-16s ANCORA %d" % (nome, "", orig.count(velho)))
             ruins += 1
             continue
-        io.open(arq, "w", encoding="utf-8", newline="").write(orig.replace(velho, novo, 1))
+        io.open(arq, "w", encoding="utf-8", newline="").write(orig.replace(velho, novo_txt, 1))
         try:
             falhou = roda(alvo)
         finally:

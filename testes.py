@@ -544,6 +544,85 @@ class TestFormatoDeEnvio(Base):
         self.assertIn("HEIC", r.get_json()["erro"])
 
 
+class TestConfiancaDaArea(Base):
+    """
+    Metragem errada num anuncio nao e detalhe estetico: e o numero que o
+    comprador usa para comparar preco entre imoveis.
+
+    A estimativa vem de um retangulo ajustado ao contorno do piso — acerta em
+    comodo retangular com paredes a vista, erra em comodo em L ou com movel
+    tapando parede. Ate agora saia com a mesma cara nos dois casos. Medido no
+    quarto real: 11,1 m2 estimados contra 13,6 m2 do LiDAR, erro de -18%.
+    """
+
+    def test_comodo_retangular_tem_confianca_alta(self):
+        import numpy as np
+        import area
+        # contorno de retangulo perfeito, camera no centro
+        n = 360
+        ang = (np.arange(n) / n - 0.5) * 2 * np.pi
+        a, b = 3.0, 2.0
+        du, dv = np.sin(ang), np.cos(ang)
+        with np.errstate(divide="ignore"):
+            contorno = np.fmin(np.abs(a / np.where(np.abs(du) < 1e-6, 1e-6, du)),
+                               np.abs(b / np.where(np.abs(dv) < 1e-6, 1e-6, dv)))
+        c = area._confianca(contorno.astype(np.float32), 0.0, (a, a, b, b),
+                            piso_livre=4 * a * b * 0.9, metros2=4 * a * b,
+                            fracao_com_piso=0.95)
+        self.assertEqual(c["leitura"], "alta", c)
+        self.assertGreater(c["aderencia"], 0.7)
+
+    def test_contorno_torto_derruba_a_confianca(self):
+        """Cômodo em L, ou móvel tapando: o retângulo deixa de explicar."""
+        import numpy as np
+        import area
+        n = 360
+        rnd = np.random.RandomState(3)
+        contorno = (2.0 + rnd.rand(n) * 3.0).astype(np.float32)   # nada retangular
+        c = area._confianca(contorno, 0.0, (3.0, 3.0, 2.0, 2.0),
+                            piso_livre=6.0, metros2=24.0, fracao_com_piso=0.5)
+        self.assertIn(c["leitura"], ("baixa", "media"))
+        self.assertLess(c["aderencia"], 0.5)
+
+    def test_a_camera_fora_do_centro_nao_derruba_sozinha(self):
+        """
+        Quem fotografa quase nunca está no meio do cômodo. Tratar o retângulo
+        como centrado dava aderência ZERO em tudo, inclusive na cena conferida
+        com LiDAR — o defeito que este teste existe para impedir.
+        """
+        import numpy as np
+        import area
+        n = 360
+        ang = (np.arange(n) / n - 0.5) * 2 * np.pi
+        um, ume, vm, vme = 4.0, 1.0, 1.5, 1.2      # bem fora do centro
+        du, dv = np.sin(ang), np.cos(ang)
+        au = np.where(du > 1e-6, um / du, np.where(du < -1e-6, -ume / du, np.inf))
+        av = np.where(dv > 1e-6, vm / dv, np.where(dv < -1e-6, -vme / dv, np.inf))
+        contorno = np.fmin(au, av).astype(np.float32)
+        c = area._confianca(contorno, 0.0, (um, ume, vm, vme),
+                            piso_livre=20.0, metros2=25.0, fracao_com_piso=0.95)
+        self.assertGreater(c["aderencia"], 0.7,
+                           "voltou a tratar o retângulo como centrado na câmera")
+
+    def test_numero_digitado_nao_carrega_confianca(self):
+        """Quem digitou o próprio número assumiu: a nota é da estimativa."""
+        dona = self.conta("areaconf")
+        iid = self.imovel(dona, "Casa")
+        tour = dona.get("/api/imoveis/%s/tour" % iid).get_json()
+        dona.post("/api/imoveis/%s/cenas/demo" % iid, json={"nome": "Sala"})
+        cena = dona.get("/api/imoveis/%s/tour" % iid).get_json()["cenas"][0]
+        r = dona.put("/api/imoveis/%s/cenas/%s/area" % (iid, cena["id"]),
+                     json={"area_m2": 20.0, "corrigido": True,
+                           "confianca": {"nota": 0.1, "leitura": "baixa"}})
+        self.assertNotIn("confianca", r.get_json()["area"])
+
+    def test_o_painel_avisa_antes_de_publicar_medida_ruim(self):
+        with io.open(os.path.join("static", "admin.html"), encoding="utf-8") as f:
+            painel = f.read()
+        self.assertIn("notaDeConfianca", painel)
+        self.assertIn("confiança BAIXA", painel)
+
+
 class TestPrevisaoDeEscorrido(unittest.TestCase):
     """
     O corretor precisa saber se a captura presta ANTES de publicar.

@@ -50,6 +50,78 @@ def _carregar_disparidade(caminho_png):
     return (((alto << 8) | baixo).astype(np.float32) / 65535.0)
 
 
+def _confianca(contorno, angulo, extensoes, piso_livre, metros2,
+               fracao_com_piso):
+    """
+    Diz o quanto ACREDITAR na metragem, e por que.
+
+    O numero final vem de um retangulo ajustado ao contorno do piso. Isso acerta
+    em comodo retangular com paredes a vista, e erra quando o contorno nao e
+    retangular ou quando movel esconde parede demais — so que hoje ele sai com a
+    mesma cara nos dois casos. Metragem errada num anuncio nao e detalhe
+    estetico: e o numero que o comprador usa para comparar preco.
+
+    Tres sinais, todos ja disponiveis:
+
+    1. QUANTO O RETANGULO EXPLICA O CONTORNO. Se o comodo e retangular e as
+       paredes aparecem, o contorno medido cai quase em cima do retangulo. Se e
+       em L, ou se armario tapa metade, a sobra e grande.
+    2. QUANTO DE PISO FOI VISTO. Direcao sem piso e direcao adivinhada.
+    3. DISTANCIA ENTRE PISO LIVRE E RETANGULO. Diferenca enorme significa que o
+       retangulo esta extrapolando muito alem do que a foto mostrou.
+    """
+    u_mais, u_menos, v_mais, v_menos = extensoes
+    n = len(contorno)
+    ang = (np.arange(n) / n - 0.5) * 2 * np.pi
+
+    # A camera quase nunca esta no centro do comodo, entao o retangulo se estende
+    # de forma diferente para cada lado. Aqui a distancia ate a borda e calculada
+    # com as quatro extensoes reais; tratar como centrado dava aderencia zero em
+    # tudo, inclusive na cena conferida com trena.
+    px, py = np.sin(ang), np.cos(ang)                 # direcao unitaria
+    du = px * np.cos(angulo) + py * np.sin(angulo)
+    dv = -px * np.sin(angulo) + py * np.cos(angulo)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ate_u = np.where(du > 1e-6, u_mais / du,
+                         np.where(du < -1e-6, -u_menos / du, np.inf))
+        ate_v = np.where(dv > 1e-6, v_mais / dv,
+                         np.where(dv < -1e-6, -v_menos / dv, np.inf))
+    borda = np.fmin(ate_u, ate_v)
+    bom = np.isfinite(borda) & (borda > 0.05)
+    if bom.sum() < n * 0.5:
+        aderencia = 0.0
+    else:
+        erro = np.abs(contorno[bom] - borda[bom]) / np.maximum(borda[bom], 1e-6)
+        # MEDIA aparada, nao mediana. A mediana e cega a erro que atinja menos de
+        # metade das direcoes — e armario tapando UMA parede atinge exatamente
+        # isso. Medido: uma borda errada em 171 de 360 direcoes, com 4,17 m de
+        # diferenca, dava mediana zero e nota maxima. O corte em 2 evita que uma
+        # direcao absurda sozinha derrube a nota inteira.
+        aderencia = float(max(0.0, 1.0 - float(np.mean(np.minimum(erro, 2.0))) / 0.25))
+
+    cobertura = float(min(1.0, max(0.0, (fracao_com_piso - 0.4) / 0.5)))
+    proporcao = float(min(1.0, max(0.0, piso_livre / max(metros2, 1e-6))))
+    # piso livre bem menor que o retangulo = muita parede escondida por movel
+    extrapolacao = float(min(1.0, max(0.0, (proporcao - 0.35) / 0.35)))
+
+    nota = 0.5 * aderencia + 0.3 * cobertura + 0.2 * extrapolacao
+    if nota >= 0.70:
+        leitura, recado = "alta", "Medida consistente com o formato do cômodo."
+    elif nota >= 0.45:
+        leitura, recado = ("media",
+                           "Confira com trena antes de publicar: móveis "
+                           "escondem parte das paredes.")
+    else:
+        leitura, recado = ("baixa",
+                           "Não publique este número sem medir: o cômodo não é "
+                           "retangular ou as paredes mal aparecem.")
+    return {"nota": round(nota, 3), "leitura": leitura, "recado": recado,
+            "aderencia": round(aderencia, 3),
+            "cobertura": round(cobertura, 3),
+            "extrapolacao": round(extrapolacao, 3)}
+
+
 def medir(caminho_png, altura_camera=ALTURA_CAMERA):
     """
     Devolve a area estimada em m2 e os dados que sustentam o numero.
@@ -141,13 +213,20 @@ def medir(caminho_png, altura_camera=ALTURA_CAMERA):
         v = -px * np.sin(th) + py * np.cos(th)
         if not ((u > 0).any() and (u < 0).any() and (v > 0).any() and (v < 0).any()):
             continue
-        lado_a = np.percentile(u[u > 0], PCT) + np.percentile(-u[u < 0], PCT)
-        lado_b = np.percentile(v[v > 0], PCT) + np.percentile(-v[v < 0], PCT)
+        # as quatro extensoes sao guardadas separadas: quem fotografa quase
+        # nunca esta no centro do comodo, e tratar o retangulo como centrado
+        # na camera erra a borda em cada direcao
+        u_mais = np.percentile(u[u > 0], PCT)
+        u_menos = np.percentile(-u[u < 0], PCT)
+        v_mais = np.percentile(v[v > 0], PCT)
+        v_menos = np.percentile(-v[v < 0], PCT)
+        lado_a, lado_b = u_mais + u_menos, v_mais + v_menos
         if melhor is None or lado_a * lado_b < melhor[0]:
-            melhor = (lado_a * lado_b, lado_a, lado_b)
+            melhor = (lado_a * lado_b, lado_a, lado_b, th,
+                      (u_mais, u_menos, v_mais, v_menos))
     if melhor is None:
         raise ErroArea("Não consegui ajustar um retângulo ao contorno.")
-    _, lado_a, lado_b = melhor
+    _, lado_a, lado_b, melhor_angulo, extensoes = melhor
     comprimento, largura = max(lado_a, lado_b), min(lado_a, lado_b)
 
     passo = 2 * np.pi / DIRECOES
@@ -157,8 +236,12 @@ def medir(caminho_png, altura_camera=ALTURA_CAMERA):
         contorno ** 2 + np.roll(contorno, -1) ** 2 -
         2 * contorno * np.roll(contorno, -1) * np.cos(passo))))
 
+    confianca = _confianca(contorno, melhor_angulo, extensoes,
+                           piso_livre, metros2, float(vistos_col.mean()))
+
     return {
         "area_m2": round(metros2, 1),
+        "confianca": confianca,
         "comprimento_m": round(comprimento, 2),
         "largura_m": round(largura, 2),
         "piso_livre_m2": round(piso_livre, 1),

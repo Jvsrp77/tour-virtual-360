@@ -788,6 +788,30 @@ async function removerFundo(){
   aviso('Camada de fundo removida.', 'ok');
 }
 
+// O quanto acreditar na metragem estimada.
+//
+// Ela sai de um retangulo ajustado ao contorno do piso: acerta em comodo
+// retangular com paredes a vista, e erra quando o comodo e em L ou quando movel
+// esconde parede demais. Antes o numero saia com a mesma cara nos dois casos.
+//
+// Isso nao e detalhe estetico: metragem e o que o comprador usa para comparar
+// preco entre anuncios. Medido no quarto real do proprio usuario, a estimativa
+// deu 11,1 m2 contra 13,6 m2 do LiDAR — e a nota flagrou essa cena como a pior
+// das treze, sozinha.
+function notaDeConfianca(c){
+  if (!c) return '';
+  const cores = {alta: '#3fa46a', media: '#e07b39', baixa: '#d9534f'};
+  const rotulos = {alta: 'confiança alta', media: 'confiança média',
+                   baixa: 'confiança baixa'};
+  const cor = cores[c.leitura] || '#9aa2ad';
+  return `<div style="margin-top:9px;padding:8px 10px;border-radius:7px;
+                      border-left:3px solid ${cor};background:rgba(0,0,0,.18)">
+            <div style="font-size:12.5px;color:${cor};font-weight:600">
+              ${rotulos[c.leitura] || ''}</div>
+            <div style="font-size:12px;color:#a9b0ba;margin-top:2px">${c.recado || ''}</div>
+          </div>`;
+}
+
 async function medirArea(){
   const bt = $('btArea');
   const rotulo = bt.textContent;
@@ -801,14 +825,14 @@ async function medirArea(){
         <div style="font-size:22px;font-weight:700;color:var(--acento)">${nBR(m.area_m2)} m²</div>
         <div class="dica" style="margin-top:2px">${nBR(m.comprimento_m)} × ${nBR(m.largura_m)} m ·
           piso livre ${nBR(m.piso_livre_m2)} m²</div>
+        ${notaDeConfianca(m.confianca)}
         <div class="linha" style="margin-top:10px">
           <input type="number" id="areaCorrigida" step="0.1" min="1" max="400" value="${m.area_m2}">
           <button onclick="publicarArea()">Publicar</button>
         </div>
       </div>
-      <div class="dica">Aferido num quarto real contra o LiDAR do iPhone: 2% de erro na
-        área — mas é uma medição só. Confira antes de publicar, e se você tem o número
-        da matrícula, corrija no campo acima: ele vale mais que a estimativa.</div>`;
+      <div class="dica">A estimativa vem do formato do piso. Se você tem o número da
+        matrícula, corrija no campo acima: ele vale mais que qualquer estimativa.</div>`;
   }catch(e){ aviso('Falha ao medir: ' + e, 'erro'); }
   finally{ bt.disabled = false; bt.textContent = rotulo; }
 }
@@ -823,6 +847,15 @@ async function publicarArea(){
   if (!corrigido){
     corpo.comprimento_m = medidaAtual.comprimento_m;
     corpo.largura_m = medidaAtual.largura_m;
+    corpo.confianca = medidaAtual.confianca;
+    // Publicar estimativa de baixa confianca sem conferir e o caminho para uma
+    // metragem errada num anuncio. Quem digitou o proprio numero ja assumiu,
+    // entao a confirmacao so aparece para a estimativa crua.
+    const c = medidaAtual.confianca;
+    if (c && c.leitura === 'baixa' &&
+        !confirm('Esta medição tem confiança BAIXA.\n\n' + (c.recado || '') +
+                 '\n\nPublicar mesmo assim?'))
+      return;
   }
   const j = await (await fetch(API + '/cenas/' + cenaAtual + '/area', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},

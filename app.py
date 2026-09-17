@@ -1263,6 +1263,15 @@ def api_publicar_area(cena_id):
             registro[campo] = round(float(dados[campo]), 2)
         except (KeyError, TypeError, ValueError):
             pass
+    # Guarda o quanto a medida merecia credito. Numero digitado pelo corretor
+    # dispensa: quem digitou assumiu. Numero estimado carrega a nota junto,
+    # porque metragem errada num anuncio e o que o comprador usa para comparar
+    # preco — e a estimativa erra feio em comodo nao retangular.
+    if registro["origem"] == "medido" and isinstance(dados.get("confianca"), dict):
+        c = dados["confianca"]
+        if c.get("leitura") in ("alta", "media", "baixa"):
+            registro["confianca"] = {"nota": c.get("nota"),
+                                     "leitura": c.get("leitura")}
     cena["area"] = registro
     salvar_tour(tour)
     return jsonify({"ok": True, "area": registro})
