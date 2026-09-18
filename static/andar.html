@@ -32,6 +32,9 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .painel label{display:block;font-size:11px;color:#a9b0ba;margin:11px 0 4px;
     text-transform:uppercase;letter-spacing:.5px}
   .painel input[type=range]{width:100%;accent-color:var(--acento)}
+  .limite{font-size:11.5px;color:#e6c98a;line-height:1.5;margin-top:7px;
+    background:rgba(230,201,138,.09);border:1px solid rgba(230,201,138,.22);
+    border-radius:7px;padding:6px 8px}
   .teclas{font-size:12px;color:#a9b0ba;line-height:1.9;margin-top:10px;
     border-top:1px solid rgba(255,255,255,.1);padding-top:9px}
   .teclas b{display:inline-block;min-width:52px;background:#22262d;color:#e8eaed;
@@ -111,6 +114,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
     Quem quiser o paralaxe de se inclinar abre o controle e aceita o borrao.
   -->
   <input type="range" id="alcance" min="0" max="250" value="0">
+  <div id="limitePasseio" class="limite" style="display:none"></div>
 
   <div class="teclas">
     <div><b>▲ seta</b> ir ao ponto</div>
@@ -170,6 +174,34 @@ const GRADE_L = 320, GRADE_A = 160;
 const SALTO_MAX = 0.18;
 const ESCURECE_ATE = 1.6;    // metros andados ate o trecho duvidoso virar sombra
 const SOMBRA = 0.14;         // o quanto sobra dele no fim: sombra, nao preto puro
+
+// ---------------------------------------------- teto de passeio por cena
+//
+// O borrao NAO e igual em toda cena: depende de o mapa de profundidade ter, ou
+// nao, uma borda no contorno dos moveis. Onde ele tem uma mancha em vez de uma
+// silhueta, a malha estica a textura do movel por cima do que esta atras, e o
+// estrago cresce conforme voce se afasta do ponto.
+//
+// O `escorrido` ja mede isso na publicacao (fracao da imagem com rampa de
+// profundidade justo onde a foto tem borda). Aqui essa medida vira limite: cena
+// medida pior anda menos, e o visitante nunca chega na distancia em que o
+// defeito fica visivel.
+//
+// A regra e inversamente proporcional, ancorada no limiar de "otimo" do
+// profundidade.py: uma cena duas vezes pior anda metade. Nao e lei da fisica
+// medida, e uma proporcao — mas erra para o lado seguro, que e o lado certo
+// quando o erro aparece na tela do comprador.
+const ESCORRIDO_OTIMO = 0.010;   // espelha profundidade.ESCORRIDO_OTIMO
+const PASSEIO_CHEIO = 2.50;      // metros, o maximo que o controle oferece
+const PASSEIO_MINIMO = 0.35;     // abaixo disto o passeio nao serve para nada
+
+function tetoDePasseio(cena){
+  const e = cena && cena.escorrido && cena.escorrido.fracao;
+  // sem medida nao da para afrouxar: cena antiga anda o padrao conservador
+  if (!e || e <= ESCORRIDO_OTIMO) return PASSEIO_CHEIO;
+  return Math.max(PASSEIO_MINIMO, PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e));
+}
+
 const MAX_MALHAS = 3;            // texturas de panorama pesam; nao da para segurar todas
 const TEX_MAX = 4096;
 
@@ -527,8 +559,10 @@ function raioNaDirecao(pt, dir){
  * uma parede que esteja mais perto que o alcance e passa a ver a cena por fora.
  */
 function podeEstar(p){
-  const alcance = $('alcance').value / 100;
+  const pedido = $('alcance').value / 100;
   return pontos.some(pt => {
+    // o controle escolhe, a medida da cena limita: vale o menor dos dois
+    const alcance = Math.min(pedido, tetoDePasseio(pt.cena));
     const desvio = p.clone().sub(pt.mundo);
     const d = desvio.length();
     if (d > alcance) return false;
@@ -565,6 +599,22 @@ function atualizarPainel(){
     : (dv > 0.005
         ? ' · ' + (dv*100).toFixed(1) + '% da cena é deduzido: a foto não viu atrás dos móveis'
         : ''));
+
+  // Sem isto o controle parece quebrado: o visitante arrasta ate 2,5 m e a
+  // camera para antes, sem explicacao. Dizer o motivo e melhor do que deixar
+  // parecer defeito — e e a verdade: aqui o passeio foi limitado de proposito.
+  const teto = tetoDePasseio(ativo.cena);
+  const pedido = $('alcance').value / 100;
+  const nota = $('limitePasseio');
+  if (nota){
+    if (teto < PASSEIO_CHEIO && pedido > teto){
+      nota.textContent = 'Passeio limitado a ' + teto.toFixed(1).replace('.', ',') +
+        ' m nesta cena: além disso a imagem começa a escorrer.';
+      nota.style.display = '';
+    } else {
+      nota.style.display = 'none';
+    }
+  }
 }
 
 function recentrar(){ posicao.copy(ativo.mundo); }
@@ -673,6 +723,7 @@ function ligarControles(){
   addEventListener('keyup', e => { teclas[e.key.toLowerCase()] = false; });
 
   $('forca').addEventListener('input', () => pontos.forEach(aplicarForcaEm));
+  $('alcance').addEventListener('input', atualizarPainel);
   $('mapa').addEventListener('click', irPeloMapa);
 }
 

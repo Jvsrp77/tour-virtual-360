@@ -196,6 +196,96 @@ class TestPaginas(unittest.TestCase):
                              % (nome, faltando))
 
 
+class TestTetoDePasseio(unittest.TestCase):
+    """
+    Quanto o visitante pode andar em cada cena.
+
+    O borrao nao e igual em toda cena: depende de o mapa de profundidade ter
+    borda no contorno do movel, ou so uma mancha. Onde tem mancha, a malha
+    estica a textura por cima do que esta atras, e o estrago cresce com a
+    distancia andada. A cena Sala mediu escorrido 2,35% — o pior do acervo — e
+    e justamente onde a poltrona derrete.
+
+    O teto e a defesa: cena medida pior anda menos, e o visitante nunca alcanca
+    a distancia em que o defeito aparece. Como e a regra que decide o que o
+    comprador VE, ela e exercitada de verdade no Node, com o codigo que a pagina
+    embarca — nao com uma copia escrita no teste, que envelheceria sozinha.
+    """
+
+    CORPO = re.compile(r"(const ESCORRIDO_OTIMO.*?^\})", re.S | re.M)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _rodar(self, casos):
+        """Roda tetoDePasseio no Node, com a fonte extraida da propria pagina."""
+        achado = self.CORPO.search(self.html)
+        self.assertTrue(achado, "não achei tetoDePasseio em andar.html")
+        programa = (achado.group(1) + "\nconsole.log(JSON.stringify("
+                    + json.dumps(casos) + ".map(c => tetoDePasseio(c))));\n")
+        caminho = os.path.join(_TEMP, "teto.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def test_cena_medida_pior_anda_menos(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        otima, ruim = self._rodar([{"escorrido": {"fracao": 0.008}},
+                                   {"escorrido": {"fracao": 0.0235}}])
+        self.assertGreater(otima, ruim,
+                           "cena com mais escorrido tinha de andar MENOS")
+
+    def test_a_sala_de_verdade_fica_bem_abaixo_do_cheio(self):
+        """2,35% medido na Sala: o passeio tem de cair para perto de 1 m."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        (teto,) = self._rodar([{"escorrido": {"fracao": 0.02352}}])
+        self.assertLess(teto, 1.3)
+        self.assertGreater(teto, 0.8)
+
+    def test_cena_boa_anda_o_maximo(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        (teto,) = self._rodar([{"escorrido": {"fracao": 0.004}}])
+        self.assertAlmostEqual(teto, 2.50, places=2)
+
+    def test_cena_sem_medida_nao_ganha_folga_indevida(self):
+        """Sem medida nao da para afrouxar; o padrao nao pode passar do cheio."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        sem, vazio = self._rodar([{}, {"escorrido": {}}])
+        self.assertLessEqual(sem, 2.50)
+        self.assertLessEqual(vazio, 2.50)
+
+    def test_cena_pessima_ainda_anda_um_pouco(self):
+        """Teto zero tiraria o passeio inteiro sem avisar; tem piso."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        (teto,) = self._rodar([{"escorrido": {"fracao": 0.9}}])
+        self.assertGreater(teto, 0.0)
+        self.assertLess(teto, 0.5)
+
+    def test_o_teto_e_mesmo_aplicado_no_passo(self):
+        """
+        Calcular o teto e nao usar seria pior que nao ter: daria a impressao de
+        protecao. podeEstar precisa comparar a distancia com o MENOR entre o que
+        o controle pediu e o que a cena aguenta.
+        """
+        corpo = re.split(r"^\}", self.html.split("function podeEstar(")[1],
+                         maxsplit=1, flags=re.M)[0]
+        self.assertIn("tetoDePasseio(", corpo,
+                      "podeEstar ignora o teto da cena")
+        self.assertIn("Math.min(", corpo,
+                      "podeEstar não limita pelo menor dos dois")
+
+
 class TestLeads(Base):
     """
     O contato precisa SAIR do arquivo: sem exportar, sem marcar atendido e sem

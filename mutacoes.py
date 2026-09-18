@@ -155,6 +155,19 @@ MUT = [
      'onclick="baixarLeads()"',
      'onclick="baixarLeadsQueNaoExiste()"',
      "TestPaginas.test_handlers_do_html_tem_funcao"),
+
+    # calcular o teto e nao aplicar seria pior do que nao ter: daria a
+    # impressao de protecao enquanto o visitante anda ate o borrao
+    ("passo ignora o teto da cena", "static/andar.html",
+     "    const alcance = Math.min(pedido, tetoDePasseio(pt.cena));",
+     "    const alcance = pedido;",
+     "TestTetoDePasseio.test_o_teto_e_mesmo_aplicado_no_passo"),
+
+    # se o teto nao cair com escorrido ruim, a cena pior anda tanto quanto a boa
+    ("teto nao cai em cena ruim", "static/andar.html",
+     "  return Math.max(PASSEIO_MINIMO, PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e));",
+     "  return PASSEIO_CHEIO;",
+     "TestTetoDePasseio.test_cena_medida_pior_anda_menos"),
 ]
 
 
