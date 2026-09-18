@@ -11,6 +11,7 @@ arquivo real — roda o teste que deveria pegar aquilo, e desfaz a mudanca.
 Se alguma linha disser NAO ACUSOU, o teste correspondente esta decorativo.
 """
 import io
+import os
 import subprocess
 import sys
 
@@ -244,6 +245,32 @@ MUT = [
 ]
 
 
+def _esquecer_bytecode(arq):
+    """
+    Apaga o .pyc do arquivo restaurado.
+
+    Sem isto o conserto nao cola, e o modo de falhar e cruel. O Python valida o
+    cache pela DATA e pelo TAMANHO do fonte. Varias mutacoes daqui trocam texto
+    do mesmo comprimento — "1.15" por "1.20" — e a restauracao acontece no mesmo
+    segundo. Tamanho igual, segundo igual: o Python da o cache por valido e
+    segue rodando o bytecode SABOTADO, com o fonte certo no disco.
+
+    Aconteceu de verdade: fundo.SALTO lia 1.20 com o arquivo mostrando 1.15, e o
+    teste acusava um defeito que nao existia mais. Meia hora atras de um erro
+    que estava no cache, nao no codigo.
+    """
+    pasta = os.path.join(os.path.dirname(os.path.abspath(arq)), "__pycache__")
+    base = os.path.splitext(os.path.basename(arq))[0]
+    if not os.path.isdir(pasta):
+        return
+    for nome in os.listdir(pasta):
+        if nome.startswith(base + ".") and nome.endswith(".pyc"):
+            try:
+                os.remove(os.path.join(pasta, nome))
+            except OSError:
+                pass
+
+
 def roda(alvo):
     r = subprocess.run([PY, "testes.py", alvo], capture_output=True,
                        text=True, errors="ignore")
@@ -277,6 +304,7 @@ def main():
             falhou = roda(alvo)
         finally:
             io.open(arq, "w", encoding="utf-8", newline="").write(orig)
+            _esquecer_bytecode(arq)
         curto = alvo.split(".")[-1][:16]
         if falhou:
             print("  %-38s %-16s ACUSOU" % (nome, curto))
