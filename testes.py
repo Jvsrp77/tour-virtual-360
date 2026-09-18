@@ -1086,6 +1086,26 @@ class TestCodigoNoAr(unittest.TestCase):
         self.assertIsNone(veredito)
         self.assertIn("processo", detalhe)
 
+    def test_o_modo_nao_depende_do_idioma_do_windows(self):
+        """
+        Defeito real, pego rodando no servidor: a primeira versao procurava a
+        palavra "SYSTEM" na saida do schtasks. O Windows de la responde em
+        portugues, "SISTEMA" — e o estado passou a dizer "sobe quando alguem
+        entra" numa tarefa que sobe na inicializacao. Era o MESMO engano que
+        este comando existe para nao cometer, so que por outro caminho.
+        """
+        boot = servico.modo_do_agendamento(
+            "<Triggers><BootTrigger/></Triggers>"
+            "<Principal><UserId>S-1-5-18</UserId></Principal>")
+        self.assertIn("LIGAR", boot)
+        self.assertNotIn("entra no Windows", boot)
+
+        logon = servico.modo_do_agendamento("<Triggers><LogonTrigger/></Triggers>")
+        self.assertIn("entra no Windows", logon)
+
+    def test_sem_agendamento_diz_que_nao_ha(self):
+        self.assertIn("não está agendado", servico.modo_do_agendamento(""))
+
     def test_a_consulta_nao_pode_casar_com_ela_mesma(self):
         """
         Defeito cometido ao escrever isto: a consulta do PowerShell procurava

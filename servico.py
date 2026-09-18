@@ -244,18 +244,30 @@ def _inicio_do_servidor():
         return None
 
 
+def modo_do_agendamento(xml):
+    """
+    Le o modo a partir do XML da tarefa. Nao olha texto traduzido.
+
+    Primeira versao procurava a palavra "SYSTEM" na saida em lista — e o Windows
+    daqui responde em portugues, "SISTEMA". O check passou a mentir de um jeito
+    novo: dizia "sobe quando alguem entra" numa tarefa que sobe na inicializacao.
+    Os nomes das marcas do XML (BootTrigger, LogonTrigger) nao sao traduzidos.
+    """
+    if not xml:
+        return "não está agendado"
+    sistema = "S-1-5-18" in xml            # SID da conta de sistema, universal
+    if "<BootTrigger" in xml:
+        return ("sobe ao LIGAR a máquina, sem depender de login"
+                + (", como SISTEMA" if sistema else ""))
+    if "<LogonTrigger" in xml:
+        return "sobe quando alguém entra no Windows"
+    return "agendado, mas não soube dizer quando dispara"
+
+
 def estado():
-    r = _schtasks(["/Query", "/TN", TAREFA, "/FO", "LIST", "/V"])
-    saida = (r.stdout or "")
-    # dizer "sobe no login" numa tarefa criada como ONSTART/SYSTEM foi o que fez
-    # recomendarem o comando errado de reinicio. O modo sai do proprio agendador.
-    if r.returncode != 0:
-        quando = "não está agendado"
-    elif "SYSTEM" in saida.upper():
-        quando = "sobe ao LIGAR a máquina, como SYSTEM (não depende de login)"
-    else:
-        quando = "sobe quando alguém entra no Windows"
-    print("  agendamento: %s" % quando)
+    r = _schtasks(["/Query", "/TN", TAREFA, "/XML"])
+    xml = (r.stdout or "") if r.returncode == 0 else ""
+    print("  agendamento: %s" % modo_do_agendamento(xml))
     print("  respondendo agora em %s: %s" % (SAUDE, "sim" if responde() else "não"))
 
     veredito, detalhe = codigo_no_ar()

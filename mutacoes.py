@@ -199,6 +199,13 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # procurar a palavra "SYSTEM" falhava no Windows em portugues, que diz
+    # "SISTEMA": o estado voltava a mentir sobre o modo do agendamento
+    ("modo do agendamento depende do idioma", "servico.py",
+     '    if "<BootTrigger" in xml:',
+     '    if "SYSTEM" in xml.upper():',
+     "TestCodigoNoAr.test_o_modo_nao_depende_do_idioma_do_windows"),
+
     # a consulta que casava com ela mesma: veredito "no ar" sempre
     ("consulta do vigia casa com ela mesma", "servico.py",
      "\"Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' \"",
