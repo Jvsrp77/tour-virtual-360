@@ -22,6 +22,7 @@ from datetime import timedelta
 
 from flask import (Flask, Blueprint, g, request, jsonify, send_from_directory,
                    send_file, redirect, Response, abort, session)
+from markupsafe import escape
 
 import cv2
 import numpy as np
@@ -780,7 +781,79 @@ def painel(imovel):
 def visualizador(imovel):
     if not imovel_existe(imovel):
         return redirect("/imoveis")
-    return send_from_directory("static", "viewer.html")
+    return _com_previa("viewer.html", imovel)
+
+
+def _texto_da_previa(tour):
+    """Segunda linha da prévia: o que faz alguém decidir tocar no link."""
+    partes = []
+    n = len(tour.get("cenas", []))
+    if n:
+        partes.append("%d ambiente%s em 360°" % (n, "s" if n > 1 else ""))
+    metros = sum(c["area"]["m2"] for c in tour.get("cenas", []) if c.get("area"))
+    if metros:
+        partes.append(("%.1f m²" % metros).replace(".", ","))
+    for campo in ("endereco", "preco"):
+        if tour.get(campo):
+            partes.append(str(tour[campo]))
+    return " · ".join(partes) or "Visita virtual pelo imóvel."
+
+
+def _com_previa(pagina, imovel_id):
+    """
+    Serve a página do tour com as etiquetas de prévia já no HTML.
+
+    Imóvel se vende por link no WhatsApp, e ali o link ia PELADO: só o endereço
+    cru, sem foto, sem título, sem metragem. Link com a foto da sala e "3
+    ambientes · 11,1 m²" é tocado muito mais do que uma URL seca — e essa é a
+    diferença entre o corretor mandar o tour ou mandar as fotos soltas.
+
+    Tem de ser no HTML servido, e não no JavaScript: o robô que monta a prévia
+    busca a página uma vez e NÃO executa script. Injetado pela página pronta, o
+    robô veria o cabeçalho vazio do arquivo estático.
+    """
+    caminho = os.path.join(RAIZ, "static", pagina)
+    try:
+        with io.open(caminho, encoding="utf-8") as f:
+            html = f.read()
+    except OSError:
+        return send_from_directory("static", pagina)
+
+    tour = carregar_tour(imovel_id)
+    titulo = tour.get("titulo") or "Tour virtual"
+    descricao = _texto_da_previa(tour)
+    raiz = request.url_root.rstrip("/")
+    capa = next((c.get("miniatura") or c.get("arquivo")
+                 for c in tour.get("cenas", []) if c.get("arquivo")), None)
+
+    etiquetas = [
+        '<meta property="og:type" content="website">',
+        '<meta property="og:site_name" content="Tour Virtual">',
+        '<meta property="og:locale" content="pt_BR">',
+        '<meta property="og:title" content="%s">' % escape(titulo),
+        '<meta property="og:description" content="%s">' % escape(descricao),
+        '<meta property="og:url" content="%s/tour/%s">' % (escape(raiz),
+                                                           escape(imovel_id)),
+        '<meta name="description" content="%s">' % escape(descricao),
+    ]
+    if capa:
+        # endereco absoluto: o robo busca de fora e nao resolve caminho relativo
+        imagem = "%s/data/%s/scenes/%s" % (raiz, imovel_id, capa)
+        etiquetas += [
+            '<meta property="og:image" content="%s">' % escape(imagem),
+            '<meta name="twitter:card" content="summary_large_image">',
+            '<meta name="twitter:image" content="%s">' % escape(imagem),
+        ]
+    else:
+        etiquetas.append('<meta name="twitter:card" content="summary">')
+
+    html = html.replace("<head>", "<head>\n" + "\n".join(etiquetas), 1)
+    html = html.replace("<title>Tour Virtual</title>",
+                        "<title>%s</title>" % escape(titulo), 1)
+    resposta = Response(html, mimetype="text/html")
+    # o robo guarda a previa por muito tempo; titulo trocado tem de chegar
+    resposta.headers["Cache-Control"] = "public, max-age=300"
+    return resposta
 
 
 @app.route("/andar/<imovel>")

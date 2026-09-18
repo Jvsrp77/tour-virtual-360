@@ -804,6 +804,95 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
         self.assertIn("escorrido ao caminhar", painel)
 
 
+class TestPreviaDoLink(Base):
+    """
+    Imovel se vende por link no WhatsApp, e o link ia PELADO: so o endereco
+    cru, sem foto, sem titulo, sem metragem. Link com a foto da sala e
+    "3 ambientes · 11,1 m²" e tocado muito mais que uma URL seca.
+
+    O ponto que estes testes protegem: as etiquetas tem de estar no HTML
+    SERVIDO. O robo que monta a previa busca a pagina uma vez e nao executa
+    JavaScript — montar as etiquetas na pagina pronta nao serviria de nada, e o
+    defeito sairia invisivel para quem testa no proprio navegador.
+    """
+
+    def setUp(self):
+        self.cliente = self.conta("dona-previa")
+        self.iid = self.imovel(self.cliente, "Casa com quintal")
+
+    def test_o_titulo_do_imovel_vai_nas_etiquetas(self):
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        self.assertIn('property="og:title"', html)
+        self.assertIn("Casa com quintal", html)
+
+    def test_as_etiquetas_estao_no_html_e_nao_no_javascript(self):
+        """
+        Se alguem trocar isto por injecao via script, o WhatsApp volta a mostrar
+        o link pelado e ninguem percebe: no navegador continua bonito.
+        """
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        cabeca = html.split("</head>")[0]
+        self.assertIn('property="og:title"', cabeca,
+                      "a etiqueta não está no <head> servido")
+
+    def test_o_endereco_da_imagem_e_absoluto(self):
+        """O robo busca de fora: caminho relativo nao resolve para ele."""
+        self.cliente.post("/api/imoveis/%s/cenas/demo" % self.iid,
+                          json={"nome": "Sala"})
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        self.assertIn('property="og:image"', html)
+        linha = next(l for l in html.splitlines() if "og:image" in l)
+        self.assertIn("http://", linha, "endereço da imagem não é absoluto")
+        self.assertIn("/data/%s/scenes/" % self.iid, linha)
+
+    def test_sem_cena_nao_inventa_imagem(self):
+        """Prévia apontando para imagem que não existe fica pior que sem foto."""
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        self.assertNotIn('property="og:image"', html)
+
+    def test_titulo_com_aspas_nao_quebra_a_etiqueta(self):
+        """Título é digitado pelo corretor: sem escape ele fecha o atributo."""
+        tour = self.cliente.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        tour["titulo"] = 'Casa "dos sonhos" <b>'
+        self.cliente.put("/api/imoveis/%s/tour" % self.iid, json=tour)
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        self.assertNotIn('content="Casa "dos sonhos"', html)
+        self.assertIn("&#34;", html)
+
+    def test_a_descricao_conta_ambientes_e_metragem(self):
+        """
+        A segunda linha da previa e o que faz alguem tocar no link. As cenas nao
+        entram pelo PUT do tour (elas nascem na costura), entao aqui a funcao e
+        exercitada direto.
+        """
+        texto = aplicacao._texto_da_previa({
+            "cenas": [{"area": {"m2": 11.1}}, {"area": {"m2": 9.0}}],
+            "endereco": "Rua das Flores, 100"})
+        self.assertIn("2 ambientes", texto)
+        self.assertIn("20,1 m²", texto)
+        self.assertIn("Rua das Flores, 100", texto)
+
+    def test_um_ambiente_so_nao_sai_no_plural(self):
+        self.assertIn("1 ambiente em 360°",
+                      aplicacao._texto_da_previa({"cenas": [{}]}))
+
+    def test_tour_vazio_ainda_tem_uma_frase(self):
+        """Descricao vazia faz o WhatsApp mostrar so o endereco."""
+        self.assertTrue(aplicacao._texto_da_previa({"cenas": []}).strip())
+
+    def test_o_botao_de_enviar_chama_mesmo_a_funcao(self):
+        """
+        Conferir so se o NOME aparece no arquivo nao serve: ele aparece na
+        definicao da funcao mesmo que o botao deixe de chama-la. A mutacao
+        provou isso — trocar o onclick por nada() passava batido.
+        """
+        painel = io.open("static/admin.html", encoding="utf-8").read()
+        self.assertIn('onclick="enviarPorWhatsApp()"', painel,
+                      "o botão do painel não chama a função de enviar")
+        self.assertIn("wa.me/?text=", painel,
+                      "o botão precisa abrir o WhatsApp sem destinatário fixo")
+
+
 class TestExigirHttps(Base):
     """
     Marcar o cookie como seguro nao basta: em http a senha do corretor viaja

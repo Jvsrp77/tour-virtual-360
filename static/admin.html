@@ -150,6 +150,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button onclick="verMetricas()">Métricas</button>
   <button onclick="verLeads()">Leads</button>
   <button onclick="copiarEmbed()">Copiar embed</button>
+  <button onclick="enviarPorWhatsApp()" title="Mandar o tour para um cliente">Enviar no WhatsApp</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
 </header>
@@ -1366,6 +1367,29 @@ async function verMetricas(){
 let soPendentes = false;
 
 function soDigitos(tel){ return (tel || '').replace(/\D/g, ''); }
+
+/**
+ * Manda o TOUR para um cliente. Nao confundir com linkWhatsApp, que responde um
+ * lead que ja chegou.
+ *
+ * Imovel se vende por link no WhatsApp. Antes disto o corretor tinha de copiar o
+ * endereco da barra do navegador e escrever a mensagem na mao toda vez — e o que
+ * chegava era uma URL crua. Com as etiquetas de previa no /tour, o mesmo link
+ * chega com a foto da sala e a metragem.
+ */
+function enviarPorWhatsApp(){
+  const endereco = new URL(URL_VOLTAR, location.href).href;
+  const partes = [];
+  const n = (tour.cenas || []).length;
+  if (n) partes.push(n + (n > 1 ? ' ambientes' : ' ambiente') + ' em 360°');
+  const m2 = (tour.cenas || []).reduce((t, c) => t + ((c.area && c.area.m2) || 0), 0);
+  if (m2) partes.push(m2.toFixed(1).replace('.', ',') + ' m²');
+  const texto = encodeURIComponent(
+    (tour.titulo || 'Tour virtual') + '\n'
+    + (partes.length ? partes.join(' · ') + '\n' : '')
+    + '\nVisite por dentro, sem sair de casa:\n' + endereco);
+  window.open('https://wa.me/?text=' + texto, '_blank');
+}
 
 function linkWhatsApp(l){
   const num = soDigitos(l.telefone);

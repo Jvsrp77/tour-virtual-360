@@ -199,6 +199,30 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # o robo do WhatsApp nao executa script: etiqueta injetada depois nao existe
+    ("previa do link some do html servido", "app.py",
+     '    html = html.replace("<head>", "<head>',
+     '    html = html.replace("<NAO-EXISTE>", "<head>',
+     "TestPreviaDoLink.test_as_etiquetas_estao_no_html_e_nao_no_javascript"),
+
+    # titulo e digitado pelo corretor: sem escape ele fecha o atributo
+    ("titulo do imovel entra sem escape", "app.py",
+     "        '<meta property=\"og:title\" content=\"%s\">' % escape(titulo),",
+     "        '<meta property=\"og:title\" content=\"%s\">' % titulo,",
+     "TestPreviaDoLink.test_titulo_com_aspas_nao_quebra_a_etiqueta"),
+
+    # caminho relativo nao resolve para o robo, que busca de fora
+    ("imagem da previa fica relativa", "app.py",
+     '        imagem = "%s/data/%s/scenes/%s" % (raiz, imovel_id, capa)',
+     '        imagem = "/data/%s/scenes/%s" % (imovel_id, capa)',
+     "TestPreviaDoLink.test_o_endereco_da_imagem_e_absoluto"),
+
+    # botao que nao abre o WhatsApp nao serve para nada
+    ("botao de enviar some do painel", "static/admin.html",
+     "  <button onclick=\"enviarPorWhatsApp()\"",
+     "  <button onclick=\"nada()\"",
+     "TestPreviaDoLink.test_o_botao_de_enviar_chama_mesmo_a_funcao"),
+
     # procurar a palavra "SYSTEM" falhava no Windows em portugues, que diz
     # "SISTEMA": o estado voltava a mentir sobre o modo do agendamento
     ("modo do agendamento depende do idioma", "servico.py",
