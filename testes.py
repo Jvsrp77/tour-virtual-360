@@ -804,6 +804,78 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
         self.assertIn("escorrido ao caminhar", painel)
 
 
+class TestRecarregarServidor(Base):
+    """
+    Aplicar uma publicacao dependia de abrir um terminal e acertar um comando —
+    e errou tres vezes seguidas. A culpa nao e de quem digitou: e do produto,
+    que nao sabia se recarregar.
+
+    O caso que estes testes guardam acima de todos: SEM VIGIA a rota tem de se
+    recusar. O processo sai de proposito, e quem o repoe e o vigia; sem ele, o
+    botao deixaria o site morto ate alguem ir na maquina. Um botao que derruba
+    o site sem volta e pior que nenhum botao.
+    """
+
+    def setUp(self):
+        self.cliente = self.conta("dona-recarga")
+        self.antes = os.environ.get("TOUR_VIGIADO")
+
+    def tearDown(self):
+        if self.antes is None:
+            os.environ.pop("TOUR_VIGIADO", None)
+        else:
+            os.environ["TOUR_VIGIADO"] = self.antes
+
+    def test_sem_vigia_a_rota_se_recusa(self):
+        os.environ.pop("TOUR_VIGIADO", None)
+        r = self.cliente.post("/api/recarregar")
+        self.assertEqual(r.status_code, 409,
+                         "ia derrubar o site sem ninguém para repor")
+        self.assertIn("vigia", r.get_json()["erro"].lower())
+
+    def test_sem_sessao_ninguem_derruba_o_site(self):
+        """Rota aberta aqui seria um botão de derrubar o site para estranhos."""
+        os.environ["TOUR_VIGIADO"] = "1"
+        r = aplicacao.app.test_client().post("/api/recarregar")
+        self.assertEqual(r.status_code, 401)
+
+    def test_a_versao_pendente_e_vista_pelo_horario(self):
+        """Arquivo gravado depois do início do processo = publicação esperando."""
+        antes = aplicacao.INICIADO_EM
+        try:
+            aplicacao.INICIADO_EM = 0.0        # como se o processo fosse antigo
+            self.assertTrue(aplicacao.versao_pendente()["pendente"])
+            aplicacao.INICIADO_EM = time.time() + 3600   # e agora, recém-nascido
+            self.assertFalse(aplicacao.versao_pendente()["pendente"])
+        finally:
+            aplicacao.INICIADO_EM = antes
+
+    def test_a_rota_de_versao_diz_se_ha_vigia(self):
+        os.environ["TOUR_VIGIADO"] = "1"
+        d = self.cliente.get("/api/versao").get_json()
+        self.assertTrue(d["ha_vigia"])
+        os.environ.pop("TOUR_VIGIADO", None)
+        self.assertFalse(self.cliente.get("/api/versao").get_json()["ha_vigia"])
+
+    def test_o_vigia_marca_o_processo_que_ele_repoe(self):
+        """
+        A marca e o que liga as duas pontas: sem ela o site nunca saberia que
+        ha quem o traga de volta, e o botao ficaria escondido para sempre.
+        """
+        fonte = io.open("servico.py", encoding="utf-8").read()
+        corpo = fonte.split("def _subir()")[1].split("def ")[0]
+        self.assertIn('TOUR_VIGIADO="1"', corpo,
+                      "o vigia parou de marcar o processo que vigia")
+        self.assertIn("env=ambiente", corpo,
+                      "a marca não chega ao processo filho")
+
+    def test_o_botao_so_aparece_com_vigia_e_versao_esperando(self):
+        painel = io.open("static/admin.html", encoding="utf-8").read()
+        self.assertIn('onclick="recarregarServidor()"', painel)
+        self.assertIn("v.pendente && v.ha_vigia", painel,
+                      "o botão apareceria sem haver o que aplicar, ou sem vigia")
+
+
 class TestPreviaDoLink(Base):
     """
     Imovel se vende por link no WhatsApp, e o link ia PELADO: so o endereco

@@ -151,6 +151,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button onclick="verLeads()">Leads</button>
   <button onclick="copiarEmbed()">Copiar embed</button>
   <button onclick="enviarPorWhatsApp()" title="Mandar o tour para um cliente">Enviar no WhatsApp</button>
+  <button id="btRecarregar" onclick="recarregarServidor()" style="display:none"
+          title="Aplicar a versão publicada">Recarregar servidor</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
 </header>
@@ -1377,6 +1379,59 @@ function soDigitos(tel){ return (tel || '').replace(/\D/g, ''); }
  * chegava era uma URL crua. Com as etiquetas de previa no /tour, o mesmo link
  * chega com a foto da sala e a metragem.
  */
+/**
+ * Aplica a versao publicada no disco.
+ *
+ * Copiar os arquivos e a parte facil; o processo velho segue na memoria com o
+ * codigo antigo. Aplicar dependia de abrir um terminal e acertar um comando —
+ * e errou tres vezes seguidas. O botao so aparece quando ha versao esperando E
+ * ha vigia para repor: sem vigia, sair do ar deixaria o site morto.
+ */
+async function verVersao(){
+  const bt = $('btRecarregar');
+  if (!bt) return null;
+  try{
+    const v = await (await fetch('/api/versao')).json();
+    const mostrar = v.pendente && v.ha_vigia;
+    bt.style.display = mostrar ? '' : 'none';
+    if (mostrar){
+      bt.title = 'Há uma versão publicada esperando (' + v.arquivo + ')';
+      bt.classList.add('primario');
+    }
+    return v;
+  }catch(e){ return null; }
+}
+
+async function recarregarServidor(){
+  if (!confirm('O site sai do ar por alguns segundos e volta com a versão '
+             + 'publicada. Quem estiver vendo um tour agora vai precisar '
+             + 'recarregar a página. Continuar?')) return;
+  const bt = $('btRecarregar');
+  bt.disabled = true;
+  try{
+    const r = await (await fetch('/api/recarregar', {method: 'POST'})).json();
+    if (!r.ok){ aviso(r.erro, 'erro'); bt.disabled = false; return; }
+  }catch(e){ /* a conexao cai junto com o processo: e o esperado */ }
+
+  aviso('Recarregando…');
+  // espera o vigia repor; ele leva ~2s, mas a primeira subida carrega modelos
+  for (let i = 0; i < 40; i++){
+    await new Promise(r => setTimeout(r, 1500));
+    try{
+      const s = await fetch('/saude', {cache: 'no-store'});
+      if (s.ok){
+        const v = await verVersao();
+        bt.disabled = false;
+        if (v && !v.pendente){ aviso('Pronto: a versão publicada está no ar.'); }
+        else { aviso('Voltou, mas ainda aponta versão pendente.', 'erro'); }
+        return;
+      }
+    }catch(e){ /* ainda subindo */ }
+  }
+  bt.disabled = false;
+  aviso('Não voltou em 60s. Veja servico.log na máquina.', 'erro');
+}
+
 function enviarPorWhatsApp(){
   const endereco = new URL(URL_VOLTAR, location.href).href;
   const partes = [];
@@ -1454,6 +1509,7 @@ function baixarLeads(){ window.open(API + '/leads.csv', '_blank'); }
 function abrirGuia(){ $('dlgGuia').showModal(); }
 
 carregar();
+verVersao();          // avisa se ha versao publicada esperando
 </script>
 </body>
 </html>

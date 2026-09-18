@@ -988,6 +988,77 @@ def api_entrar():
     return jsonify({"ok": True, "imobiliaria": conta["imobiliaria"]})
 
 
+# ------------------------------------------------------- recarregar o servidor
+#
+# A publicacao virou o gargalo: copiar os arquivos e facil, mas o processo velho
+# segue na memoria com o codigo antigo, e aplicar dependia de alguem abrir um
+# terminal e acertar um comando. Errou tres vezes seguidas aqui, e a culpa nao e
+# de quem digitou: e do produto, que nao sabia se recarregar.
+#
+# O processo simplesmente SAI. Quem repoe e o vigia, em segundos, ja lendo os
+# arquivos novos — por isso a rota se recusa a agir quando nao ha vigia: ali
+# sair deixaria o site fora do ar ate alguem ir na maquina.
+INICIADO_EM = time.time()
+
+
+def _fontes_do_projeto():
+    import glob
+    return (glob.glob(os.path.join(RAIZ, "*.py"))
+            + glob.glob(os.path.join(RAIZ, "static", "*.html")))
+
+
+def versao_pendente():
+    """
+    Diz se ha codigo publicado no disco que este processo ainda nao carregou.
+
+    Comparar a hora de inicio com a do arquivo mais novo e barato e exato: o
+    processo sabe quando nasceu. Sem isto o painel nao teria como avisar, e a
+    pessoa so descobriria que a publicacao nao pegou quando o recurso novo nao
+    aparecesse.
+    """
+    try:
+        arquivos = _fontes_do_projeto()
+        if not arquivos:
+            return {"pendente": False, "motivo": "não achei os arquivos"}
+        mais_novo = max(arquivos, key=os.path.getmtime)
+        quando = os.path.getmtime(mais_novo)
+    except OSError as e:
+        return {"pendente": False, "motivo": str(e)}
+    return {"pendente": quando > INICIADO_EM,
+            "arquivo": os.path.basename(mais_novo),
+            "minutos": max(0, int((quando - INICIADO_EM) / 60))}
+
+
+def ha_vigia():
+    return os.environ.get("TOUR_VIGIADO") == "1"
+
+
+@app.route("/api/versao", methods=["GET"])
+def api_versao():
+    dados = versao_pendente()
+    dados.update({"ok": True, "ha_vigia": ha_vigia(),
+                  "no_ar_desde": int(time.time() - INICIADO_EM)})
+    return jsonify(dados)
+
+
+@app.route("/api/recarregar", methods=["POST"])
+def api_recarregar():
+    """Sai do ar de proposito, para o vigia repor com o codigo publicado."""
+    if not ha_vigia():
+        return jsonify({"ok": False, "erro":
+                        "Este servidor não está sob o vigia, então ninguém o "
+                        "traria de volta. Rode-o por 'python servico.py' ou "
+                        "reinicie na mão."}), 409
+
+    def sair():
+        time.sleep(0.6)          # tempo de a resposta chegar ao painel
+        os._exit(0)              # saida limpa: o vigia repoe em segundos
+
+    threading.Thread(target=sair, daemon=True, name="recarregar").start()
+    return jsonify({"ok": True, "aviso": "Saindo do ar; o vigia repõe em "
+                                         "alguns segundos."})
+
+
 @app.route("/api/sair", methods=["POST"])
 def api_sair():
     session.clear()

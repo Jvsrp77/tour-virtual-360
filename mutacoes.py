@@ -200,6 +200,24 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # botao que derruba o site sem ninguem para repor e pior que botao nenhum
+    ("recarregar age sem haver vigia", "app.py",
+     "    if not ha_vigia():",
+     "    if False:",
+     "TestRecarregarServidor.test_sem_vigia_a_rota_se_recusa"),
+
+    # sem a marca, o site nunca sabe que ha quem o reponha
+    ("vigia deixa de marcar o filho", "servico.py",
+     '    ambiente = dict(os.environ, TOUR_VIGIADO="1")',
+     "    ambiente = dict(os.environ)",
+     "TestRecarregarServidor.test_o_vigia_marca_o_processo_que_ele_repoe"),
+
+    # processo mais novo que o arquivo nao tem publicacao esperando
+    ("versao pendente sempre diz que sim", "app.py",
+     '    return {"pendente": quando > INICIADO_EM,',
+     '    return {"pendente": True,',
+     "TestRecarregarServidor.test_a_versao_pendente_e_vista_pelo_horario"),
+
     # o robo do WhatsApp nao executa script: etiqueta injetada depois nao existe
     ("previa do link some do html servido", "app.py",
      '    html = html.replace("<head>", "<head>',

@@ -66,7 +66,11 @@ def responde(prazo=5.0):
 
 
 def _subir():
-    return subprocess.Popen([sys.executable, COMANDO], cwd=RAIZ)
+    # A marca diz ao proprio site que HA quem o reponha. Sem ela o botao de
+    # recarregar do painel se recusa a agir: derrubar um servidor sem vigia
+    # deixaria o site fora do ar ate alguem ir la na maquina.
+    ambiente = dict(os.environ, TOUR_VIGIADO="1")
+    return subprocess.Popen([sys.executable, COMANDO], cwd=RAIZ, env=ambiente)
 
 
 def vigiar(limite_de_quedas=None):

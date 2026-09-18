@@ -571,6 +571,21 @@ inteiro para o navegador de qualquer visitante.
 O aviso roda **depois** de o contato já estar gravado, em outra thread e dentro de um
 `try`: servidor de e-mail fora do ar não pode custar um lead.
 
+### Aplicar uma publicação
+
+Copiar os arquivos é a parte fácil: o processo em execução segue na memória com
+o código antigo. O painel mostra o botão **Recarregar servidor** quando há versão
+publicada esperando — e só quando há vigia para repor.
+
+O processo simplesmente sai; quem o traz de volta é o `servico.py`, em segundos,
+já lendo os arquivos novos. Por isso a rota **se recusa a agir sem vigia**: ali,
+sair deixaria o site fora do ar até alguém ir até a máquina. Um botão que derruba
+o site sem volta é pior que botão nenhum.
+
+O vigia marca o processo que supervisiona com `TOUR_VIGIADO=1`. É essa marca que
+liga as duas pontas — sem ela o site não teria como saber que há quem o reponha,
+e o botão ficaria escondido para sempre.
+
 ### Senha esquecida
 
 Não existe recuperação pela web, e não pode existir: redefinir sem a senha antiga por uma
