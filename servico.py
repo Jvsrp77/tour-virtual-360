@@ -184,10 +184,87 @@ def remover():
     return 0
 
 
+def codigo_no_ar():
+    """
+    Diz se o processo que atende agora carregou os arquivos que estao no disco.
+
+    Nasceu de um prejuizo real: os arquivos novos foram copiados, o processo
+    velho continuou de pe segurando a porta, e o `estado` respondeu "sim,
+    respondendo" durante a publicacao inteira. Perguntar a porta so responde
+    "tem alguem ai" — nao responde "e a versao que eu publiquei".
+
+    Devolve (veredito, detalhe). O veredito e None quando nao deu para saber:
+    fingir certeza aqui seria repetir o erro de ontem por outro caminho.
+    """
+    try:
+        import glob
+        fontes = (glob.glob(os.path.join(RAIZ, "*.py"))
+                  + glob.glob(os.path.join(RAIZ, "static", "*.html")))
+        if not fontes:
+            return None, "não achei os arquivos do projeto"
+        gravado = max(os.path.getmtime(f) for f in fontes)
+    except OSError as e:
+        return None, "não consegui ler a data dos arquivos: %s" % e
+
+    subiu = _inicio_do_servidor()
+    if subiu is None:
+        return None, "não achei o processo do servidor"
+    if subiu >= gravado:
+        return True, "processo subiu depois do arquivo mais novo"
+    atraso = (gravado - subiu) / 60.0
+    return False, ("o processo é %.0f min MAIS VELHO que o arquivo mais novo: "
+                   "derrube-o para o vigia repor com o código publicado" % atraso)
+
+
+def _inicio_do_servidor():
+    """Instante em que o servidor.py vigiado comecou, ou None."""
+    if os.name != "nt":
+        return None
+    # O filtro por python nao e detalhe: sem ele a PROPRIA consulta casa, porque
+    # a linha de comando dela contem "servidor.py". Achava um processo so — ela
+    # mesma, recem-nascida — e o veredito dava "esta no ar" sempre. Check cego e
+    # pior que check nenhum: mente com cara de conferencia.
+    ps = ("Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' "
+          "-and $_.CommandLine -like '*%s*' } | ForEach-Object { "
+          "(Get-Process -Id $_.ProcessId).StartTime.ToUniversalTime()"
+          ".ToString('o') }" % COMANDO)
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, text=True, errors="ignore")
+    except OSError:
+        return None
+    linhas = [l.strip() for l in (r.stdout or "").splitlines() if l.strip()]
+    if len(linhas) != 1:            # nenhum, ou varios: nao da para afirmar
+        return None
+    try:
+        from datetime import timezone
+        texto = linhas[0].replace("Z", "+00:00")
+        return datetime.fromisoformat(texto).astimezone(timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
 def estado():
-    r = _schtasks(["/Query", "/TN", TAREFA])
-    print("  agendado para subir no login: %s" % ("sim" if r.returncode == 0 else "não"))
+    r = _schtasks(["/Query", "/TN", TAREFA, "/FO", "LIST", "/V"])
+    saida = (r.stdout or "")
+    # dizer "sobe no login" numa tarefa criada como ONSTART/SYSTEM foi o que fez
+    # recomendarem o comando errado de reinicio. O modo sai do proprio agendador.
+    if r.returncode != 0:
+        quando = "não está agendado"
+    elif "SYSTEM" in saida.upper():
+        quando = "sobe ao LIGAR a máquina, como SYSTEM (não depende de login)"
+    else:
+        quando = "sobe quando alguém entra no Windows"
+    print("  agendamento: %s" % quando)
     print("  respondendo agora em %s: %s" % (SAUDE, "sim" if responde() else "não"))
+
+    veredito, detalhe = codigo_no_ar()
+    if veredito is True:
+        print("  código publicado está no ar: sim (%s)" % detalhe)
+    elif veredito is False:
+        print("  código publicado está no ar: NÃO — %s" % detalhe)
+    else:
+        print("  código publicado está no ar: não deu para saber (%s)" % detalhe)
     return 0
 
 

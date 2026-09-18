@@ -538,6 +538,56 @@ do visitante em vez do IP do proxy.
 Os timeouts do proxy e do waitress vão a 900 s de propósito: uma costura de 30 fotos leva
 minutos, e o padrão de 120 s cortaria o envio no meio.
 
+Marcar o cookie como seguro não basta: quem abrir o link em `http://` manda a senha do
+corretor legível **antes** de qualquer cookie existir. Com `TOUR_EXIGIR_HTTPS=1` o app
+deixa de atender em claro — desvia as páginas para `https` e **recusa** os envios em vez
+de desviá-los, porque desviar um POST faria o navegador reenviar a senha que já viajou.
+
+Ele nasce desligado de propósito: ligado sem HTTPS de verdade na frente, desviaria para um
+endereço que não responde e tiraria o site do ar. Duas exceções ficam de fora do desvio, e
+não são detalhe: `/saude` e as chamadas de `127.0.0.1` — é por ali que o vigia confere se o
+site está vivo, e desviá-las poria o servidor em ciclo de reinício.
+
+### Aviso de contato
+
+Sem isto o contato é gravado e ninguém fica sabendo: o corretor só descobre se abrir o
+painel. Para quem vende imóvel, contato que espera um dia é contato perdido.
+
+O telefone vai no **assunto** do e-mail de propósito — o corretor lê a notificação no
+celular, na rua, e precisa poder ligar sem abrir nada.
+
+| Variável | Para quê |
+|---|---|
+| `TOUR_SMTP_SERVIDOR` | `smtp.gmail.com`, por exemplo |
+| `TOUR_SMTP_PORTA` | `587` (STARTTLS) ou `465` (SSL direto) |
+| `TOUR_SMTP_USUARIO` | a conta que envia |
+| `TOUR_SMTP_SENHA` | senha **de aplicativo**, nunca a senha da conta |
+| `TOUR_AVISO_PARA` | quem recebe o aviso, separado por vírgula |
+
+Sem `TOUR_SMTP_SERVIDOR` e `TOUR_AVISO_PARA` nada é enviado e nada quebra — é o estado em
+que o site nasce. A senha fica em variável de ambiente e nunca no `tour.json`, que vai
+inteiro para o navegador de qualquer visitante.
+
+O aviso roda **depois** de o contato já estar gravado, em outra thread e dentro de um
+`try`: servidor de e-mail fora do ar não pode custar um lead.
+
+### Senha esquecida
+
+Não existe recuperação pela web, e não pode existir: redefinir sem a senha antiga por uma
+rota seria tomada de conta. Quem opera o servidor resolve na linha de comando, onde a
+autorização é o acesso ao disco:
+
+```
+python conta.py redefinir <usuario>
+```
+
+### Tentativas de login
+
+Depois de 8 erros o endereço fica 5 minutos de fora, e nesse período nem a senha certa
+entra — senão o robô acerta na nona tentativa e a trava não serviu de nada. A contagem é
+por origem, não por usuário: travar por usuário deixaria qualquer um trancar o corretor
+do lado de fora.
+
 ### Volumes
 
 Os modelos (302 MB) e os dados ficam fora da imagem. Assim atualizar o código não reenvia

@@ -31,6 +31,7 @@ import video
 import cena_demo
 import profundidade
 import tarefas
+import aviso
 import area
 import fundo
 import usuarios
@@ -167,10 +168,47 @@ app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax",
 # Atras de um proxy que termina o TLS, o Flask so enxerga http e o IP do proxy.
 # Sem o ProxyFix o cookie de sessao nunca seria marcado como seguro e o log
 # registraria sempre o mesmo endereco.
-if os.environ.get("TOUR_ATRAS_DE_PROXY") == "1":
+ATRAS_DE_PROXY = os.environ.get("TOUR_ATRAS_DE_PROXY") == "1"
+if ATRAS_DE_PROXY:
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     app.config.update(SESSION_COOKIE_SECURE=True)
+
+
+# ------------------------------------------------------------ HTTPS de verdade
+#
+# Marcar o cookie como seguro nao basta: se alguem abrir o link em http, a senha
+# do corretor viaja legivel antes de qualquer cookie existir. O waitress nao faz
+# TLS — quem termina o TLS e o Caddy (ver Caddyfile) — entao o que cabe aqui e
+# nao ACEITAR o http: desviar para https e pedir ao navegador que nunca mais
+# tente em claro.
+#
+# Fica desligado por padrao de proposito. Ligado sem HTTPS de verdade na frente,
+# ele desviaria para um endereco que nao responde e tiraria o site do ar.
+EXIGIR_HTTPS = os.environ.get("TOUR_EXIGIR_HTTPS") == "1"
+HSTS_SEGUNDOS = 60 * 60 * 24 * 180
+
+
+@app.before_request
+def _exigir_https():
+    if not EXIGIR_HTTPS or request.is_secure:
+        return None
+    # /saude e como o vigia sabe que o site esta vivo, e ele chama em 127.0.0.1
+    # sem TLS. Desviar isto poria o servidor em ciclo de reinicio.
+    if request.endpoint == "saude" or request.remote_addr in ("127.0.0.1", "::1"):
+        return None
+    if request.method not in ("GET", "HEAD"):
+        return jsonify({"ok": False, "erro":
+                        "Esta conexão não é segura. Use o endereço https."}), 403
+    return redirect(request.url.replace("http://", "https://", 1), code=308)
+
+
+@app.after_request
+def _fixar_https(resposta):
+    if EXIGIR_HTTPS and request.is_secure:
+        resposta.headers["Strict-Transport-Security"] = (
+            "max-age=%d; includeSubDomains" % HSTS_SEGUNDOS)
+    return resposta
 
 # O tour publicado e o produto: ele fica aberto, e com ele o modo de caminhada,
 # as imagens das cenas e o registro de visita e de lead. Todo o resto — painel,
@@ -786,6 +824,57 @@ def api_estado_conta():
                     "imobiliaria": conta["imobiliaria"] if conta else ""})
 
 
+# ---------------------------------------------------- freio de forca bruta
+#
+# A espera de 1 segundo por tentativa errada atrapalha um ataque, mas nao o
+# impede: 1 por segundo ainda da 86 mil tentativas por dia, e senha de corretor
+# nao costuma aguentar 86 mil. Na rede interna isso nao preocupava; publicado na
+# internet, preocupa.
+#
+# A contagem e por ORIGEM, nao por usuario: travar por usuario deixaria qualquer
+# um trancar a conta do corretor de fora, o que troca um problema por outro.
+TENTATIVAS_ATE_TRAVAR = 8
+TRAVA_SEGUNDOS = 300.0
+_tentativas = {}
+_trava_tentativas = threading.Lock()
+
+
+def _origem():
+    """IP de quem chama, respeitando o proxy so quando ha um configurado."""
+    if os.environ.get("TOUR_ATRAS_DE_PROXY") == "1":
+        adiante = request.headers.get("X-Forwarded-For", "")
+        if adiante:
+            return adiante.split(",")[0].strip()
+    return request.remote_addr or "?"
+
+
+def _espera_da_trava(origem):
+    """Segundos que ainda faltam, ou 0 se pode tentar."""
+    with _trava_tentativas:
+        erros, ate = _tentativas.get(origem, (0, 0.0))
+        if erros >= TENTATIVAS_ATE_TRAVAR and ate > time.time():
+            return ate - time.time()
+    return 0.0
+
+
+def _contar_erro(origem):
+    with _trava_tentativas:
+        erros, _ = _tentativas.get(origem, (0, 0.0))
+        erros += 1
+        _tentativas[origem] = (erros, time.time() + TRAVA_SEGUNDOS)
+        # nao deixa o dicionario crescer sem fim com IPs de passagem
+        if len(_tentativas) > 4000:
+            agora = time.time()
+            for k, (_, v) in list(_tentativas.items()):
+                if v < agora:
+                    _tentativas.pop(k, None)
+
+
+def _limpar_erros(origem):
+    with _trava_tentativas:
+        _tentativas.pop(origem, None)
+
+
 @app.route("/api/entrar", methods=["POST"])
 def api_entrar():
     """
@@ -800,6 +889,13 @@ def api_entrar():
     nome = (d.get("usuario") or "").strip().lower()
     senha = d.get("senha") or ""
 
+    origem = _origem()
+    falta = _espera_da_trava(origem)
+    if falta > 0:
+        return jsonify({"ok": False, "erro":
+                        "Tentativas demais deste endereço. Tente de novo em "
+                        "%d minutos." % max(1, int(falta / 60) + 1)}), 429
+
     if not usuarios.ha_usuarios(PASTA_DADOS):
         try:
             usuarios.criar(PASTA_DADOS, nome, senha, d.get("imobiliaria") or "")
@@ -807,8 +903,11 @@ def api_entrar():
             return jsonify({"ok": False, "erro": str(e)}), 400
         adotar_imoveis_sem_dono()
     elif not usuarios.verificar(PASTA_DADOS, nome, senha):
+        _contar_erro(origem)
         time.sleep(1.0)                 # atrasa a tentativa em massa
         return jsonify({"ok": False, "erro": "Usuário ou senha incorretos."}), 401
+
+    _limpar_erros(origem)               # acertou: a conta volta ao normal
 
     session.permanent = True
     session["usuario"] = nome
@@ -1675,7 +1774,7 @@ def api_registrar_lead():
     visitas = tour.get("visitas", [])
     if visitas:
         visitas[-1]["virou_lead"] = True
-    tour["leads_capturados"].append({
+    registro = {
         "id": uuid.uuid4().hex[:10],
         "nome": (dados.get("nome") or "")[:120],
         "telefone": (dados.get("telefone") or "")[:40],
@@ -1684,8 +1783,18 @@ def api_registrar_lead():
         "recebido_em": datetime.now().isoformat(timespec="seconds"),
         "consentimento": (dados.get("consentimento") or "")[:400],
         "atendido": False,
-    })
+    }
+    tour["leads_capturados"].append(registro)
     salvar_tour(tour)
+
+    # O contato ja esta GRAVADO acima. O aviso vem depois e dentro de try por
+    # isso: contato que espera o corretor abrir o painel e contato perdido, mas
+    # perder o contato por causa do aviso seria trocar um problema por um pior.
+    try:
+        aviso.avisar(registro, tour.get("titulo", ""),
+                     link=request.url_root.rstrip("/") + "/painel/" + g.imovel)
+    except Exception:   # o aviso nunca derruba o cadastro do contato
+        traceback.print_exc()
     return jsonify({"ok": True})
 
 

@@ -10,6 +10,7 @@ abrir conta no servidor do cliente. A primeira conta nasce no primeiro acesso a
   python conta.py listar
   python conta.py criar <usuario> "Nome da Imobiliaria"
   python conta.py senha <usuario>
+  python conta.py redefinir <usuario>    (senha esquecida)
 """
 import os
 import sys
@@ -76,6 +77,34 @@ def senha(argv):
     return 0
 
 
+def redefinir(argv):
+    """
+    Senha esquecida: define uma nova sem pedir a antiga.
+
+    O que autoriza e estar no servidor, com acesso ao arquivo de contas — quem
+    chega ate aqui ja podia trocar o hash na mao. Por isso nao existe rota web
+    equivalente, e nao pode existir.
+    """
+    if not argv:
+        print("  uso: python conta.py redefinir <usuario>")
+        return 1
+    nome = argv[0]
+    if nome.strip().lower() not in [u["nome"] for u in usuarios.listar(PASTA_DADOS)]:
+        print("  não existe usuário '%s'. Veja: python conta.py listar" % nome)
+        return 1
+    print("  redefinindo a senha de '%s' sem pedir a antiga." % nome)
+    nova = pedir_senha()
+    if nova is None:
+        return 1
+    try:
+        usuarios.redefinir_senha(PASTA_DADOS, nome, nova)
+    except usuarios.ErroUsuario as e:
+        print("  %s" % e)
+        return 1
+    print("  senha de '%s' redefinida. Avise a pessoa por um canal seguro." % nome)
+    return 0
+
+
 def main():
     os.makedirs(PASTA_DADOS, exist_ok=True)
     comando = sys.argv[1] if len(sys.argv) > 1 else "listar"
@@ -85,6 +114,8 @@ def main():
         return criar(sys.argv[2:])
     if comando == "senha":
         return senha(sys.argv[2:])
+    if comando == "redefinir":
+        return redefinir(sys.argv[2:])
     print(__doc__)
     return 1
 

@@ -134,6 +134,34 @@ def trocar_senha(pasta_dados, nome, senha_atual, senha_nova):
         _gravar(pasta_dados, dados)
 
 
+def redefinir_senha(pasta_dados, nome, senha_nova):
+    """
+    Troca a senha SEM exigir a antiga. So para quem opera o servidor.
+
+    Senha esquecida nao tinha saida nenhuma: `trocar_senha` pede a atual, e nao
+    ha e-mail configurado para mandar link de recuperacao. Numa imobiliaria com
+    varios corretores isso vira ligacao para o fornecedor toda semana.
+
+    A autorizacao aqui e o acesso ao DISCO do servidor, nao uma senha — quem
+    consegue editar este arquivo ja podia trocar o hash na mao. Por isso esta
+    funcao NAO tem rota: pela web ela seria exatamente o buraco que o produto
+    evita ao nao ter cadastro aberto.
+    """
+    alvo = (nome or "").strip().lower()
+    if len(senha_nova or "") < MIN_SENHA:
+        raise ErroUsuario("A senha nova precisa ter pelo menos %d caracteres." % MIN_SENHA)
+    with _TRAVA:
+        dados = _ler(pasta_dados)
+        achou = False
+        for u in dados["usuarios"]:
+            if u["nome"] == alvo:
+                u["senha"] = generate_password_hash(senha_nova)
+                achou = True
+        if not achou:
+            raise ErroUsuario("Não existe usuário com esse nome.")
+        _gravar(pasta_dados, dados)
+
+
 def segredo(pasta_dados):
     """
     Chave que assina o cookie de sessao. Fica em disco para que reiniciar o

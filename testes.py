@@ -21,6 +21,7 @@ import shutil
 import sys
 import subprocess
 import threading
+import time
 import unittest
 import warnings
 
@@ -35,6 +36,8 @@ os.environ["TOUR_BACKUPS"] = os.path.join(_TEMP, "backups")
 os.makedirs(os.environ["TOUR_DADOS"], exist_ok=True)
 
 import app as aplicacao           # noqa: E402
+import servico                    # noqa: E402
+import aviso                      # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
 import stitcher                   # noqa: E402
@@ -799,6 +802,301 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
             painel = f.read()
         self.assertIn("notaDeEscorrido", painel)
         self.assertIn("escorrido ao caminhar", painel)
+
+
+class TestExigirHttps(Base):
+    """
+    Marcar o cookie como seguro nao basta: em http a senha do corretor viaja
+    legivel ANTES de qualquer cookie existir. Com TOUR_EXIGIR_HTTPS=1 o site
+    deixa de atender em claro.
+
+    O caso que nao pode quebrar: /saude e chamado pelo vigia em 127.0.0.1 sem
+    TLS. Desviar isso poria o servidor em ciclo de reinicio — o site cairia por
+    causa da protecao.
+    """
+
+    def setUp(self):
+        self.antes = aplicacao.EXIGIR_HTTPS
+        aplicacao.EXIGIR_HTTPS = True
+        self.cliente = aplicacao.app.test_client()
+
+    def tearDown(self):
+        aplicacao.EXIGIR_HTTPS = self.antes
+
+    def test_pagina_em_claro_e_desviada_para_https(self):
+        r = self.cliente.get("/entrar", base_url="http://tour.exemplo.com",
+                             environ_overrides={"REMOTE_ADDR": "200.1.2.3"})
+        self.assertEqual(r.status_code, 308)
+        self.assertTrue(r.headers["Location"].startswith("https://"),
+                        r.headers.get("Location"))
+
+    def test_envio_de_senha_em_claro_e_recusado_e_nao_desviado(self):
+        """
+        Desviar um POST faria o navegador reenviar a senha — que ja viajou em
+        claro. Recusar e a unica resposta honesta.
+        """
+        r = self.cliente.post("/api/entrar", json={"usuario": "x", "senha": "y"},
+                              base_url="http://tour.exemplo.com",
+                              environ_overrides={"REMOTE_ADDR": "200.1.2.3"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_a_saude_continua_respondendo_em_claro(self):
+        """Se isto quebrar, o vigia derruba o servidor de 5 em 5 segundos."""
+        r = self.cliente.get("/saude", base_url="http://tour.exemplo.com",
+                             environ_overrides={"REMOTE_ADDR": "200.1.2.3"})
+        self.assertEqual(r.status_code, 200, "o vigia perderia o site de vista")
+
+    def test_localhost_nao_e_desviado(self):
+        r = self.cliente.get("/entrar", base_url="http://127.0.0.1:8000",
+                             environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_em_https_manda_o_navegador_nunca_mais_tentar_em_claro(self):
+        r = self.cliente.get("/entrar", base_url="https://tour.exemplo.com",
+                             environ_overrides={"REMOTE_ADDR": "200.1.2.3"})
+        self.assertIn("max-age", r.headers.get("Strict-Transport-Security", ""))
+
+    def test_desligado_o_site_atende_em_claro_normalmente(self):
+        """Ligado sem HTTPS de verdade na frente, tiraria o site do ar."""
+        aplicacao.EXIGIR_HTTPS = False
+        r = self.cliente.get("/entrar", base_url="http://tour.exemplo.com",
+                             environ_overrides={"REMOTE_ADDR": "200.1.2.3"})
+        self.assertEqual(r.status_code, 200)
+
+
+class TestAvisoDeLead(Base):
+    """
+    O contato precisa AVISAR alguem.
+
+    Antes ele era gravado no tour.json e ninguem ficava sabendo: o corretor so
+    descobria se abrisse o painel. Para quem vende imovel, contato que espera um
+    dia e contato perdido — o comprador ja falou com outro corretor.
+
+    O que estes testes protegem, acima de tudo: o aviso NAO pode derrubar o
+    cadastro. Se o servidor de e-mail estiver fora, o contato ainda tem de
+    entrar. Perder o lead por causa do aviso seria trocar um problema por um
+    pior.
+    """
+
+    def setUp(self):
+        self.cliente = self.conta("dona-lead")
+        self.iid = self.imovel(self.cliente, "Apartamento 302")
+
+    def test_o_contato_entra_mesmo_com_o_email_quebrado(self):
+        original = aviso.avisar
+        aviso.avisar = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("smtp fora"))
+        try:
+            r = self.cliente.post("/api/imoveis/%s/leads" % self.iid,
+                                  json={"nome": "Visitante", "telefone": "12 99999-0000"})
+            self.assertEqual(r.status_code, 200, "o e-mail quebrado derrubou o lead")
+        finally:
+            aviso.avisar = original
+        leads = self.cliente.get("/api/imoveis/%s/leads" % self.iid).get_json()["leads"]
+        self.assertEqual(len(leads), 1, "o contato se perdeu")
+        self.assertEqual(leads[0]["nome"], "Visitante")
+
+    def test_sem_configuracao_nao_tenta_enviar(self):
+        """O site nasce sem e-mail configurado e tem de funcionar igual."""
+        self.assertFalse(aviso.configurado())
+        self.assertFalse(aviso.avisar({"nome": "x"}, "Imóvel"))
+
+    def test_diz_o_que_falta_em_vez_de_silencio(self):
+        self.assertIn("TOUR_SMTP_SERVIDOR", aviso.por_que_nao())
+
+    def test_o_telefone_vai_no_assunto(self):
+        """
+        O corretor le a notificacao no celular, na rua. Precisa poder ligar sem
+        abrir o e-mail.
+        """
+        assunto, corpo = aviso.montar(
+            {"nome": "Maria", "telefone": "12 98888-1111",
+             "email": "m@x.com", "recebido_em": "2026-09-18T10:00:00"},
+            "Apartamento 302")
+        self.assertIn("12 98888-1111", assunto)
+        self.assertIn("Maria", assunto)
+        self.assertIn("Apartamento 302", assunto)
+        self.assertIn("m@x.com", corpo)
+
+    def test_lead_sem_telefone_nao_quebra_o_assunto(self):
+        assunto, corpo = aviso.montar({"nome": "Sem Telefone"}, "Casa")
+        self.assertIn("Sem Telefone", assunto)
+        self.assertIn("—", corpo)
+
+    def test_a_senha_do_email_nao_vai_para_o_tour(self):
+        """
+        Senha de e-mail em variavel de ambiente, nunca no tour.json: o tour vai
+        inteiro para o navegador de qualquer visitante.
+        """
+        fonte = io.open("aviso.py", encoding="utf-8").read()
+        self.assertIn("TOUR_SMTP_SENHA", fonte)
+        self.assertNotIn("TOUR_SMTP_SENHA",
+                         io.open("static/admin.html", encoding="utf-8").read())
+
+
+class TestSenhaEsquecida(Base):
+    """
+    Senha esquecida nao tinha saida: `trocar_senha` exige a antiga, e nao ha
+    e-mail configurado para link de recuperacao. Numa imobiliaria com varios
+    corretores isso vira ligacao para o fornecedor toda semana.
+
+    O que autoriza a redefinicao e o acesso ao disco do servidor, nao uma senha.
+    Por isso ela nao pode ter rota web — seria o buraco que o produto evita ao
+    nao ter cadastro aberto.
+    """
+
+    def test_redefine_sem_pedir_a_antiga(self):
+        try:
+            usuarios.criar(aplicacao.PASTA_DADOS, "esquecida", "a-velha-123", "")
+        except usuarios.ErroUsuario:
+            pass
+        usuarios.redefinir_senha(aplicacao.PASTA_DADOS, "esquecida", "a-nova-456")
+        self.assertTrue(usuarios.verificar(aplicacao.PASTA_DADOS,
+                                           "esquecida", "a-nova-456"))
+        self.assertFalse(usuarios.verificar(aplicacao.PASTA_DADOS,
+                                            "esquecida", "a-velha-123"),
+                         "a senha antiga continuou valendo")
+
+    def test_recusa_usuario_que_nao_existe(self):
+        """Sem isto, um erro de digitacao sairia calado sem trocar nada."""
+        with self.assertRaises(usuarios.ErroUsuario):
+            usuarios.redefinir_senha(aplicacao.PASTA_DADOS, "ninguem", "seja-la-123")
+
+    def test_recusa_senha_curta(self):
+        try:
+            usuarios.criar(aplicacao.PASTA_DADOS, "curta", "comprida-123", "")
+        except usuarios.ErroUsuario:
+            pass
+        with self.assertRaises(usuarios.ErroUsuario):
+            usuarios.redefinir_senha(aplicacao.PASTA_DADOS, "curta", "123")
+
+    def test_nenhuma_rota_web_redefine_senha(self):
+        """
+        Redefinir sem a senha antiga pela web seria tomada de conta. A prova e
+        no proprio app.py: nenhuma rota pode chamar essa funcao.
+        """
+        fonte = io.open("app.py", encoding="utf-8").read()
+        self.assertNotIn("redefinir_senha", fonte,
+                         "app.py expôs a redefinição de senha pela web")
+
+
+class TestFreioDeForcaBruta(Base):
+    """
+    Senha de corretor nao aguenta 86 mil tentativas por dia.
+
+    A espera de 1 segundo por erro atrapalha, mas nao impede: publicado na
+    internet, um robo tenta a noite inteira. Depois de algumas tentativas o
+    endereco fica de fora por um tempo.
+
+    A contagem e por ORIGEM, e nao por usuario, de proposito: travar por usuario
+    deixaria qualquer um trancar a conta do corretor de fora.
+    """
+
+    def setUp(self):
+        super().setUp()
+        aplicacao._tentativas.clear()
+        # nome proprio: "dona" ja e usada por TestAcesso com OUTRA senha, e
+        # engolir o "ja existe" fazia este teste logar com a senha errada e
+        # acusar a trava de estar presa
+        try:
+            usuarios.criar(aplicacao.PASTA_DADOS, "freio", "senha-boa-123", "")
+        except usuarios.ErroUsuario:
+            usuarios.redefinir_senha(aplicacao.PASTA_DADOS, "freio", "senha-boa-123")
+
+    def tearDown(self):
+        aplicacao._tentativas.clear()
+        super().tearDown()
+
+    def _errar(self, cliente):
+        return cliente.post("/api/entrar",
+                            json={"usuario": "freio", "senha": "errada"})
+
+    def test_erro_repetido_acaba_travando(self):
+        cliente = aplicacao.app.test_client()
+        for _ in range(aplicacao.TENTATIVAS_ATE_TRAVAR):
+            self.assertEqual(self._errar(cliente).status_code, 401)
+        r = self._errar(cliente)
+        self.assertEqual(r.status_code, 429, "seguiu aceitando tentativa sem fim")
+        self.assertIn("Tentativas demais", r.get_json()["erro"])
+
+    def test_travado_nao_entra_nem_com_a_senha_certa(self):
+        """Senao o robo acerta na tentativa 9 e a trava nao serviu de nada."""
+        cliente = aplicacao.app.test_client()
+        for _ in range(aplicacao.TENTATIVAS_ATE_TRAVAR):
+            self._errar(cliente)
+        r = cliente.post("/api/entrar",
+                         json={"usuario": "freio", "senha": "senha-boa-123"})
+        self.assertEqual(r.status_code, 429)
+
+    def test_acertar_antes_de_travar_limpa_a_contagem(self):
+        """Quem errou duas vezes e lembrou a senha nao pode ficar marcado."""
+        cliente = aplicacao.app.test_client()
+        self._errar(cliente)
+        self._errar(cliente)
+        r = cliente.post("/api/entrar",
+                         json={"usuario": "freio", "senha": "senha-boa-123"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(aplicacao._tentativas, {},
+                         "a contagem ficou suja depois do acerto")
+
+    def test_a_trava_expira(self):
+        cliente = aplicacao.app.test_client()
+        for _ in range(aplicacao.TENTATIVAS_ATE_TRAVAR):
+            self._errar(cliente)
+        self.assertEqual(self._errar(cliente).status_code, 429)
+        # envelhece a marca em vez de esperar 5 minutos de verdade
+        for chave, (n, _) in list(aplicacao._tentativas.items()):
+            aplicacao._tentativas[chave] = (n, time.time() - 1)
+        r = cliente.post("/api/entrar",
+                         json={"usuario": "freio", "senha": "senha-boa-123"})
+        self.assertEqual(r.status_code, 200, "a trava ficou presa para sempre")
+
+
+class TestCodigoNoAr(unittest.TestCase):
+    """
+    O `estado` precisa saber dizer se o processo no ar carregou os arquivos
+    publicados — nao apenas se ALGUEM atende a porta.
+
+    Custou uma hora de verdade: os arquivos novos foram copiados, o processo
+    velho continuou de pe segurando a porta 8000, e o `estado` respondeu
+    "respondendo: sim" durante a publicacao inteira. A publicacao parecia feita
+    e nao estava.
+    """
+
+    def setUp(self):
+        self.original = servico._inicio_do_servidor
+
+    def tearDown(self):
+        servico._inicio_do_servidor = self.original
+
+    def test_processo_mais_velho_que_o_arquivo_e_denunciado(self):
+        servico._inicio_do_servidor = lambda: time.time() - 7200
+        veredito, detalhe = servico.codigo_no_ar()
+        self.assertIs(veredito, False, detalhe)
+        self.assertIn("MAIS VELHO", detalhe)
+
+    def test_processo_mais_novo_passa(self):
+        servico._inicio_do_servidor = lambda: time.time() + 60
+        veredito, _ = servico.codigo_no_ar()
+        self.assertIs(veredito, True)
+
+    def test_sem_processo_admite_que_nao_sabe(self):
+        """Fingir certeza aqui seria repetir o erro por outro caminho."""
+        servico._inicio_do_servidor = lambda: None
+        veredito, detalhe = servico.codigo_no_ar()
+        self.assertIsNone(veredito)
+        self.assertIn("processo", detalhe)
+
+    def test_a_consulta_nao_pode_casar_com_ela_mesma(self):
+        """
+        Defeito cometido ao escrever isto: a consulta do PowerShell procurava
+        qualquer processo com 'servidor.py' na linha de comando — e a propria
+        consulta tem. Ela se achava, recem-nascida, e o veredito dava "no ar"
+        sempre. Sem o filtro por python o check volta a mentir.
+        """
+        fonte = io.open("servico.py", encoding="utf-8").read()
+        corpo = fonte.split("def _inicio_do_servidor")[1].split("\ndef ")[0]
+        self.assertIn("$_.Name -like 'python*'", corpo,
+                      "a consulta voltou a casar com o proprio processo")
 
 
 class TestVigiaDoServidor(unittest.TestCase):

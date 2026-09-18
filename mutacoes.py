@@ -168,6 +168,48 @@ MUT = [
      "  return Math.max(PASSEIO_MINIMO, PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e));",
      "  return PASSEIO_CHEIO;",
      "TestTetoDePasseio.test_cena_medida_pior_anda_menos"),
+
+    # sem o freio, 1 tentativa por segundo ainda da 86 mil por dia
+    ("login aceita tentativa sem fim", "app.py",
+     "    if falta > 0:",
+     "    if False:",
+     "TestFreioDeForcaBruta.test_erro_repetido_acaba_travando"),
+
+    # travar e deixar entrar com a senha certa nao seria travar
+    ("trava solta quem acerta depois", "app.py",
+     "    falta = _espera_da_trava(origem)",
+     "    falta = 0.0 if senha else _espera_da_trava(origem)",
+     "TestFreioDeForcaBruta.test_travado_nao_entra_nem_com_a_senha_certa"),
+
+    # o aviso nunca pode derrubar o cadastro do contato
+    ("aviso derruba o cadastro do lead", "app.py",
+     "    except Exception:   # o aviso nunca derruba o cadastro do contato",
+     "    except ZeroDivisionError:   # o aviso nunca derruba o cadastro do contato",
+     "TestAvisoDeLead.test_o_contato_entra_mesmo_com_o_email_quebrado"),
+
+    # desviar o POST faria o navegador reenviar a senha que ja viajou em claro
+    ("senha em claro e desviada em vez de recusada", "app.py",
+     '    if request.method not in ("GET", "HEAD"):',
+     "    if False:",
+     "TestExigirHttps.test_envio_de_senha_em_claro_e_recusado_e_nao_desviado"),
+
+    # se /saude for desviada, o vigia derruba o servidor de 5 em 5 segundos
+    ("https derruba a checagem de saude", "app.py",
+     '    if request.endpoint == "saude" or request.remote_addr in ("127.0.0.1", "::1"):',
+     "    if False:",
+     "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
+
+    # a consulta que casava com ela mesma: veredito "no ar" sempre
+    ("consulta do vigia casa com ela mesma", "servico.py",
+     "\"Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'python*' \"",
+     "\"Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*' \"",
+     "TestCodigoNoAr.test_a_consulta_nao_pode_casar_com_ela_mesma"),
+
+    # redefinir senha sem a antiga pela web seria tomada de conta
+    ("redefinicao de senha exposta na web", "app.py",
+     "import aviso",
+     "import aviso\nfrom usuarios import redefinir_senha  # noqa",
+     "TestSenhaEsquecida.test_nenhuma_rota_web_redefine_senha"),
 ]
 
 
