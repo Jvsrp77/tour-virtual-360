@@ -38,6 +38,9 @@ os.makedirs(os.environ["TOUR_DADOS"], exist_ok=True)
 import app as aplicacao           # noqa: E402
 import servico                    # noqa: E402
 import aviso                      # noqa: E402
+import numpy as np                # noqa: E402
+import plantas                    # noqa: E402
+import cena_apartamento           # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
 import stitcher                   # noqa: E402
@@ -802,6 +805,101 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
             painel = f.read()
         self.assertIn("notaDeEscorrido", painel)
         self.assertIn("escorrido ao caminhar", painel)
+
+
+class TestPlantasSinteticas(unittest.TestCase):
+    """
+    As plantas que geram o acervo de demonstracao.
+
+    Nasceram de uma perda: o acervo de imagens foi apagado do OneDrive e nao
+    havia mais o que demonstrar. Como sao sinteticas, a profundidade sai do
+    proprio raio em vez do modelo de IA — e por isso ela precisa falar a MESMA
+    lingua que o visualizador, senao o comodo inteiro vem na distancia errada e
+    caminhar fica sem sentido.
+    """
+
+    FORMULA = re.compile(r"const raio = d => 1 / \(([\d.]+) \* d \+ ([\d.]+)\)")
+
+    def test_a_conversao_de_profundidade_fecha_com_o_visualizador(self):
+        """
+        A ida e a volta tem de bater. O andar.html reconstroi o raio com
+        r = 1/(a*d + b); aqui gravamos d. Se um lado mudar sem o outro, todas as
+        distancias saem erradas de uma vez — e em silencio, porque a imagem
+        continua bonita parada no ponto.
+        """
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            achado = self.FORMULA.search(f.read())
+        self.assertTrue(achado, "não achei a fórmula do raio em andar.html")
+        a, b = float(achado.group(1)), float(achado.group(2))
+
+        metros = np.array([[0.8, 1.5, 2.5, 4.0, 6.0]], dtype=np.float32)
+        d = cena_apartamento.disparidade_exata(np.repeat(metros, 2, axis=0), largura=10)
+        volta = 1.0 / (a * d + b)
+        # a conversao passa por um redimensionamento; o que importa e a ordem de
+        # grandeza bater, nao o pixel exato
+        self.assertLess(abs(float(volta.min()) - 0.8), 0.6, volta)
+        self.assertLess(abs(float(volta.max()) - 6.0), 2.0, volta)
+
+    def test_a_formula_do_visor_nao_mudou_sozinha(self):
+        """Se alguém calibrar o visor, esta conversão precisa acompanhar."""
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            achado = self.FORMULA.search(f.read())
+        a, b = float(achado.group(1)), float(achado.group(2))
+        fonte = io.open("cena_apartamento.py", encoding="utf-8").read()
+        self.assertIn(str(a), fonte, "o traçador usa outra constante que o visor")
+        self.assertIn(str(b), fonte, "o traçador usa outra constante que o visor")
+
+    def test_nenhuma_planta_poe_a_camera_dentro_de_movel(self):
+        """
+        Ja aconteceu: a camera caiu dentro do retangulo da cama e o colchao virou
+        o chao inteiro — descoberto so depois de meia hora renderizando em 8k.
+        A conferencia custa milissegundos e diz o nome do ponto.
+        """
+        for construir in plantas.TODAS:
+            planta = construir()
+            problemas = cena_apartamento.conferir(planta)
+            self.assertEqual(problemas, [], "%s: %s" % (planta["nome"], problemas))
+
+    def test_a_conferencia_acusa_camera_dentro_de_movel(self):
+        """Conferência que nunca reprova nada não é conferência."""
+        planta = plantas.compacto()
+        nome, x, z = planta["pontos"][0]
+        planta["caixas"] = list(planta["caixas"]) + [
+            (x - 0.5, 0.0, z - 0.5, x + 0.5, 2.0, z + 0.5, "madeira")]
+        problemas = cena_apartamento.conferir(planta)
+        self.assertTrue(problemas, "não acusou a câmera dentro do móvel")
+        self.assertIn("DENTRO", problemas[0])
+
+    def test_cada_imovel_tem_dois_pontos_por_comodo(self):
+        """
+        O produto so mostra o botao de caminhar com dois ou mais pontos, e e
+        disso que a demonstracao trata: de um ponto so, andar obriga o programa
+        a inventar o que esta atras do movel.
+        """
+        for construir in plantas.TODAS:
+            planta = construir()
+            self.assertGreaterEqual(len(planta["pontos"]), 2 * len(planta["zonas"]) - 2,
+                                    planta["nome"])
+
+    def test_os_comodos_cabem_dentro_do_imovel(self):
+        """Zona fora da casca renderiza parede onde deveria haver cômodo."""
+        for construir in plantas.TODAS:
+            p = construir()
+            for nome, x0, x1, z0, z1, _, _ in p["zonas"]:
+                self.assertGreaterEqual(x0, -0.01, nome)
+                self.assertLessEqual(x1, p["larg"] + 0.01, nome)
+                self.assertGreaterEqual(z0, -0.01, nome)
+                self.assertLessEqual(z1, p["fundo"] + 0.01, nome)
+
+    def test_toda_zona_tem_material_de_parede_e_piso_conhecido(self):
+        """Material sem cor cadastrada estoura o render no meio, não antes."""
+        for construir in plantas.TODAS:
+            p = construir()
+            for z in p["zonas"]:
+                self.assertIn(z[5], cena_apartamento.MATERIAIS, z[0])
+                self.assertIn(z[6], cena_apartamento.MATERIAIS, z[0])
+            for c in p["caixas"]:
+                self.assertIn(c[6], cena_apartamento.MATERIAIS, str(c))
 
 
 class TestRecarregarServidor(Base):

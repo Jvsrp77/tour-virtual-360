@@ -2,6 +2,11 @@ modelos/
 data/
 __pycache__/
 fotos_exemplo_costura/
+# panoramas gerados pelo tracador: saem de plantas.py em minutos,
+# e sao 100 MB que nao precisam viajar no historico
+fotos_apto_padrao/
+fotos_apto_compacto/
+fotos_cobertura/
 backups/
 *.log
 

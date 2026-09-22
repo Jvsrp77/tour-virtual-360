@@ -200,6 +200,25 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # conferencia que nunca reprova nada nao e conferencia: meia hora de render
+    # em 8k ja foi jogada fora por camera dentro da cama
+    ("conferencia da planta nunca reprova", "cena_apartamento.py",
+     "        if pior < 0.02:",
+     "        if False:",
+     "TestPlantasSinteticas.test_a_conferencia_acusa_camera_dentro_de_movel"),
+
+    # a profundidade exata precisa falar a MESMA lingua do visualizador
+    ("tracador usa outra escala de profundidade", "cena_apartamento.py",
+     "        d = (1.0 / np.maximum(pequeno, 1e-3) - 0.125) / 1.542",
+     "        d = (1.0 / np.maximum(pequeno, 1e-3) - 0.2) / 2.0",
+     "TestPlantasSinteticas.test_a_formula_do_visor_nao_mudou_sozinha"),
+
+    # comodo fora da casca vira parede no lugar do comodo
+    ("comodo sai para fora do imovel", "plantas.py",
+     '        ("Cozinha",         wx1,  wx2,  0.00, wz1,   "cozinha",   "porcelanato"),',
+     '        ("Cozinha",         wx1,  wx2 + 4.0, 0.00, wz1, "cozinha", "porcelanato"),',
+     "TestPlantasSinteticas.test_os_comodos_cabem_dentro_do_imovel"),
+
     # botao que derruba o site sem ninguem para repor e pior que botao nenhum
     ("recarregar age sem haver vigia", "app.py",
      "    if not ha_vigia():",
