@@ -200,6 +200,24 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # prometer maquete onde nao ha geometria e vender o que nao existe
+    ("maquete finge existir sem geometria", "app.py",
+     "    if not os.path.exists(caminho):     # imovel de fotos nao tem geometria",
+     "    if False:                           # imovel de fotos nao tem geometria",
+     "TestMaquete.test_imovel_de_fotos_responde_que_nao_tem"),
+
+    # exigir conta aqui esconderia do comprador a tela que ajuda a vender
+    ("maquete deixa de ser publica", "app.py",
+     '"api.api_embed", "maquete", "api.api_maquete",',
+     '"api.api_embed",',
+     "TestMaquete.test_a_maquete_e_publica_como_o_tour"),
+
+    # o painel renomeia o imovel; a geometria foi gravada uma vez so
+    ("maquete mostra nome velho do imovel", "app.py",
+     '    dados["titulo"] = tour.get("titulo") or dados.get("nome", "")',
+     '    dados["titulo"] = dados.get("nome", "")',
+     "TestMaquete.test_o_titulo_do_imovel_manda_no_da_geometria"),
+
     # conferencia que nunca reprova nada nao e conferencia: meia hora de render
     # em 8k ja foi jogada fora por camera dentro da cama
     ("conferencia da planta nunca reprova", "cena_apartamento.py",

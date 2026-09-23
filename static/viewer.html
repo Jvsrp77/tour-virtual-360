@@ -142,6 +142,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
           title="Voltar para a tela de edição deste imóvel">✎ Editar</button>
   <button class="bt" id="btAndar" onclick="andarAqui()" style="display:none"
           title="Deslocar-se dentro deste ambiente">Andar aqui</button>
+  <button class="bt" id="btMaquete" onclick="verMaquete()" style="display:none"
+          title="Ver o imóvel por fora, em 3D">Maquete</button>
   <button class="bt" onclick="telaCheia()" title="Tela cheia">⛶</button>
   <button class="bt" onclick="giroscopio()" id="btGiro" title="Girar com o celular">◎</button>
 </div>
@@ -298,6 +300,19 @@ function desenharArea(){
     + `${medidos.length} de ${tour.cenas.length} ambiente(s)`;
   $('vArea').style.display = 'block';
 }
+
+// A maquete so existe para imovel gerado, que tem paredes e moveis em metros.
+// Imovel fotografado tem panorama e profundidade, que e outra coisa — por isso
+// o botao pergunta ao servidor em vez de aparecer sempre.
+async function verSeTemMaquete(){
+  try{
+    const r = await fetch(API + '/maquete');
+    if (r.ok) document.getElementById('btMaquete').style.display = 'block';
+  }catch(e){ /* sem servidor, no pacote exportado: fica escondido */ }
+}
+verSeTemMaquete();
+
+function verMaquete(){ location.href = '/maquete/' + IMOVEL; }
 
 function andarAqui(){
   medicao.andou = true;

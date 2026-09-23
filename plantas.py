@@ -35,8 +35,8 @@ def apartamento():
         ("Sala de jantar",  wx2,  larg, 0.00, wz1,   "jantar",    "piso"),
         ("Quarto 1",        0.00, wx1,  wz1,  fundo, "parede_q1", "piso"),
         ("Banheiro",        wx1,  wx3,  wz1,  fundo, "banheiro",  "porcelanato"),
-        ("Area de servico", wx3,  wx2,  wz1,  fundo, "servico",   "porcelanato"),
-        ("Suite",           wx2,  larg, wz1,  fundo, "parede_q2", "piso"),
+        ("Área de serviço", wx3,  wx2,  wz1,  fundo, "servico",   "porcelanato"),
+        ("Suíte",           wx2,  larg, wz1,  fundo, "parede_q2", "piso"),
     ]
     caixas = []
     caixas += _px(wx1, [(0.0, 1.90), (2.80, 6.00), (6.90, fundo)])
@@ -266,7 +266,7 @@ def cobertura():
         ("Varanda gourmet", wx1,  wx2,  0.00, wz1,   "servico",   "porcelanato"),
         ("Cozinha",         wx2,  larg, 0.00, wz1,   "cozinha",   "porcelanato"),
         ("Home office",     0.00, wx1,  wz1,  fundo, "jantar",    "piso"),
-        ("Suite master",    wx1,  wx2,  wz1,  fundo, "parede_q2", "piso"),
+        ("Suíte master",    wx1,  wx2,  wz1,  fundo, "parede_q2", "piso"),
         ("Banheiro",        wx2,  larg, wz1,  fundo, "banheiro",  "porcelanato"),
     ]
     caixas = []

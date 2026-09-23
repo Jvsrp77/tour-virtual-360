@@ -154,6 +154,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button id="btRecarregar" onclick="recarregarServidor()" style="display:none"
           title="Aplicar a versão publicada">Recarregar servidor</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
+  <button id="btMaquete" onclick="window.open('/maquete/' + IMOVEL,'_blank')"
+          style="display:none" title="Ver o imóvel por fora, em 3D">Maquete</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
 </header>
 
@@ -1432,6 +1434,14 @@ async function recarregarServidor(){
   aviso('Não voltou em 60s. Veja servico.log na máquina.', 'erro');
 }
 
+// So imovel gerado tem geometria; o de fotos nao tem maquete e o botao some.
+async function verSeTemMaquete(){
+  try{
+    const r = await fetch(API + '/maquete');
+    if (r.ok) $('btMaquete').style.display = '';
+  }catch(e){ /* sem resposta: fica escondido, que e o estado correto */ }
+}
+
 function enviarPorWhatsApp(){
   const endereco = new URL(URL_VOLTAR, location.href).href;
   const partes = [];
@@ -1509,7 +1519,8 @@ function baixarLeads(){ window.open(API + '/leads.csv', '_blank'); }
 function abrirGuia(){ $('dlgGuia').showModal(); }
 
 carregar();
-verVersao();          // avisa se ha versao publicada esperando
+verVersao();
+verSeTemMaquete();          // avisa se ha versao publicada esperando
 </script>
 </body>
 </html>

@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maquete</title>
+<script>
+// O imovel vem do proprio endereco, como nas demais paginas. No ZIP exportado
+// nao ha servidor: a exportacao injeta window.__MAQUETE__ apontando o arquivo
+// solto ao lado da pagina.
+const IMOVEL = location.pathname.split('/').filter(Boolean)[1] || '';
+const URL_MAQUETE = window.__MAQUETE__ || ('/api/imoveis/' + IMOVEL + '/maquete');
+const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
+</script>
+<script src="/static/vendor/three.js"></script>
+<style>
+  :root{
+    --ground:#edeff2; --surface:#ffffff; --ink:#171a20; --muted:#5a6371;
+    --line:#c7cdd6; --accent:#e07b39; --accent-fraco:rgba(224,123,57,.14);
+    --ceu-topo:#dfe4ea; --ceu-base:#eef0f3;
+    --sombra:0 1px 2px rgba(20,25,35,.06), 0 8px 24px rgba(20,25,35,.07);
+    --fonte:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme:dark;
+      --ground:#13161b; --surface:#1b1f26; --ink:#e7ebf1; --muted:#949dab;
+      --line:#2b323c; --accent:#f08d4b; --accent-fraco:rgba(240,141,75,.16);
+      --ceu-topo:#10131a; --ceu-base:#1a1f27;
+      --sombra:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --ground:#13161b; --surface:#1b1f26; --ink:#e7ebf1; --muted:#949dab;
+    --line:#2b323c; --accent:#f08d4b; --accent-fraco:rgba(240,141,75,.16);
+    --ceu-topo:#10131a; --ceu-base:#1a1f27;
+    --sombra:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.35);
+  }
+
+  html,body{height:100%}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--fonte);
+    font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  *{box-sizing:border-box}
+  .app{height:100%;display:flex;flex-direction:column;padding:0 16px 16px;gap:14px}
+
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 22px;
+    padding-block:18px 2px}
+  .marca{font-weight:600;letter-spacing:-.01em;font-size:15px}
+  .marca em{font-style:normal;color:var(--muted);font-weight:400}
+  .abas{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+  .aba{font:inherit;font-size:13px;color:var(--muted);background:none;
+    border:1px solid transparent;border-radius:7px;padding:6px 11px;cursor:pointer;
+    transition:.14s}
+  .aba:hover{color:var(--ink);background:var(--surface)}
+  .aba[aria-pressed="true"]{color:var(--ink);background:var(--surface);
+    border-color:var(--line);box-shadow:var(--sombra);font-weight:500}
+  .aba:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .corpo{flex:1;min-height:0;display:grid;grid-template-columns:1fr 310px;gap:14px}
+
+  .palco{position:relative;min-height:340px;border-radius:14px;overflow:hidden;
+    border:1px solid var(--line);
+    background:linear-gradient(var(--ceu-topo),var(--ceu-base));box-shadow:var(--sombra)}
+  #tela{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
+  #tela:active{cursor:grabbing}
+
+  .canto{position:absolute;font-family:var(--mono);font-size:11px;color:var(--muted);
+    letter-spacing:.02em;pointer-events:none;user-select:none}
+  .dica{right:12px;bottom:11px;text-align:right}
+  .escala{left:13px;bottom:11px;display:flex;align-items:center;gap:8px}
+  .regua{display:block;height:7px;width:64px;border:1px solid var(--muted);
+    border-top:0;opacity:.75}
+
+  .selo{position:absolute;left:13px;top:12px;display:flex;gap:6px;align-items:center;
+    font-family:var(--mono);font-size:11px;color:var(--muted);pointer-events:none}
+  .selo b{color:var(--ink);font-weight:500}
+
+  .lado{display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;
+    padding-right:2px}
+  .cartao{background:var(--surface);border:1px solid var(--line);border-radius:12px;
+    padding:15px 16px}
+  h1{margin:0 0 5px;font-size:17px;font-weight:600;letter-spacing:-.015em;
+    line-height:1.3;text-wrap:balance}
+  .sub{margin:0;color:var(--muted);font-size:12.5px;line-height:1.5}
+
+  .numeros{display:grid;grid-template-columns:1fr 1fr;gap:1px;margin:14px 0 0;
+    background:var(--line);border:1px solid var(--line);border-radius:9px;
+    overflow:hidden}
+  .numeros>div{background:var(--surface);padding:9px 11px}
+  .numeros dt{margin:0;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--muted)}
+  .numeros dd{margin:2px 0 0;font-family:var(--mono);font-size:15px;font-weight:500;
+    font-variant-numeric:tabular-nums}
+
+  .rotulo{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--muted);margin:0 0 9px}
+
+  .chaves{display:flex;flex-direction:column;gap:9px}
+  .chave{display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer}
+  .chave input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+  .corte{margin-top:13px}
+  .corte label{display:flex;justify-content:space-between;font-size:13px;
+    margin-bottom:6px}
+  .corte b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+  .corte input{width:100%;accent-color:var(--accent);margin:0}
+
+  .comodos{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .comodo{display:flex;align-items:center;gap:10px;background:var(--surface);
+    border:0;width:100%;text-align:left;font:inherit;color:inherit;
+    padding:9px 11px;cursor:pointer;transition:.12s}
+  .comodo:hover{background:var(--accent-fraco)}
+  .comodo[aria-pressed="true"]{background:var(--accent-fraco);
+    box-shadow:inset 3px 0 0 var(--accent)}
+  .comodo:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+  .amostra{width:11px;height:11px;border-radius:3px;flex:none;
+    border:1px solid rgba(0,0,0,.18)}
+  .comodo span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;font-size:13px}
+  .comodo b{font-family:var(--mono);font-size:12.5px;font-weight:500;color:var(--muted);
+    font-variant-numeric:tabular-nums}
+
+  .nota{font-size:12px;color:var(--muted);line-height:1.5}
+  .nota b{color:var(--ink);font-weight:600}
+
+  @media (max-width: 860px){
+    .corpo{grid-template-columns:1fr;grid-template-rows:minmax(300px,52vh) auto}
+    .lado{overflow:visible}
+    .app{height:auto;min-height:100%}
+    .dica{display:none}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+  }
+
+  /* dentro do sistema a pagina tem barra propria, como o painel e o visor */
+  .topo-dir{position:fixed;top:14px;right:16px;z-index:20;display:flex;gap:8px}
+  .bt{background:var(--surface);color:var(--ink);border:1px solid var(--line);
+    border-radius:9px;padding:8px 13px;cursor:pointer;font:inherit;font-size:13px;
+    box-shadow:var(--sombra);transition:.14s;text-decoration:none;display:inline-block}
+  .bt:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="topo-dir">
+  <a class="bt" id="btTour" href="#">Ver o tour 360</a>
+</div>
+
+<div class="app">
+  <header>
+    <div class="marca">Maquete eletrônica <em id="marcaImovel"></em></div>
+  </header>
+
+  <div class="corpo">
+    <section class="palco">
+      <canvas id="tela"></canvas>
+      <div class="selo canto"><b id="seloNome">—</b> · pé-direito <b>2,70 m</b></div>
+      <div class="escala canto"><span class="regua" id="regua"></span><span id="reguaTxt">2 m</span></div>
+      <div class="dica canto">arraste para girar · role para aproximar</div>
+    </section>
+
+    <aside class="lado">
+      <div class="cartao">
+        <h1 id="titulo">—</h1>
+        <p class="sub" id="descricao"></p>
+        <dl class="numeros">
+          <div><dt>Área construída</dt><dd id="nArea">—</dd></div>
+          <div><dt>Cômodos</dt><dd id="nComodos">—</dd></div>
+          <div><dt>Pontos de captura</dt><dd id="nPontos">—</dd></div>
+          <div><dt>Volumes</dt><dd id="nVolumes">—</dd></div>
+        </dl>
+      </div>
+
+      <div class="cartao">
+        <p class="rotulo">Vista</p>
+        <div class="corte">
+          <label for="corte">Altura das paredes <b id="corteTxt">1,10 m</b></label>
+          <input type="range" id="corte" min="0" max="270" step="5" value="110">
+        </div>
+        <div class="chaves" style="margin-top:13px">
+          <label class="chave"><input type="checkbox" id="chMoveis" checked> Mobiliário</label>
+          <label class="chave"><input type="checkbox" id="chPontos" checked> Pontos de captura</label>
+          <label class="chave"><input type="checkbox" id="chRotulos" checked> Nomes dos cômodos</label>
+        </div>
+      </div>
+
+      <div class="cartao">
+        <p class="rotulo">Cômodos</p>
+        <ul class="comodos" id="comodos"></ul>
+      </div>
+
+      <div class="cartao">
+        <p class="nota"><b>É a mesma geometria do tour.</b> Cada ponto de captura marcado
+        aqui é uma cena 360 do passeio — os panoramas saem deste modelo por traçado de
+        raios, e é por isso que a profundidade do tour é exata em vez de estimada.</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const nBR = (n, casas) => n.toLocaleString("pt-BR",
+    {minimumFractionDigits: casas, maximumFractionDigits: casas});
+
+  const tela = $("tela");
+  let cena, camera, renderizador, grupoObra, grupoMoveis, grupoPontos, grupoRotulos;
+  let imoveis = [], atual = 0, selecionado = null, paredes = [], pisos = [];
+
+  // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
+  // vertical e distancia — guardados aqui porque o usuario mexe nos tres e a
+  // posicao cartesiana e recalculada a cada quadro.
+  const orbita = {giro: -0.72, altura: 0.86, raio: 20, alvo: new THREE.Vector3()};
+  const girarSozinho = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let ocioso = girarSozinho;
+
+  function iniciar3d(){
+    renderizador = new THREE.WebGLRenderer({canvas: tela, antialias: true, alpha: true});
+    renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
+    cena = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+
+    cena.add(new THREE.AmbientLight(0xffffff, 0.72));
+    const sol = new THREE.DirectionalLight(0xffffff, 0.62);
+    sol.position.set(9, 16, 7);
+    cena.add(sol);
+    const contraluz = new THREE.DirectionalLight(0xffffff, 0.22);
+    contraluz.position.set(-8, 7, -9);
+    cena.add(contraluz);
+
+    redimensionar();
+    addEventListener("resize", redimensionar);
+    ligarControles();
+    desenhar();
+  }
+
+  function redimensionar(){
+    const l = tela.clientWidth || 1, a = tela.clientHeight || 1;
+    renderizador.setSize(l, a, false);
+    camera.aspect = l / a;
+    camera.updateProjectionMatrix();
+  }
+
+  // ---------------------------------------------------------------- montagem
+
+  function material(cor){
+    return new THREE.MeshLambertMaterial({color: new THREE.Color(cor)});
+  }
+
+  function caixa(x0, y0, z0, x1, y1, z1, mat){
+    const g = new THREE.BoxGeometry(x1 - x0, Math.max(y1 - y0, 0.002), z1 - z0);
+    const m = new THREE.Mesh(g, mat);
+    m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    return m;
+  }
+
+  function rotulo(texto, cor){
+    const dpr = 2, pad = 10;
+    const c = document.createElement("canvas");
+    const ctx = c.getContext("2d");
+    ctx.font = "600 " + (15 * dpr) + "px 'IBM Plex Sans', sans-serif";
+    const larg = ctx.measureText(texto).width;
+    c.width = larg + pad * 2 * dpr;
+    c.height = 26 * dpr;
+    const g = c.getContext("2d");
+    g.font = "600 " + (15 * dpr) + "px 'IBM Plex Sans', sans-serif";
+    g.textBaseline = "middle";
+    g.fillStyle = "rgba(255,255,255,.88)";
+    g.strokeStyle = "rgba(0,0,0,.16)";
+    g.lineWidth = dpr;
+    arredondado(g, dpr / 2, dpr / 2, c.width - dpr, c.height - dpr, 7 * dpr);
+    g.fill(); g.stroke();
+    g.fillStyle = cor;
+    g.fillText(texto, pad * dpr, c.height / 2 + dpr * 0.5);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.minFilter = THREE.LinearFilter;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({map: tex, depthTest: false}));
+    sp.scale.set(c.width / c.height * 0.52, 0.52, 1);
+    sp.renderOrder = 10;
+    return sp;
+  }
+
+  function arredondado(g, x, y, l, a, r){
+    g.beginPath();
+    g.moveTo(x + r, y);
+    g.arcTo(x + l, y, x + l, y + a, r);
+    g.arcTo(x + l, y + a, x, y + a, r);
+    g.arcTo(x, y + a, x, y, r);
+    g.arcTo(x, y, x + l, y, r);
+    g.closePath();
+  }
+
+  function montar(imovel){
+    [grupoObra, grupoMoveis, grupoPontos, grupoRotulos].forEach(g => {
+      if (g) cena.remove(g);
+    });
+    grupoObra = new THREE.Group();
+    grupoMoveis = new THREE.Group();
+    grupoPontos = new THREE.Group();
+    grupoRotulos = new THREE.Group();
+    paredes = []; pisos = []; selecionado = null;
+
+    const L = imovel.larg, F = imovel.fundo, PE = imovel.pe;
+    // O modelo nasce centrado na origem: assim a orbita gira em torno do imovel
+    // e nao em torno de um canto dele.
+    const cx = -L / 2, cz = -F / 2;
+
+    // piso de cada comodo, com a cor real do revestimento
+    imovel.zonas.forEach(z => {
+      const m = caixa(z.x0 + cx, -0.06, z.z0 + cz, z.x1 + cx, 0, z.z1 + cz,
+                      material(z.piso));
+      m.userData.zona = z;
+      pisos.push(m);
+      grupoObra.add(m);
+
+      const r = rotulo(z.nome, "#171a20");
+      r.position.set((z.x0 + z.x1) / 2 + cx, 1.25, (z.z0 + z.z1) / 2 + cz);
+      grupoRotulos.add(r);
+    });
+
+    // paredes e mobiliario
+    const corParede = new THREE.Color(getComputedStyle(document.documentElement)
+      .getPropertyValue("--surface").trim() || "#ffffff");
+    imovel.caixas.forEach(c => {
+      const p = c.p;
+      const eParede = c.m === "parede";
+      const mat = eParede
+        ? new THREE.MeshLambertMaterial({color: corParede})
+        : material(c.cor);
+      const m = caixa(p[0] + cx, p[1], p[2] + cz, p[3] + cx, p[4], p[5] + cz, mat);
+      if (eParede){
+        m.userData.alturaCheia = p[4] - p[1];
+        paredes.push(m);
+        grupoObra.add(m);
+      } else {
+        grupoMoveis.add(m);
+      }
+    });
+
+    // as quatro paredes externas nao estao na lista: no tracador elas sao a
+    // casca do imovel, nao caixas
+    const E = 0.14;
+    [[0, 0, L, E], [0, F - E, L, E], [0, 0, E, F], [L - E, 0, E, F]].forEach(w => {
+      const m = caixa(w[0] + cx, 0, w[1] + cz, w[0] + w[2] + cx, PE, w[1] + w[3] + cz,
+                      new THREE.MeshLambertMaterial({color: corParede}));
+      m.userData.alturaCheia = PE;
+      paredes.push(m);
+      grupoObra.add(m);
+    });
+
+    // janelas: faixas claras rentes a parede externa
+    const vidro = new THREE.MeshLambertMaterial({
+      color: 0xbcd8ee, transparent: true, opacity: 0.85});
+    imovel.janelas.forEach(j => {
+      const x0 = Math.min(j[0], j[1]), x1 = Math.max(j[0], j[1]);
+      const z0 = Math.min(j[2], j[3]), z1 = Math.max(j[2], j[3]);
+      const m = caixa(x0 + cx - (x1 - x0 ? 0 : 0.09), j[4], z0 + cz - (z1 - z0 ? 0 : 0.09),
+                      x1 + cx + (x1 - x0 ? 0 : 0.09), j[5], z1 + cz + (z1 - z0 ? 0 : 0.09),
+                      vidro);
+      m.userData.janela = true;
+      m.userData.alturaCheia = j[5];
+      paredes.push(m);
+      grupoObra.add(m);
+    });
+
+    // pontos de captura: onde cada panorama do tour foi gerado
+    const corAcento = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent").trim() || "#e07b39";
+    imovel.pontos.forEach(p => {
+      const haste = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.022, 0.022, 1.5, 8),
+        new THREE.MeshLambertMaterial({color: corAcento}));
+      haste.position.set(p.x + cx, 0.75, p.z + cz);
+      const bola = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 18, 12),
+        new THREE.MeshLambertMaterial({color: corAcento}));
+      bola.position.set(p.x + cx, 1.5, p.z + cz);
+      grupoPontos.add(haste, bola);
+    });
+
+    cena.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
+    orbita.raio = Math.max(L, F) * 1.35;
+    orbita.alvo.set(0, 0.9, 0);
+    aplicarCorte();
+    aplicarChaves();
+  }
+
+  // ------------------------------------------------------------- interacao
+
+  function aplicarCorte(){
+    const altura = $("corte").value / 100;
+    $("corteTxt").textContent = nBR(altura, 2) + " m";
+    paredes.forEach(m => {
+      const cheia = m.userData.alturaCheia || 1;
+      const base = m.userData.janela ? 0 : 0;
+      const k = Math.min(1, altura / cheia);
+      m.scale.y = Math.max(k, 0.001);
+      // escalar em torno do centro sobe a peca: reassenta no chao
+      m.position.y = base + (m.geometry.parameters.height * m.scale.y) / 2;
+      m.visible = altura > 0.02;
+    });
+  }
+
+  function aplicarChaves(){
+    grupoMoveis.visible = $("chMoveis").checked;
+    grupoPontos.visible = $("chPontos").checked;
+    grupoRotulos.visible = $("chRotulos").checked;
+  }
+
+  function ligarControles(){
+    let arrastando = false, ux = 0, uy = 0, distancia = 0;
+
+    const pegar = e => e.touches ? e.touches[0] : e;
+    const comecar = e => {
+      arrastando = true; ocioso = false;
+      const t = pegar(e); ux = t.clientX; uy = t.clientY;
+      if (e.touches && e.touches.length === 2) distancia = separacao(e.touches);
+    };
+    const mover = e => {
+      if (e.touches && e.touches.length === 2){
+        const d = separacao(e.touches);
+        if (distancia) aproximar((distancia - d) * 0.05);
+        distancia = d;
+        e.preventDefault();
+        return;
+      }
+      if (!arrastando) return;
+      const t = pegar(e);
+      orbita.giro -= (t.clientX - ux) * 0.006;
+      orbita.altura = Math.min(1.5, Math.max(0.12, orbita.altura - (t.clientY - uy) * 0.005));
+      ux = t.clientX; uy = t.clientY;
+      if (e.touches) e.preventDefault();
+    };
+    const parar = () => { arrastando = false; distancia = 0; };
+
+    tela.addEventListener("mousedown", comecar);
+    addEventListener("mousemove", mover);
+    addEventListener("mouseup", parar);
+    tela.addEventListener("touchstart", comecar, {passive: true});
+    tela.addEventListener("touchmove", mover, {passive: false});
+    addEventListener("touchend", parar);
+    tela.addEventListener("wheel", e => {
+      ocioso = false; aproximar(e.deltaY * 0.012); e.preventDefault();
+    }, {passive: false});
+
+    tela.addEventListener("click", e => {
+      const r = tela.getBoundingClientRect();
+      const ponteiro = new THREE.Vector2(
+        ((e.clientX - r.left) / r.width) * 2 - 1,
+        -((e.clientY - r.top) / r.height) * 2 + 1);
+      const raio = new THREE.Raycaster();
+      raio.setFromCamera(ponteiro, camera);
+      const achou = raio.intersectObjects(pisos, false)[0];
+      if (achou) selecionar(achou.object.userData.zona.nome);
+    });
+
+    $("corte").addEventListener("input", aplicarCorte);
+    ["chMoveis", "chPontos", "chRotulos"].forEach(id =>
+      $(id).addEventListener("change", aplicarChaves));
+  }
+
+  const separacao = t => Math.hypot(
+    t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+  function aproximar(passo){
+    const im = imoveis[atual];
+    const minimo = 4, maximo = Math.max(im.larg, im.fundo) * 2.6;
+    orbita.raio = Math.min(maximo, Math.max(minimo, orbita.raio + passo));
+  }
+
+  function desenhar(){
+    requestAnimationFrame(desenhar);
+    if (ocioso) orbita.giro += 0.0016;
+    const r = orbita.raio, a = orbita.altura;
+    camera.position.set(
+      orbita.alvo.x + Math.cos(orbita.giro) * r * Math.cos(a),
+      orbita.alvo.y + Math.sin(a) * r,
+      orbita.alvo.z + Math.sin(orbita.giro) * r * Math.cos(a));
+    camera.lookAt(orbita.alvo);
+    atualizarRegua();
+    renderizador.render(cena, camera);
+  }
+
+  // A regua tem de dizer a verdade: mede-se no plano do chao, na distancia em
+  // que a camera esta olhando. Sem isso ela vira enfeite.
+  function atualizarRegua(){
+    const metros = 2;
+    const dist = camera.position.distanceTo(orbita.alvo);
+    const alturaVisivel = 2 * Math.tan((camera.fov * Math.PI / 180) / 2) * dist;
+    const px = (metros / alturaVisivel) * (tela.clientHeight || 1);
+    $("regua").style.width = Math.max(18, Math.min(150, px)) + "px";
+    $("reguaTxt").textContent = metros + " m";
+  }
+
+  // ----------------------------------------------------------------- ficha
+
+  function selecionar(nome){
+    selecionado = selecionado === nome ? null : nome;
+    pisos.forEach(m => {
+      const e = m.userData.zona.nome === selecionado;
+      m.material.emissive = new THREE.Color(e ? 0x5a2a05 : 0x000000);
+      m.material.emissiveIntensity = e ? 1 : 0;
+    });
+    [...document.querySelectorAll(".comodo")].forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.nome === selecionado)));
+  }
+
+  function mostrar(i){
+    atual = i;
+    const im = imoveis[i];
+    montar(im);
+    $("titulo").textContent = im.nome;
+    $("descricao").textContent = im.descricao;
+    $("seloNome").textContent = im.nome;
+    const area = im.zonas.reduce((s, z) => s + z.m2, 0);
+    $("nArea").textContent = nBR(area, 1) + " m²";
+    $("nComodos").textContent = im.zonas.length;
+    $("nPontos").textContent = im.pontos.length;
+    $("nVolumes").textContent = im.caixas.length;
+
+    $("comodos").innerHTML = im.zonas.map(z =>
+      '<li><button class="comodo" data-nome="' + z.nome + '" aria-pressed="false">' +
+      '<i class="amostra" style="background:' + z.piso + '"></i>' +
+      '<span>' + z.nome + '</span><b>' + nBR(z.m2, 1) + ' m²</b></button></li>').join("");
+    [...document.querySelectorAll(".comodo")].forEach(b =>
+      b.addEventListener("click", () => selecionar(b.dataset.nome)));
+
+    ocioso = girarSozinho;
+  }
+
+  function erro(titulo, texto){
+    document.getElementById("titulo").textContent = titulo;
+    document.getElementById("descricao").textContent = texto;
+  }
+
+  document.getElementById("btTour").href = URL_TOUR_PG;
+  fetch(URL_MAQUETE).then(r => r.json()).then(j => {
+    const dados = j.maquete || j;
+    if (!dados || !dados.zonas) throw new Error("sem geometria");
+    if (dados.titulo) dados.nome = dados.titulo;
+    imoveis = [dados];
+    document.getElementById("marcaImovel").textContent = "· " + dados.nome;
+    iniciar3d();
+    mostrar(0);
+  }).catch(() => {
+    erro("Este imóvel não tem maquete",
+         "A maquete existe para ambiente gerado, que tem paredes e móveis em "
+         + "metros. Imóvel fotografado tem panorama e profundidade, "
+         + "que é outra coisa.");
+  });
+})();
+</script>
+</body>
+</html>

@@ -807,6 +807,94 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
         self.assertIn("escorrido ao caminhar", painel)
 
 
+class TestMaquete(Base):
+    """
+    A vista 3D do imovel, dentro do sistema.
+
+    Ela so existe onde HA geometria: imovel gerado conhece as paredes e os
+    moveis em metros, porque foi assim que nasceu. Imovel FOTOGRAFADO tem
+    panorama e mapa de profundidade, que e outra coisa — e prometer maquete ali
+    seria vender o que o produto nao entrega.
+
+    E publica como o tour: quem recebe o link do imovel abre a maquete sem
+    conta. Exigir login aqui esconderia do comprador justamente a tela que
+    ajuda a vender.
+    """
+
+    GEOMETRIA = {
+        "nome": "Casa de teste", "descricao": "duas paredes e um sofá",
+        "larg": 6.0, "fundo": 4.0, "pe": 2.7,
+        "zonas": [{"nome": "Sala", "x0": 0, "x1": 6, "z0": 0, "z1": 4,
+                   "m2": 24.0, "piso": "#8a6a42", "parede": "#a8aaac"}],
+        "caixas": [{"p": [1, 0, 1, 2, 0.8, 3], "m": "estofado", "cor": "#7a687e"}],
+        "pontos": [{"nome": "Sala - centro", "x": 3.0, "z": 2.0}],
+        "janelas": [],
+    }
+
+    def setUp(self):
+        self.dona = self.conta("dona-maquete")
+        self.iid = self.imovel(self.dona, "Imóvel com geometria")
+        self.sem = self.imovel(self.dona, "Imóvel de fotos")
+        with io.open(aplicacao.arq_maquete(self.iid), "w", encoding="utf-8") as f:
+            json.dump(self.GEOMETRIA, f, ensure_ascii=False)
+
+    def test_a_geometria_chega_pela_api(self):
+        r = self.dona.get("/api/imoveis/%s/maquete" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        m = r.get_json()["maquete"]
+        self.assertEqual(len(m["zonas"]), 1)
+        self.assertEqual(m["pontos"][0]["nome"], "Sala - centro")
+
+    def test_imovel_de_fotos_responde_que_nao_tem(self):
+        """
+        404 com recado, e nao uma maquete vazia: tela 3D em branco faria o
+        corretor achar que quebrou, quando na verdade nunca houve geometria.
+        """
+        r = self.dona.get("/api/imoveis/%s/maquete" % self.sem)
+        self.assertEqual(r.status_code, 404)
+        self.assertIn("geometria", r.get_json()["erro"])
+
+    def test_a_maquete_e_publica_como_o_tour(self):
+        """Quem recebe o link do imóvel precisa abrir sem conta."""
+        visitante = aplicacao.app.test_client()
+        self.assertEqual(
+            visitante.get("/api/imoveis/%s/maquete" % self.iid).status_code, 200)
+        self.assertEqual(visitante.get("/maquete/%s" % self.iid).status_code, 200)
+
+    def test_sem_geometria_a_pagina_manda_de_volta_ao_tour(self):
+        """Abrir uma maquete que não existe tem de levar a algum lugar útil."""
+        r = aplicacao.app.test_client().get("/maquete/%s" % self.sem)
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/tour/%s" % self.sem, r.headers["Location"])
+
+    def test_o_titulo_do_imovel_manda_no_da_geometria(self):
+        """
+        O corretor renomeia o imóvel no painel; a geometria foi gravada uma vez.
+        Quem tem a última palavra é o painel, senão a maquete mostra um nome que
+        já não existe em lugar nenhum.
+        """
+        tour = self.dona.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        tour["titulo"] = "Apartamento renomeado"
+        self.dona.put("/api/imoveis/%s/tour" % self.iid, json=tour)
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertEqual(m["titulo"], "Apartamento renomeado")
+
+    def test_o_botao_so_aparece_quando_ha_geometria(self):
+        """
+        O botão pergunta ao servidor em vez de aparecer sempre: num imóvel de
+        fotos ele levaria a uma tela que não tem o que mostrar.
+        """
+        for pagina in ("viewer.html", "admin.html"):
+            html = io.open(os.path.join("static", pagina), encoding="utf-8").read()
+            self.assertIn("verSeTemMaquete", html, pagina)
+            self.assertIn("/maquete", html, pagina)
+
+    def test_a_pagina_da_maquete_nao_some_do_static(self):
+        html = io.open(os.path.join("static", "maquete.html"), encoding="utf-8").read()
+        self.assertIn("URL_MAQUETE", html)
+        self.assertIn("vendor/three.js", html)
+
+
 class TestPlantasSinteticas(unittest.TestCase):
     """
     As plantas que geram o acervo de demonstracao.

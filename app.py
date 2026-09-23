@@ -61,6 +61,22 @@ def arq_tour(imovel_id):
     return os.path.join(pasta_imovel(imovel_id), "tour.json")
 
 
+def arq_maquete(imovel_id):
+    """
+    A geometria do imovel, quando existe.
+
+    So imovel SINTETICO tem: dele conhecemos as paredes e os moveis em metros,
+    porque foi assim que ele nasceu. Imovel fotografado nao tem geometria — tem
+    panorama e profundidade, que e outra coisa. Por isso o arquivo e opcional, e
+    a maquete so aparece onde ele existe.
+    """
+    return os.path.join(pasta_imovel(imovel_id), "maquete.json")
+
+
+def tem_maquete(imovel_id):
+    return os.path.exists(arq_maquete(imovel_id))
+
+
 def pasta_cenas(imovel_id=None):
     caminho = os.path.join(pasta_imovel(imovel_id or g.imovel), "scenes")
     os.makedirs(caminho, exist_ok=True)
@@ -222,7 +238,7 @@ ROTAS_PUBLICAS = {
     "visualizador", "andar", "arquivo_cena", "pagina_entrar", "saude",
     "static", "api_entrar", "api_estado_conta",
     "api.api_obter_tour", "api.api_registrar_lead", "api.api_registrar_visita",
-    "api.api_embed",
+    "api.api_embed", "maquete", "api.api_maquete",
 }
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
@@ -863,6 +879,14 @@ def andar(imovel):
     return send_from_directory("static", "andar.html")
 
 
+@app.route("/maquete/<imovel>")
+def maquete(imovel):
+    """A vista 3D do imovel: a mesma geometria do tour, vista por fora."""
+    if not imovel_existe(imovel) or not tem_maquete(imovel):
+        return redirect("/tour/" + imovel if imovel_existe(imovel) else "/imoveis")
+    return _com_previa("maquete.html", imovel)
+
+
 @app.route("/data/<imovel>/scenes/<path:nome>")
 def arquivo_cena(imovel, nome):
     if not imovel_existe(imovel):
@@ -1103,6 +1127,25 @@ def api_obter_tour():
     for campo in ("leads_capturados", "visitas"):
         tour.pop(campo, None)
     return jsonify(tour)
+
+
+@api.route("/maquete", methods=["GET"])
+def api_maquete():
+    """
+    Devolve a geometria. Publica, como o tour: quem abre o link do imovel ve a
+    maquete sem precisar de conta.
+    """
+    caminho = arq_maquete(g.imovel)
+    if not os.path.exists(caminho):     # imovel de fotos nao tem geometria
+        return jsonify({"ok": False, "erro":
+                        "Este imóvel não tem geometria: a maquete só existe "
+                        "para ambiente gerado, não para foto."}), 404
+    with open(caminho, "r", encoding="utf-8") as f:
+        dados = json.load(f)
+    tour = carregar_tour()
+    dados["titulo"] = tour.get("titulo") or dados.get("nome", "")
+    dados["descricao"] = tour.get("descricao") or dados.get("descricao", "")
+    return jsonify({"ok": True, "maquete": dados})
 
 
 @api.route("/tour", methods=["PUT"])
