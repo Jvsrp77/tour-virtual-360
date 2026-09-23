@@ -200,6 +200,18 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # agendado com console, o vigia morre no CTRL_CLOSE_EVENT: 0xC000013A
+    ("vigia agendado com console", "servico.py",
+     '    candidato = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")',
+     "    candidato = sys.executable",
+     "TestVigiaSemConsole.test_agenda_com_interpretador_sem_console"),
+
+    # sob pythonw o sys.stdout e None: o flush estoura e o site nem atende
+    ("servidor esvazia sem protecao", "servidor.py",
+     "    except (AttributeError, ValueError, OSError):",
+     "    except OSError:",
+     "TestVigiaSemConsole.test_o_servidor_sobe_sem_console"),
+
     # prometer maquete onde nao ha geometria e vender o que nao existe
     ("maquete finge existir sem geometria", "app.py",
      "    if not os.path.exists(caminho):     # imovel de fotos nao tem geometria",

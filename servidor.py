@@ -49,6 +49,21 @@ def _backup_periodico(horas):
         time.sleep(horas * 3600)
 
 
+def despejar():
+    """
+    Esvazia o cabecalho de subida, sem exigir que haja console.
+
+    Rodando sob pythonw — que e como o vigia agenda o servico, justamente para
+    nao morrer com CTRL_CLOSE_EVENT — o sys.stdout pode ser None. `print` nesse
+    caso nao faz nada e passa liso; `sys.stdout.flush()` levanta AttributeError
+    e o site nem comeca a atender. Medido: o print nao estoura, o flush estoura.
+    """
+    try:
+        sys.stdout.flush()
+    except (AttributeError, ValueError, OSError):
+        pass
+
+
 def main():
     porta = int(os.environ.get("TOUR_PORTA", "8000"))
     endereco = os.environ.get("TOUR_ENDERECO", "0.0.0.0")
@@ -76,7 +91,7 @@ def main():
         print("  backup automatico DESLIGADO (TOUR_BACKUP_HORAS=0)")
 
     print("")
-    sys.stdout.flush()
+    despejar()
 
     serve(aplicacao.app, host=endereco, port=porta, threads=threads,
           # uma costura pode levar minutos; o padrao de 120s derrubaria o envio

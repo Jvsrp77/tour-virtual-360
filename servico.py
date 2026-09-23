@@ -49,6 +49,10 @@ TOLERANCIA_TRAVADO = 3   # checagens de saude falhas seguidas antes de derrubar
 
 def anotar(texto):
     linha = "%s  %s" % (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), texto)
+    # Sem console (pythonw) o sys.stdout e None — e ai o print simplesmente NAO
+    # FAZ NADA, medido: ele nao estoura. Quem estoura e mexer no stdout direto,
+    # tipo sys.stdout.flush(). Por isso aqui nao ha guarda: ela nao protegeria
+    # de nada, e guarda decorativa engana quem le.
     print(linha, flush=True)
     try:
         with open(REGISTRO, "a", encoding="utf-8") as f:
@@ -70,7 +74,15 @@ def _subir():
     # recarregar do painel se recusa a agir: derrubar um servidor sem vigia
     # deixaria o site fora do ar ate alguem ir la na maquina.
     ambiente = dict(os.environ, TOUR_VIGIADO="1")
-    return subprocess.Popen([sys.executable, COMANDO], cwd=RAIZ, env=ambiente)
+    # Rodando sob pythonw nao ha console, e o servidor.py imprime um cabecalho
+    # na subida: sem destino, o print estouraria e o site nem comecaria. A saida
+    # vai para arquivo, que de quebra guarda o traceback de uma queda.
+    try:
+        saida = open(os.path.join(RAIZ, "servidor.log"), "a", encoding="utf-8")
+    except OSError:
+        saida = subprocess.DEVNULL
+    return subprocess.Popen([sys.executable, COMANDO], cwd=RAIZ, env=ambiente,
+                            stdout=saida, stderr=subprocess.STDOUT)
 
 
 def vigiar(limite_de_quedas=None):
@@ -124,6 +136,22 @@ def _schtasks(args):
                           errors="ignore")
 
 
+def interpretador_sem_console():
+    """
+    pythonw.exe quando existir, senao o python normal.
+
+    Isto e o que faz o vigia SOBREVIVER. Agendado com python.exe, ele ganha um
+    console; quando esse console fecha, o Windows manda CTRL_CLOSE_EVENT e o
+    processo morre. Medido aqui: a tarefa terminou tres vezes com 0xC000013A,
+    que e exatamente esse encerramento. pythonw nao tem console, entao nao ha
+    evento de console para mata-lo.
+    """
+    if os.name != "nt":
+        return sys.executable
+    candidato = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+    return candidato if os.path.exists(candidato) else sys.executable
+
+
 def instalar(modo_servidor=False):
     """
     modo_servidor=False  sobe quando ALGUEM entra no Windows (micro de mesa)
@@ -137,7 +165,8 @@ def instalar(modo_servidor=False):
     if os.name != "nt":
         print("  o agendamento automático só vale no Windows.")
         return 1
-    alvo = '"%s" "%s"' % (sys.executable, os.path.join(RAIZ, "servico.py"))
+    alvo = '"%s" "%s"' % (interpretador_sem_console(),
+                          os.path.join(RAIZ, "servico.py"))
     if modo_servidor:
         args = ["/Create", "/TN", TAREFA, "/TR", alvo, "/SC", "ONSTART",
                 "/RU", "SYSTEM", "/RL", "HIGHEST", "/F"]

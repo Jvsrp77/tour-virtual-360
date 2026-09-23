@@ -37,6 +37,7 @@ os.makedirs(os.environ["TOUR_DADOS"], exist_ok=True)
 
 import app as aplicacao           # noqa: E402
 import servico                    # noqa: E402
+import servidor                   # noqa: E402
 import aviso                      # noqa: E402
 import numpy as np                # noqa: E402
 import plantas                    # noqa: E402
@@ -1396,6 +1397,75 @@ class TestFreioDeForcaBruta(Base):
         r = cliente.post("/api/entrar",
                          json={"usuario": "freio", "senha": "senha-boa-123"})
         self.assertEqual(r.status_code, 200, "a trava ficou presa para sempre")
+
+
+class TestVigiaSemConsole(Base):
+    """
+    O vigia precisa sobreviver ao console fechar.
+
+    Custou tres mortes seguidas para achar: a tarefa agendada terminava sempre
+    com 0xC000013A, que no Windows e encerramento por EVENTO DE CONSOLE. Ela
+    rodava python.exe, que e aplicativo de console; quando o console associado
+    fecha, o Windows manda CTRL_CLOSE_EVENT e leva o processo junto. Servico que
+    morre com Ctrl+C nao e servico.
+
+    As tres pontas do conserto estao aqui: agendar sem console, nao depender de
+    stdout, e dar destino a saida do filho.
+    """
+
+    def test_agenda_com_interpretador_sem_console(self):
+        escolhido = servico.interpretador_sem_console()
+        if os.name != "nt":
+            self.skipTest("só vale no Windows")
+        if not os.path.exists(os.path.join(os.path.dirname(sys.executable),
+                                           "pythonw.exe")):
+            self.skipTest("este Python não traz pythonw.exe")
+        self.assertTrue(escolhido.endswith("pythonw.exe"),
+                        "agendou com console: morre no CTRL_CLOSE_EVENT")
+
+    def test_sem_pythonw_ainda_devolve_um_interpretador(self):
+        """Python sem pythonw existe; o vigia não pode ficar sem como subir."""
+        self.assertTrue(os.path.basename(servico.interpretador_sem_console())
+                        .lower().startswith("python"))
+
+    def test_o_servidor_sobe_sem_console(self):
+        """
+        Aqui está o risco de verdade, e a mutação provou onde ele NÃO estava:
+        eu tinha posto uma guarda no anotar() achando que print estouraria sem
+        console. Medido: print com sys.stdout None não faz nada e passa liso —
+        a guarda era decorativa, e a mutação passou batida por isso.
+
+        Quem estoura é mexer no stdout direto. O servidor.py esvazia o cabeçalho
+        de subida com sys.stdout.flush(), e sob pythonw isso levanta
+        AttributeError antes de o site começar a atender.
+        """
+        antes = sys.stdout
+        try:
+            sys.stdout = None
+            servidor.despejar()
+        finally:
+            sys.stdout = antes
+
+    def test_anotar_grava_no_arquivo_sem_console(self):
+        """O log em arquivo é o que sobra quando não há tela para onde escrever."""
+        antes = sys.stdout
+        try:
+            sys.stdout = None
+            servico.anotar("linha de teste sem console")
+        finally:
+            sys.stdout = antes
+        with io.open(servico.REGISTRO, encoding="utf-8") as f:
+            self.assertIn("linha de teste sem console", f.read())
+
+    def test_a_saida_do_filho_tem_destino(self):
+        """
+        O servidor.py imprime um cabeçalho ao subir. Sob pythonw, sem destino,
+        esse print estoura e o site nem começa.
+        """
+        fonte = io.open("servico.py", encoding="utf-8").read()
+        corpo = fonte.split("def _subir()")[1].split("\ndef ")[0]
+        self.assertIn("stdout=", corpo, "o filho nasce sem destino para a saída")
+        self.assertIn("stderr=", corpo)
 
 
 class TestCodigoNoAr(unittest.TestCase):
