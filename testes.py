@@ -24,6 +24,7 @@ import threading
 import time
 import unittest
 import warnings
+import zipfile
 
 # o cliente de teste do Flask deixa o arquivo estatico aberto ate o coletor
 # passar; o aviso nao indica defeito e so atrapalha a leitura da saida
@@ -39,6 +40,7 @@ import app as aplicacao           # noqa: E402
 import servico                    # noqa: E402
 import servidor                   # noqa: E402
 import aviso                      # noqa: E402
+import maquete3d                  # noqa: E402
 import numpy as np                # noqa: E402
 import plantas                    # noqa: E402
 import cena_apartamento           # noqa: E402
@@ -1067,6 +1069,120 @@ class TestLinkDireitoParaCena(Base):
         pedaco = corpo[:corpo.index("pannellum.viewer")]
         self.assertIn("existe(", pedaco, "usa a cena pedida sem conferir se existe")
         self.assertIn("cena_inicial", pedaco, "não tem para onde cair")
+
+
+class TestExportarObj(Base):
+    """
+    A maquete baixada como OBJ + MTL, para abrir no SketchUp ou no Blender.
+
+    O que pode sair errado num OBJ nao aparece lendo o codigo: indice de
+    vertice fora da faixa, material usado e nunca declarado, modelo em escala
+    errada. Nenhum desses quebra o gerador — quebram o arquivo, e so se
+    descobre quando alguem tenta abrir. Entao o arquivo gerado e LIDO de volta
+    e conferido aqui.
+    """
+
+    GEO = {
+        "nome": "Casa de teste", "titulo": "Casa de teste", "larg": 6.0,
+        "fundo": 4.0, "pe": 2.7,
+        "zonas": [{"nome": "Sala", "x0": 0, "x1": 6, "z0": 0, "z1": 4,
+                   "m2": 24.0, "piso": "#8a6a42", "parede": "#a8aaac"}],
+        "caixas": [{"p": [1, 0, 1, 2, 0.8, 3], "m": "estofado", "cor": "#7a687e"},
+                   {"p": [3, 0, 0, 3.12, 2.7, 4], "m": "parede", "cor": "#b0aea8"}],
+        "pontos": [{"nome": "Sala - centro", "x": 3.0, "z": 2.0}],
+        "janelas": [],
+    }
+
+    def setUp(self):
+        self.dona = self.conta("dona-obj")
+        self.iid = self.imovel(self.dona, "Com geometria")
+        with io.open(aplicacao.arq_maquete(self.iid), "w", encoding="utf-8") as f:
+            json.dump(self.GEO, f, ensure_ascii=False)
+
+    def _ler(self, obj):
+        verts, faces, usados = [], [], set()
+        for linha in obj.split("\n"):
+            if linha.startswith("v "):
+                verts.append([float(v) for v in linha.split()[1:]])
+            elif linha.startswith("f "):
+                faces.append([int(p.split("//")[0]) for p in linha.split()[1:]])
+            elif linha.startswith("usemtl "):
+                usados.add(linha.split()[1])
+        return verts, faces, usados
+
+    def test_nenhuma_face_aponta_para_vertice_que_nao_existe(self):
+        """
+        Índice fora da faixa é o defeito clássico de gerador de OBJ, porque a
+        numeração é global e começa em 1. O arquivo abre e some geometria, ou
+        o programa recusa inteiro.
+        """
+        obj, _ = maquete3d.para_obj(self.GEO)
+        verts, faces, _ = self._ler(obj)
+        self.assertTrue(faces)
+        for f in faces:
+            for i in f:
+                self.assertTrue(1 <= i <= len(verts),
+                                "índice %d fora de 1..%d" % (i, len(verts)))
+
+    def test_todo_material_usado_esta_declarado(self):
+        """Material sem declaração abre cinza, e o modelo perde a leitura."""
+        obj, mtl = maquete3d.para_obj(self.GEO)
+        _, _, usados = self._ler(obj)
+        declarados = {l.split()[1] for l in mtl.split("\n")
+                      if l.startswith("newmtl ")}
+        self.assertTrue(usados)
+        self.assertEqual(usados - declarados, set())
+
+    def test_o_modelo_sai_na_escala_do_imovel(self):
+        """
+        Escala errada é o erro que mais custa: o modelo abre, parece certo, e
+        só quem for medir descobre. A envolvente tem de dar o tamanho do imóvel.
+        """
+        obj, _ = maquete3d.para_obj(self.GEO)
+        verts, _, _ = self._ler(obj)
+        larg = max(v[0] for v in verts) - min(v[0] for v in verts)
+        fundo = max(v[2] for v in verts) - min(v[2] for v in verts)
+        self.assertAlmostEqual(larg, self.GEO["larg"], places=2)
+        self.assertAlmostEqual(fundo, self.GEO["fundo"], places=2)
+
+    def test_a_fachada_existe_no_arquivo(self):
+        """
+        As paredes externas não estão na lista de caixas — no traçador elas são
+        a casca do imóvel. Sem recriá-las aqui, o modelo abre sem fachada.
+        """
+        obj, _ = maquete3d.para_obj(self.GEO)
+        self.assertIn("casca_frente", obj)
+        self.assertIn("casca_fundo", obj)
+
+    def test_o_zip_leva_obj_e_mtl_juntos(self):
+        """Separados, o modelo abre todo cinza. É do formato, não escolha."""
+        memoria, nome = maquete3d.zipar(self.GEO)
+        with zipfile.ZipFile(memoria) as z:
+            nomes = z.namelist()
+        self.assertTrue(any(n.endswith(".obj") for n in nomes), nomes)
+        self.assertTrue(any(n.endswith(".mtl") for n in nomes), nomes)
+        self.assertTrue(nome.endswith(".zip"))
+
+    def test_a_dona_baixa(self):
+        r = self.dona.get("/api/imoveis/%s/maquete/obj" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("zip", r.headers["Content-Type"])
+
+    def test_visitante_ve_a_maquete_mas_nao_leva_o_modelo(self):
+        """
+        Ver o imóvel ajuda a vender; levar a geometria editável embora é outra
+        coisa, e quem decide é a dona.
+        """
+        visitante = aplicacao.app.test_client()
+        self.assertEqual(
+            visitante.get("/api/imoveis/%s/maquete" % self.iid).status_code, 200)
+        self.assertEqual(
+            visitante.get("/api/imoveis/%s/maquete/obj" % self.iid).status_code, 401)
+
+    def test_imovel_de_fotos_nao_tem_o_que_exportar(self):
+        outro = self.imovel(self.dona, "Só fotos")
+        r = self.dona.get("/api/imoveis/%s/maquete/obj" % outro)
+        self.assertEqual(r.status_code, 404)
 
 
 class TestPrimeiraPessoa(unittest.TestCase):

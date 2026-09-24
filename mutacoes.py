@@ -200,6 +200,24 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # indice de vertice fora da faixa e o defeito classico de gerador de OBJ
+    ("obj numera vertice a partir do zero", "maquete3d.py",
+     '                "%d//%d" % (base_v + c + 1, k + 1) for c in cantos))',
+     '                "%d//%d" % (base_v + c, k + 1) for c in cantos))',
+     "TestExportarObj.test_nenhuma_face_aponta_para_vertice_que_nao_existe"),
+
+    # sem a casca recriada, o modelo abre sem fachada
+    ("obj sai sem as paredes externas", "maquete3d.py",
+     "    pecas += _caixas_da_casca(geo)",
+     "    pecas += []",
+     "TestExportarObj.test_a_fachada_existe_no_arquivo"),
+
+    # levar a geometria editavel embora e decisao da dona, nao do visitante
+    ("visitante baixa o modelo editavel", "app.py",
+     '    "api.api_embed", "maquete", "api.api_maquete",',
+     '    "api.api_embed", "maquete", "api.api_maquete", "api.api_maquete_obj",',
+     "TestExportarObj.test_visitante_ve_a_maquete_mas_nao_leva_o_modelo"),
+
     # colisao que nunca barra deixa atravessar o imovel inteiro
     ("primeira pessoa atravessa parede", "static/maquete.html",
      "      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",

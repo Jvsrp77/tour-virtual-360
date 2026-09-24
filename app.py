@@ -33,6 +33,7 @@ import cena_demo
 import profundidade
 import tarefas
 import aviso
+import maquete3d
 import area
 import fundo
 import usuarios
@@ -1154,6 +1155,27 @@ def api_maquete():
     for ponto in dados.get("pontos", []):
         ponto["cena_id"] = por_nome.get(ponto.get("nome"))
     return jsonify({"ok": True, "maquete": dados})
+
+
+@api.route("/maquete/obj", methods=["GET"])
+def api_maquete_obj():
+    """
+    Baixa a geometria como OBJ + MTL, para abrir no SketchUp ou no Blender.
+
+    Ao contrario de ver a maquete, isto NAO e publico. Ver o imovel e o que
+    ajuda a vender; levar embora o modelo editavel e outra coisa, e quem decide
+    e a dona do imovel. Visitante continua podendo olhar, girar e medir.
+    """
+    caminho = arq_maquete(g.imovel)
+    if not os.path.exists(caminho):
+        return jsonify({"ok": False, "erro":
+                        "Este imóvel não tem geometria para exportar."}), 404
+    with open(caminho, "r", encoding="utf-8") as f:
+        geo = json.load(f)
+    geo["titulo"] = carregar_tour().get("titulo") or geo.get("nome", "maquete")
+    memoria, nome = maquete3d.zipar(geo)
+    return send_file(memoria, mimetype="application/zip", as_attachment=True,
+                     download_name=nome)
 
 
 @api.route("/tour", methods=["PUT"])

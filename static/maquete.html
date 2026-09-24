@@ -190,6 +190,13 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         </div>
       </div>
 
+      <div class="cartao" id="cartaoExportar" hidden>
+        <p class="rotulo">Modelo 3D</p>
+        <a class="bt" id="btObj" style="width:100%;text-align:center">Baixar OBJ</a>
+        <p class="nota" style="margin-top:9px">Geometria em metros, para abrir no
+        SketchUp, Blender ou AutoCAD. Vem com as cores num arquivo .mtl ao lado.</p>
+      </div>
+
       <div class="cartao">
         <p class="rotulo">Visita</p>
         <button class="bt" id="btPessoa" style="width:100%">Entrar no imóvel</button>
@@ -872,6 +879,21 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   }
 
   document.getElementById("btTour").href = URL_TOUR_PG;
+
+  // Baixar o modelo editavel nao e para o visitante: ver o imovel ajuda a
+  // vender, levar a geometria embora e outra coisa. O botao so aparece para
+  // quem e dona — /api/imoveis exige sessao e so devolve os proprios imoveis.
+  (async function mostrarExportarSeDona(){
+    try{
+      const r = await fetch("/api/imoveis", {credentials: "same-origin"});
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!(j.imoveis || []).some(i => i.id === IMOVEL)) return;
+      document.getElementById("btObj").href =
+        "/api/imoveis/" + IMOVEL + "/maquete/obj";
+      document.getElementById("cartaoExportar").hidden = false;
+    }catch(e){ /* sem sessao ou sem servidor: fica escondido */ }
+  })();
   fetch(URL_MAQUETE).then(r => r.json()).then(j => {
     const dados = j.maquete || j;
     if (!dados || !dados.zonas) throw new Error("sem geometria");
