@@ -160,6 +160,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       <div class="selo canto"><b id="seloNome">—</b> · pé-direito <b>2,70 m</b></div>
       <div class="escala canto"><span class="regua" id="regua"></span><span id="reguaTxt">2 m</span></div>
       <div class="dica canto">arraste para girar · role para aproximar</div>
+      <div class="selo canto" id="ondeEstou" hidden
+           style="left:auto;right:13px;top:12px"></div>
     </section>
 
     <aside class="lado">
@@ -186,6 +188,13 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           <label class="chave"><input type="checkbox" id="chRotulos" checked> Nomes dos cômodos</label>
           <label class="chave"><input type="checkbox" id="chPlanta"> Planta baixa (vista de cima)</label>
         </div>
+      </div>
+
+      <div class="cartao">
+        <p class="rotulo">Visita</p>
+        <button class="bt" id="btPessoa" style="width:100%">Entrar no imóvel</button>
+        <p class="nota" id="dicaPessoa" style="margin-top:9px">Entra na altura dos
+        olhos (1,50 m), a mesma da câmera do tour.</p>
       </div>
 
       <div class="cartao">
@@ -234,6 +243,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let imoveis = [], atual = 0, selecionado = null, paredes = [], pisos = [];
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
   let cameraOrto = null, emPlanta = false;
+  let emPessoa = false, corteAntes = null, solidos = [], teclas = {};
+  const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0};
 
   // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
   // vertical e distancia — guardados aqui porque o usuario mexe nos tres e a
@@ -343,7 +354,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     grupoMoveis = new THREE.Group();
     grupoPontos = new THREE.Group();
     grupoRotulos = new THREE.Group();
-    paredes = []; pisos = []; pinos = []; selecionado = null;
+    paredes = []; pisos = []; pinos = []; solidos = []; selecionado = null;
     limparTrena();
 
     const L = imovel.larg, F = imovel.fundo, PE = imovel.pe;
@@ -380,6 +391,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         grupoObra.add(m);
       } else {
         grupoMoveis.add(m);
+      }
+      // o que barra o corpo a 1,50 m: parede e movel alto. Tapete e mesa baixa
+      // nao entram — atravessar um tapete nao incomoda ninguem.
+      if (eParede || p[4] - p[1] > 0.35){
+        solidos.push({x0: p[0] + cx, x1: p[3] + cx, z0: p[2] + cz, z1: p[5] + cz});
       }
     });
 
@@ -476,8 +492,17 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       }
       if (!arrastando) return;
       const t = pegar(e);
-      orbita.giro -= (t.clientX - ux) * 0.006;
-      orbita.altura = Math.min(1.5, Math.max(0.12, orbita.altura - (t.clientY - uy) * 0.005));
+      if (emPessoa){
+        // de dentro o arraste vira a cabeca; a inclinacao para antes do teto e
+        // do chao, senao a vista capota
+        pessoa.giro -= (t.clientX - ux) * 0.005;
+        pessoa.inclinacao = Math.max(-1.2, Math.min(1.2,
+          pessoa.inclinacao - (t.clientY - uy) * 0.004));
+      } else {
+        orbita.giro -= (t.clientX - ux) * 0.006;
+        orbita.altura = Math.min(1.5, Math.max(0.12,
+          orbita.altura - (t.clientY - uy) * 0.005));
+      }
       ux = t.clientX; uy = t.clientY;
       if (e.touches) e.preventDefault();
     };
@@ -531,6 +556,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       emPlanta = $("chPlanta").checked;
       ocioso = false;
       redimensionar();
+    });
+    addEventListener("keydown", e => {
+      teclas[e.key.toLowerCase()] = true;
+      if (e.key === "Escape" && emPessoa) sairDePessoa();
+      // as setas rolariam a pagina enquanto se anda
+      if (emPessoa && e.key.startsWith("Arrow")) e.preventDefault();
+    });
+    addEventListener("keyup", e => { teclas[e.key.toLowerCase()] = false; });
+    $("btPessoa").addEventListener("click", () => {
+      if (emPessoa) sairDePessoa(); else entrarEmPessoa();
     });
     $("btTrena").addEventListener("click", () => {
       if (medindo || medidas.length) { limparTrena(); return; }
@@ -587,7 +622,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   // -------------------------------------------------------------- camera
 
-  function camAtiva(){ return emPlanta && cameraOrto ? cameraOrto : camera; }
+  function camAtiva(){
+    if (emPessoa) return camera;
+    return emPlanta && cameraOrto ? cameraOrto : camera;
+  }
 
   const separacao = t => Math.hypot(
     t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -598,8 +636,24 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     orbita.raio = Math.min(maximo, Math.max(minimo, orbita.raio + passo));
   }
 
-  function desenhar(){
+  let ultimoQuadro = 0;
+
+  function desenhar(agora){
     requestAnimationFrame(desenhar);
+    const dt = Math.min(0.05, (agora - ultimoQuadro) / 1000 || 0);
+    ultimoQuadro = agora;
+
+    if (emPessoa){
+      andar(dt);
+      camera.position.copy(pessoa.pos);
+      camera.rotation.set(0, 0, 0);
+      camera.rotateY(pessoa.giro);
+      camera.rotateX(pessoa.inclinacao);
+      atualizarRegua();
+      renderizador.render(cena, camera);
+      return;
+    }
+
     if (ocioso) orbita.giro += 0.0016;
     const r = orbita.raio, a = orbita.altura;
     camera.position.set(
@@ -620,6 +674,130 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const px = (metros / alturaVisivel) * (tela.clientHeight || 1);
     $("regua").style.width = Math.max(18, Math.min(150, px)) + "px";
     $("reguaTxt").textContent = metros + " m";
+  }
+
+  // ------------------------------------------------------- primeira pessoa
+  //
+  // A mesma altura de olho do tour (1,50 m, o ALTURA_CAMERA do andar.html), para
+  // que o que se ve aqui seja o que a camera da cena 360 viu. Entrar aqui nao e
+  // so mudar a camera: de dentro, parede cortada deixaria ver o comodo vizinho,
+  // entao as paredes voltam a altura cheia enquanto durar a visita.
+
+  const OLHO = 1.50;            // igual ao ALTURA_CAMERA do andar.html
+  const RAIO_CORPO = 0.28;      // meia largura de ombro: impede atravessar quina
+  const PASSO = 2.4;            // metros por segundo, ritmo de quem anda vendo
+
+  function alturaDeParede(){ return $("corte").value / 100; }
+
+  // De onde a visita comeca.
+  //
+  // Nao serve pegar o primeiro ponto de captura e pronto: medido, no
+  // apartamento compacto o ponto "junto ao sofa" fica EM CIMA da mesa de
+  // centro. Para a foto isso e normal — a camera a 1,50 m olha por cima de uma
+  // mesa de 42 cm. Para ANDAR nao da: nasceria dentro dela. Entao escolhe-se o
+  // primeiro ponto onde caiba um corpo, e se nenhum couber, o centro do maior
+  // comodo.
+  function pontoDeEntrada(im){
+    for (const p of im.pontos){
+      const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
+      if (livre(x, z)) return {x: x, z: z};
+    }
+    const maior = im.zonas.slice().sort((a, b) => b.m2 - a.m2)[0];
+    if (maior){
+      const x = (maior.x0 + maior.x1) / 2 - im.larg / 2;
+      const z = (maior.z0 + maior.z1) / 2 - im.fundo / 2;
+      if (livre(x, z)) return {x: x, z: z};
+      // ainda ocupado: varre o comodo em passos de 25 cm
+      for (let px = maior.x0 + 0.4; px < maior.x1 - 0.4; px += 0.25){
+        for (let pz = maior.z0 + 0.4; pz < maior.z1 - 0.4; pz += 0.25){
+          const cx = px - im.larg / 2, cz = pz - im.fundo / 2;
+          if (livre(cx, cz)) return {x: cx, z: cz};
+        }
+      }
+    }
+    return null;
+  }
+
+  function entrarEmPessoa(){
+    const im = imoveis[atual];
+    if (!im || !im.pontos.length) return;
+    const p = pontoDeEntrada(im);
+    if (!p){
+      avisarTrena("Não achei lugar livre para entrar neste imóvel.");
+      return;
+    }
+    pessoa.pos.set(p.x, OLHO, p.z);
+    pessoa.giro = 0;
+    pessoa.inclinacao = 0;
+    emPessoa = true;
+    ocioso = false;
+    corteAntes = $("corte").value;
+    $("corte").value = 270;          // de dentro, parede cortada vaza o vizinho
+    aplicarCorte();
+    $("corte").disabled = true;
+    $("chPlanta").disabled = true;
+    grupoRotulos.visible = false;
+    atualizarPessoa();
+  }
+
+  function sairDePessoa(){
+    emPessoa = false;
+    $("corte").disabled = false;
+    $("chPlanta").disabled = false;
+    if (corteAntes !== null){ $("corte").value = corteAntes; corteAntes = null; }
+    aplicarCorte();
+    aplicarChaves();
+    atualizarPessoa();
+  }
+
+  function atualizarPessoa(){
+    const bt = $("btPessoa");
+    if (bt) bt.textContent = emPessoa ? "Sair (ver de fora)" : "Entrar no imóvel";
+    const dica = $("dicaPessoa");
+    if (dica) dica.textContent = emPessoa
+      ? "W A S D ou setas para andar · arraste para olhar · Esc sai"
+      : "Entra na altura dos olhos (1,50 m), a mesma da câmera do tour.";
+    const onde = $("ondeEstou");
+    if (onde) onde.hidden = !emPessoa;
+  }
+
+  // Colisao: as caixas do imovel viram retangulos no plano, e o corpo e um
+  // circulo. Testa-se um eixo de cada vez — assim, ao esbarrar na parede de
+  // lado, ainda se desliza ao longo dela em vez de travar.
+  function livre(x, z){
+    for (const b of solidos){
+      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO
+          && z > b.z0 - RAIO_CORPO && z < b.z1 + RAIO_CORPO) return false;
+    }
+    const im = imoveis[atual];
+    const meiaL = im.larg / 2 - 0.2, meiaF = im.fundo / 2 - 0.2;
+    return x > -meiaL && x < meiaL && z > -meiaF && z < meiaF;
+  }
+
+  function andar(dt){
+    let frente = 0, lado = 0;
+    if (teclas["w"] || teclas["arrowup"]) frente += 1;
+    if (teclas["s"] || teclas["arrowdown"]) frente -= 1;
+    if (teclas["d"] || teclas["arrowright"]) lado += 1;
+    if (teclas["a"] || teclas["arrowleft"]) lado -= 1;
+    if (!frente && !lado) return;
+
+    const d = PASSO * dt;
+    const sen = Math.sin(pessoa.giro), cos = Math.cos(pessoa.giro);
+    const dx = (sen * frente + cos * lado) * d;
+    const dz = (cos * frente - sen * lado) * d;
+
+    if (livre(pessoa.pos.x + dx, pessoa.pos.z)) pessoa.pos.x += dx;
+    if (livre(pessoa.pos.x, pessoa.pos.z + dz)) pessoa.pos.z += dz;
+    mostrarOnde();
+  }
+
+  function mostrarOnde(){
+    const im = imoveis[atual];
+    const x = pessoa.pos.x + im.larg / 2, z = pessoa.pos.z + im.fundo / 2;
+    const zona = im.zonas.find(q => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1);
+    const onde = $("ondeEstou");
+    if (onde) onde.textContent = zona ? zona.nome : "passagem";
   }
 
   // ----------------------------------------------------------------- ficha
@@ -683,6 +861,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     [...document.querySelectorAll(".comodo")].forEach(b =>
       b.addEventListener("click", () => selecionar(b.dataset.nome)));
 
+    if (emPessoa) sairDePessoa();
     ocioso = girarSozinho;
     mostrarCotas();
   }

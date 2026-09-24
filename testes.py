@@ -1069,6 +1069,119 @@ class TestLinkDireitoParaCena(Base):
         self.assertIn("cena_inicial", pedaco, "não tem para onde cair")
 
 
+class TestPrimeiraPessoa(unittest.TestCase):
+    """
+    Andar dentro da maquete, na altura dos olhos.
+
+    O que pode dar errado aqui nao aparece em revisao de codigo: atravessar
+    parede, nascer dentro de um movel, sair do imovel pelo fundo. Entao a
+    funcao de colisao e EXTRAIDA da pagina e exercitada no Node contra a
+    geometria real dos tres imoveis.
+
+    (O olho a 1,50 m e o mesmo ALTURA_CAMERA do andar.html de proposito: o que
+    se ve aqui tem de ser o que a camera da cena 360 viu.)
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"), encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _livre(self, planta, pontos):
+        """Roda a `livre` da pagina contra a geometria de uma planta."""
+        corpo = self.html[self.html.index("  function livre(x, z){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        raio = re.search(r"RAIO_CORPO = ([\d.]+)", self.html).group(1)
+
+        solidos, cx, cz = [], -planta["larg"] / 2, -planta["fundo"] / 2
+        for c in planta["caixas"]:
+            if c[6] == "parede" or c[4] - c[1] > 0.35:
+                solidos.append({"x0": c[0] + cx, "x1": c[3] + cx,
+                                "z0": c[2] + cz, "z1": c[5] + cz})
+        programa = ("const RAIO_CORPO = " + raio + ";\n"
+                    "const solidos = " + json.dumps(solidos) + ";\n"
+                    "const atual = 0;\n"
+                    "const imoveis = [" + json.dumps(
+                        {"larg": planta["larg"], "fundo": planta["fundo"]}) + "];\n"
+                    + corpo + "\n"
+                    "console.log(JSON.stringify(" + json.dumps(pontos)
+                    + ".map(p => livre(p[0], p[1]))));\n")
+        caminho = os.path.join(_TEMP, "livre.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def test_a_visita_sempre_comeca_em_lugar_livre(self):
+        """
+        Medido: no apartamento compacto o ponto "junto ao sofá" fica EM CIMA da
+        mesa de centro. Para a foto isso é normal — a câmera a 1,50 m olha por
+        cima de uma mesa de 42 cm. Para ANDAR não dá: nasceria dentro dela.
+
+        Por isso a entrada escolhe o primeiro ponto onde caiba um corpo, e não
+        o primeiro ponto da lista.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        for construir in plantas.TODAS:
+            p = construir()
+            livres = self._livre(p, [[x - p["larg"] / 2, z - p["fundo"] / 2]
+                                     for _, x, z in p["pontos"]])
+            self.assertIn(True, livres,
+                          "%s: nenhum ponto de captura tem espaço para andar"
+                          % p["nome"])
+
+    def test_a_entrada_procura_lugar_livre_em_vez_de_pegar_o_primeiro(self):
+        corpo = self.html[self.html.index("function pontoDeEntrada"):]
+        corpo = corpo[:corpo.index("function entrarEmPessoa")]
+        self.assertIn("livre(", corpo, "não confere se cabe um corpo")
+        entrada = self.html[self.html.index("function entrarEmPessoa"):]
+        entrada = entrada[:entrada.index("function sairDePessoa")]
+        self.assertIn("pontoDeEntrada(im)", entrada)
+        self.assertNotIn("im.pontos[0]", entrada,
+                         "voltou a entrar no primeiro ponto sem conferir")
+
+    def test_a_parede_barra_o_corpo(self):
+        """Colisão que nunca barra nada deixa atravessar o imóvel inteiro."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        p = plantas.apartamento()
+        # o centro de uma parede interna, em coordenadas do mundo
+        parede = next(c for c in p["caixas"] if c[6] == "parede")
+        x = (parede[0] + parede[3]) / 2 - p["larg"] / 2
+        z = (parede[2] + parede[5]) / 2 - p["fundo"] / 2
+        self.assertEqual(self._livre(p, [[x, z]]), [False],
+                         "atravessou a parede")
+
+    def test_nao_se_sai_do_imovel(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        p = plantas.apartamento()
+        fora = [[p["larg"], 0], [-p["larg"], 0], [0, p["fundo"]], [0, -p["fundo"]]]
+        self.assertEqual(self._livre(p, fora), [False] * 4,
+                         "saiu pelas paredes externas")
+
+    def test_de_dentro_as_paredes_ficam_inteiras(self):
+        """
+        Com a parede cortada em 1,10 m, de dentro se enxerga o cômodo vizinho
+        por cima — a visita viraria um raio-X. Entrar devolve a altura cheia.
+        """
+        corpo = self.html[self.html.index("function entrarEmPessoa()"):]
+        corpo = corpo[:corpo.index("function sairDePessoa()")]
+        self.assertIn('$("corte").value = 270', corpo)
+        self.assertIn("aplicarCorte()", corpo)
+
+    def test_o_olho_fica_na_altura_da_camera_do_tour(self):
+        """Se divergir, o que se vê aqui deixa de ser o que a cena 360 viu."""
+        aqui = float(re.search(r"const OLHO = ([\d.]+)", self.html).group(1))
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            la = float(re.search(r"ALTURA_CAMERA = ([\d.]+)", f.read()).group(1))
+        self.assertEqual(aqui, la)
+
+
 class TestPlantasSinteticas(unittest.TestCase):
     """
     As plantas que geram o acervo de demonstracao.

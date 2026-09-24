@@ -200,6 +200,24 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # colisao que nunca barra deixa atravessar o imovel inteiro
+    ("primeira pessoa atravessa parede", "static/maquete.html",
+     "      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",
+     "      if (false && x < b.x1 + RAIO_CORPO",
+     "TestPrimeiraPessoa.test_a_parede_barra_o_corpo"),
+
+    # de dentro, parede cortada deixa ver o comodo vizinho por cima
+    ("visita de dentro com parede cortada", "static/maquete.html",
+     '    $("corte").value = 270;',
+     '    $("corte").value = $("corte").value;',
+     "TestPrimeiraPessoa.test_de_dentro_as_paredes_ficam_inteiras"),
+
+    # olho em altura diferente da do tour: deixa de ser o que a cena 360 viu
+    ("olho em altura diferente do tour", "static/maquete.html",
+     "  const OLHO = 1.50;",
+     "  const OLHO = 1.70;",
+     "TestPrimeiraPessoa.test_o_olho_fica_na_altura_da_camera_do_tour"),
+
     # sem o casamento por nome, o pino da maquete nao abre cena nenhuma
     ("pino da maquete perde a cena", "app.py",
      '        ponto["cena_id"] = por_nome.get(ponto.get("nome"))',
