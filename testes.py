@@ -984,6 +984,91 @@ class TestMaquete(Base):
         self.assertIn("vendor/three.js", html)
 
 
+    def test_cada_ponto_aponta_para_a_cena_tirada_dali(self):
+        """
+        E isto que costura a maquete ao tour: clicar no pino abre o 360 feito
+        naquele lugar. O casamento e pelo nome, que e o mesmo dos dois lados
+        porque a cena nasceu do ponto.
+        """
+        # a rota de cena demo aplica title() no nome, entao renomeia-se para o
+        # nome exato do ponto — que e o que o importador de verdade grava
+        self.dona.post("/api/imoveis/%s/cenas/demo" % self.iid, json={"nome": "x"})
+        tour = self.dona.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        self.dona.put("/api/imoveis/%s/cenas/%s" % (self.iid, tour["cenas"][0]["id"]),
+                      json={"nome": self.GEOMETRIA["pontos"][0]["nome"]})
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        ponto = m["pontos"][0]
+        self.assertIn("cena_id", ponto)
+        self.assertTrue(ponto["cena_id"], "o pino ficou sem cena para abrir")
+
+    def test_cena_renomeada_deixa_o_pino_sem_link(self):
+        """
+        Perder o link e melhor do que levar para a cena ERRADA. Sem cena_id o
+        pino simplesmente nao abre nada, e a pagina diz isso.
+        """
+        self.dona.post("/api/imoveis/%s/cenas/demo" % self.iid, json={"nome": "x"})
+        tour = self.dona.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        cid = tour["cenas"][0]["id"]
+        self.dona.put("/api/imoveis/%s/cenas/%s" % (self.iid, cid),
+                      json={"nome": "Outro nome qualquer"})
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertIsNone(m["pontos"][0]["cena_id"])
+
+    def test_a_planta_baixa_usa_projecao_ortografica(self):
+        """
+        Em perspectiva, parede longe parece menor que parede perto — e planta
+        baixa serve justamente para comparar medidas. Perspectiva mentiria.
+        """
+        html = io.open(os.path.join("static", "maquete.html"), encoding="utf-8").read()
+        self.assertIn("OrthographicCamera", html)
+        self.assertIn("chPlanta", html)
+
+    def test_a_trena_mede_no_plano_do_piso(self):
+        html = io.open(os.path.join("static", "maquete.html"), encoding="utf-8").read()
+        self.assertIn("btTrena", html)
+        self.assertIn("distanceTo", html, "a trena não calcula distância")
+
+    def test_a_ficha_mostra_largura_e_profundidade(self):
+        """
+        Metragem sozinha não diz o formato: 12 m² num corredor de 1,2 m não é o
+        mesmo produto que 12 m² num quarto de 3 x 4.
+        """
+        html = io.open(os.path.join("static", "maquete.html"), encoding="utf-8").read()
+        for campo in ("comodoL", "comodoP", "comodoA", "comodoV"):
+            self.assertIn(campo, html, campo)
+
+
+class TestLinkDireitoParaCena(Base):
+    """
+    /tour/<imovel>?cena=<id> abre direto naquele ambiente.
+
+    Serve para dois usos: mandar "olha a cozinha" para um cliente, e para a
+    maquete — clicar no pino cai na cena tirada dali.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("dona-link")
+        self.iid = self.imovel(self.dona, "Com cenas")
+        self.dona.post("/api/imoveis/%s/cenas/demo" % self.iid, json={"nome": "Sala"})
+        self.dona.post("/api/imoveis/%s/cenas/demo" % self.iid, json={"nome": "Cozinha"})
+
+    def test_o_visor_aceita_a_cena_pedida(self):
+        html = io.open(os.path.join("static", "viewer.html"), encoding="utf-8").read()
+        self.assertIn("URLSearchParams", html)
+        self.assertIn("'cena'", html)
+
+    def test_cena_inexistente_cai_na_inicial_em_vez_de_tela_preta(self):
+        """
+        Link velho, cena apagada: abrir vazio seria pior do que abrir o tour no
+        comeco. A pagina confere se o id existe antes de usar.
+        """
+        html = io.open(os.path.join("static", "viewer.html"), encoding="utf-8").read()
+        corpo = html[html.index("function montarCenas()"):]
+        pedaco = corpo[:corpo.index("pannellum.viewer")]
+        self.assertIn("existe(", pedaco, "usa a cena pedida sem conferir se existe")
+        self.assertIn("cena_inicial", pedaco, "não tem para onde cair")
+
+
 class TestPlantasSinteticas(unittest.TestCase):
     """
     As plantas que geram o acervo de demonstracao.

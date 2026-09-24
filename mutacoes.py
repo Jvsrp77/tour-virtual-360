@@ -200,6 +200,24 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # sem o casamento por nome, o pino da maquete nao abre cena nenhuma
+    ("pino da maquete perde a cena", "app.py",
+     '        ponto["cena_id"] = por_nome.get(ponto.get("nome"))',
+     '        ponto["cena_id"] = None',
+     "TestMaquete.test_cada_ponto_aponta_para_a_cena_tirada_dali"),
+
+    # link velho com cena apagada nao pode abrir tela preta
+    ("visor usa cena pedida sem conferir", "static/viewer.html",
+     "  const inicial = (pedida && existe(pedida))",
+     "  const inicial = (pedida)",
+     "TestLinkDireitoParaCena.test_cena_inexistente_cai_na_inicial_em_vez_de_tela_preta"),
+
+    # perspectiva faz parede longe parecer menor: planta baixa mentiria
+    ("planta baixa em perspectiva", "static/maquete.html",
+     "    if (!cameraOrto) cameraOrto = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);",
+     "    if (!cameraOrto) cameraOrto = new THREE.PerspectiveCamera(42, 1, 0.1, 400);",
+     "TestMaquete.test_a_planta_baixa_usa_projecao_ortografica"),
+
     # o defeito de verdade: titulo com aspas fechava o atributo onclick no meio
     ("excluir volta a passar titulo no onclick", "static/imoveis.html",
      '        <button class="perigo" onclick="remover(\'${i.id}\')">Excluir</button>',

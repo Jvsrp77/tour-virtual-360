@@ -240,7 +240,13 @@ function montarCenas(){
     };
   });
 
-  const inicial = tour.cena_inicial || tour.cenas[0].id;
+  // ?cena=<id> abre direto naquele ambiente. Serve para mandar "olha a
+  // cozinha" e para a maquete: clicar no pino cai na cena tirada dali.
+  const pedida = new URLSearchParams(location.search).get('cena');
+  const existe = id => (tour.cenas || []).some(c => c.id === id);
+  const inicial = (pedida && existe(pedida))
+    ? pedida
+    : (tour.cena_inicial || tour.cenas[0].id);
   visor = pannellum.viewer('pano', {
     default: { firstScene: inicial, sceneFadeDuration: 900, autoLoad: true,
                showFullscreenCtrl: false, showZoomCtrl: true },

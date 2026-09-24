@@ -184,7 +184,27 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           <label class="chave"><input type="checkbox" id="chMoveis" checked> Mobiliário</label>
           <label class="chave"><input type="checkbox" id="chPontos" checked> Pontos de captura</label>
           <label class="chave"><input type="checkbox" id="chRotulos" checked> Nomes dos cômodos</label>
+          <label class="chave"><input type="checkbox" id="chPlanta"> Planta baixa (vista de cima)</label>
         </div>
+      </div>
+
+      <div class="cartao">
+        <p class="rotulo">Trena</p>
+        <button class="bt" id="btTrena" style="width:100%">Medir distância</button>
+        <p class="nota" id="trenaTxt" style="margin-top:9px">Clique em dois pontos
+        do piso para medir entre eles.</p>
+      </div>
+
+      <div class="cartao" id="fichaComodo" hidden>
+        <p class="rotulo">Cômodo selecionado</p>
+        <h1 id="comodoNome" style="font-size:15px"></h1>
+        <dl class="numeros" style="margin-top:11px">
+          <div><dt>Largura</dt><dd id="comodoL">—</dd></div>
+          <div><dt>Profundidade</dt><dd id="comodoP">—</dd></div>
+          <div><dt>Área</dt><dd id="comodoA">—</dd></div>
+          <div><dt>Volume</dt><dd id="comodoV">—</dd></div>
+        </dl>
+        <p class="nota" id="comodoPontos" style="margin-top:10px"></p>
       </div>
 
       <div class="cartao">
@@ -212,6 +232,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   const tela = $("tela");
   let cena, camera, renderizador, grupoObra, grupoMoveis, grupoPontos, grupoRotulos;
   let imoveis = [], atual = 0, selecionado = null, paredes = [], pisos = [];
+  let pinos = [], medindo = false, medidas = [], grupoTrena = null;
+  let cameraOrto = null, emPlanta = false;
 
   // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
   // vertical e distancia — guardados aqui porque o usuario mexe nos tres e a
@@ -245,6 +267,22 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     renderizador.setSize(l, a, false);
     camera.aspect = l / a;
     camera.updateProjectionMatrix();
+
+    // Planta baixa de verdade pede projecao ORTOGRAFICA. Em perspectiva, uma
+    // parede longe parece menor que uma parede perto — e planta baixa serve
+    // justamente para comparar medidas, entao a perspectiva mentiria.
+    const im = imoveis[atual];
+    if (!im) return;
+    const meia = Math.max(im.larg, im.fundo) * 0.58;
+    const k = l / a;
+    if (!cameraOrto) cameraOrto = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
+    cameraOrto.left = -meia * (k > 1 ? k : 1);
+    cameraOrto.right = meia * (k > 1 ? k : 1);
+    cameraOrto.top = meia * (k > 1 ? 1 : 1 / k);
+    cameraOrto.bottom = -meia * (k > 1 ? 1 : 1 / k);
+    cameraOrto.position.set(0, Math.max(im.larg, im.fundo) * 1.6, 0.001);
+    cameraOrto.lookAt(0, 0, 0);
+    cameraOrto.updateProjectionMatrix();
   }
 
   // ---------------------------------------------------------------- montagem
@@ -305,7 +343,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     grupoMoveis = new THREE.Group();
     grupoPontos = new THREE.Group();
     grupoRotulos = new THREE.Group();
-    paredes = []; pisos = []; selecionado = null;
+    paredes = []; pisos = []; pinos = []; selecionado = null;
+    limparTrena();
 
     const L = imovel.larg, F = imovel.fundo, PE = imovel.pe;
     // O modelo nasce centrado na origem: assim a orbita gira em torno do imovel
@@ -382,6 +421,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         new THREE.SphereGeometry(0.11, 18, 12),
         new THREE.MeshLambertMaterial({color: corAcento}));
       bola.position.set(p.x + cx, 1.5, p.z + cz);
+      // o pino guarda a cena: clicar nele abre o 360 tirado DALI
+      bola.userData.ponto = p;
+      haste.userData.ponto = p;
+      pinos.push(bola, haste);
       grupoPontos.add(haste, bola);
     });
 
@@ -456,7 +499,27 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         ((e.clientX - r.left) / r.width) * 2 - 1,
         -((e.clientY - r.top) / r.height) * 2 + 1);
       const raio = new THREE.Raycaster();
-      raio.setFromCamera(ponteiro, camera);
+      raio.setFromCamera(ponteiro, camAtiva());
+
+      // a trena manda enquanto estiver ligada: o clique vira ponta de medida
+      if (medindo){
+        const noPiso = raio.intersectObjects(pisos, false)[0];
+        if (noPiso) marcarMedida(noPiso.point);
+        return;
+      }
+
+      // o pino tem prioridade sobre o piso que esta atras dele
+      const noPino = raio.intersectObjects(pinos, false)[0];
+      if (noPino){
+        const p = noPino.object.userData.ponto;
+        if (p && p.cena_id){
+          location.href = URL_TOUR_PG + "?cena=" + encodeURIComponent(p.cena_id);
+        } else {
+          avisarTrena("Este ponto não tem cena correspondente no tour.");
+        }
+        return;
+      }
+
       const achou = raio.intersectObjects(pisos, false)[0];
       if (achou) selecionar(achou.object.userData.zona.nome);
     });
@@ -464,7 +527,67 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("corte").addEventListener("input", aplicarCorte);
     ["chMoveis", "chPontos", "chRotulos"].forEach(id =>
       $(id).addEventListener("change", aplicarChaves));
+    $("chPlanta").addEventListener("change", () => {
+      emPlanta = $("chPlanta").checked;
+      ocioso = false;
+      redimensionar();
+    });
+    $("btTrena").addEventListener("click", () => {
+      if (medindo || medidas.length) { limparTrena(); return; }
+      medindo = true;
+      $("btTrena").textContent = "Cancelar medição";
+      avisarTrena("Clique no primeiro ponto do piso.");
+    });
   }
+
+  // ------------------------------------------------------------------ trena
+
+  function avisarTrena(texto){ $("trenaTxt").textContent = texto; }
+
+  function limparTrena(){
+    medindo = false;
+    medidas = [];
+    if (grupoTrena){ cena.remove(grupoTrena); grupoTrena = null; }
+    const bt = $("btTrena");
+    if (bt) bt.textContent = "Medir distância";
+    avisarTrena("Clique em dois pontos do piso para medir entre eles.");
+  }
+
+  function marcarMedida(ponto){
+    if (!grupoTrena){ grupoTrena = new THREE.Group(); cena.add(grupoTrena); }
+    const cor = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent").trim() || "#e07b39";
+    const marca = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 14, 10),
+      new THREE.MeshBasicMaterial({color: cor}));
+    marca.position.copy(ponto).setY(0.04);
+    grupoTrena.add(marca);
+    medidas.push(marca.position.clone());
+
+    if (medidas.length === 1){
+      avisarTrena("Agora o segundo ponto.");
+      return;
+    }
+    const a = medidas[0], b = medidas[1];
+    const linha = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([a, b]),
+      new THREE.LineBasicMaterial({color: cor}));
+    grupoTrena.add(linha);
+
+    const metros = a.distanceTo(b);
+    const etiqueta = rotulo(nBR(metros, 2) + " m", "#171a20");
+    etiqueta.position.copy(a).lerp(b, 0.5).setY(0.55);
+    grupoTrena.add(etiqueta);
+
+    medindo = false;
+    $("btTrena").textContent = "Limpar medição";
+    avisarTrena("Distância medida: " + nBR(metros, 2) + " m em linha reta, "
+                + "no plano do piso.");
+  }
+
+  // -------------------------------------------------------------- camera
+
+  function camAtiva(){ return emPlanta && cameraOrto ? cameraOrto : camera; }
 
   const separacao = t => Math.hypot(
     t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
@@ -485,7 +608,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       orbita.alvo.z + Math.sin(orbita.giro) * r * Math.cos(a));
     camera.lookAt(orbita.alvo);
     atualizarRegua();
-    renderizador.render(cena, camera);
+    renderizador.render(cena, camAtiva());
   }
 
   // A regua tem de dizer a verdade: mede-se no plano do chao, na distancia em
@@ -510,6 +633,34 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     });
     [...document.querySelectorAll(".comodo")].forEach(b =>
       b.setAttribute("aria-pressed", String(b.dataset.nome === selecionado)));
+    mostrarCotas();
+  }
+
+  // As cotas do comodo: largura, profundidade, area e volume. Metragem sozinha
+  // nao diz se o comodo e comprido ou quadrado — e 12 m2 num corredor de 1,2 m
+  // de largura nao e o mesmo produto que 12 m2 num quarto de 3 x 4.
+  function mostrarCotas(){
+    const ficha = $("fichaComodo");
+    const im = imoveis[atual];
+    const z = selecionado && im
+      ? im.zonas.find(x => x.nome === selecionado) : null;
+    if (!z){ ficha.hidden = true; return; }
+
+    const L = z.x1 - z.x0, P = z.z1 - z.z0;
+    $("comodoNome").textContent = z.nome;
+    $("comodoL").textContent = nBR(L, 2) + " m";
+    $("comodoP").textContent = nBR(P, 2) + " m";
+    $("comodoA").textContent = nBR(z.m2, 1) + " m²";
+    $("comodoV").textContent = nBR(z.m2 * im.pe, 1) + " m³";
+
+    const dentro = (im.pontos || []).filter(p =>
+      p.x >= z.x0 && p.x <= z.x1 && p.z >= z.z0 && p.z <= z.z1);
+    $("comodoPontos").innerHTML = dentro.length
+      ? "<b>" + dentro.length + "</b> ponto(s) de captura aqui: "
+        + dentro.map(p => p.nome.replace(/^.*?- /, "")).join(", ")
+        + ". Clique num pino para abrir a cena 360 tirada dali."
+      : "Nenhum ponto de captura neste cômodo.";
+    ficha.hidden = false;
   }
 
   function mostrar(i){
@@ -533,6 +684,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       b.addEventListener("click", () => selecionar(b.dataset.nome)));
 
     ocioso = girarSozinho;
+    mostrarCotas();
   }
 
   function erro(titulo, texto){

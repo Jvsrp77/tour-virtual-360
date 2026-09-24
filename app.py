@@ -1145,6 +1145,14 @@ def api_maquete():
     tour = carregar_tour()
     dados["titulo"] = tour.get("titulo") or dados.get("nome", "")
     dados["descricao"] = tour.get("descricao") or dados.get("descricao", "")
+
+    # Costura a maquete ao tour: cada ponto de captura vira um link para a cena
+    # 360 tirada dali. O casamento e pelo NOME, que e o mesmo dos dois lados
+    # porque a cena nasceu do ponto. Cena renomeada perde o link e o pino deixa
+    # de ser clicavel — o que e melhor do que levar para a cena errada.
+    por_nome = {c.get("nome"): c.get("id") for c in tour.get("cenas", [])}
+    for ponto in dados.get("pontos", []):
+        ponto["cena_id"] = por_nome.get(ponto.get("nome"))
     return jsonify({"ok": True, "maquete": dados})
 
 
