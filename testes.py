@@ -808,6 +808,94 @@ class TestPrevisaoDeEscorrido(unittest.TestCase):
         self.assertIn("escorrido ao caminhar", painel)
 
 
+class TestBotoesDoCartao(unittest.TestCase):
+    """
+    Os botoes do cartao de imovel: Editar, Ver e Excluir.
+
+    O Excluir passou tempo QUEBRADO sem ninguem notar. O onclick era montado
+    com JSON.stringify(titulo), que devolve o texto entre aspas duplas — e o
+    proprio atributo onclick e delimitado por aspas duplas. O navegador fechava
+    o atributo no meio e lia `remover('id',`, um erro de sintaxe. O clique nao
+    fazia nada, calado.
+
+    Os testes que existiam nao pegavam: `test_handlers_do_html_tem_funcao` so
+    confere se a funcao chamada existe, e `remover` existia. `test_javascript_
+    das_paginas_compila` confere o <script>, e o script estava certo — o defeito
+    nascia na STRING que ele gera em tempo de execucao.
+
+    Entao aqui o molde do cartao e RENDERIZADO no Node, com titulos hostis, e
+    cada onclick que sai dele tem de ser JavaScript valido.
+    """
+
+    HOSTIS = ['Teste', 'Casa "dos sonhos" & cia', "Ap's do João <b>",
+              'Barra\\invertida']
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "imoveis.html"), encoding="utf-8") as f:
+            html = f.read()
+        marca = "$('grade').innerHTML = lista.map(i => `"
+        cls.molde = html[html.index(marca) + len(marca):]
+        cls.molde = cls.molde[:cls.molde.index("`).join('');")]
+
+    def _onclicks(self, titulo, ambientes):
+        """Renderiza o cartao e devolve o codigo de cada onclick."""
+        programa = (
+            'const escapar = t => String(t).replace(/[&<>"]/g, c => '
+            '({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c]));\n'
+            "const nBR = n => String(n);\n"
+            "const i = {id:'bc7136253c', titulo:" + json.dumps(titulo) + ", "
+            "ambientes:" + str(ambientes) + ", capa:null, area_total:0, "
+            "ambientes_medidos:0, com_profundidade:0, leads:0};\n"
+            "const html = `" + self.molde + "`;\n"
+            'for (const m of html.matchAll(/onclick="([^"]*)"/g)) '
+            "console.log(m[1]);\n")
+        caminho = os.path.join(_TEMP, "cartao.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:500])
+        return [l for l in r.stdout.strip().splitlines() if l.strip()]
+
+    def test_todo_onclick_do_cartao_e_javascript_valido(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        for titulo in self.HOSTIS:
+            for codigo in self._onclicks(titulo, 5):
+                caminho = os.path.join(_TEMP, "trecho.mjs")
+                with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+                    f.write(codigo + "\n")
+                r = subprocess.run([self.node, "--check", caminho],
+                                   capture_output=True, text=True, errors="ignore")
+                self.assertEqual(r.returncode, 0,
+                                 "título %r gerou onclick inválido: %s\n%s"
+                                 % (titulo, codigo, r.stderr[:300]))
+
+    def test_o_cartao_tem_os_tres_botoes(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        codigos = self._onclicks("Casa", 5)
+        self.assertEqual(len(codigos), 3, codigos)
+        self.assertTrue(any("/painel/" in c for c in codigos), codigos)
+        self.assertTrue(any("/tour/" in c for c in codigos), codigos)
+        self.assertTrue(any("remover(" in c for c in codigos), codigos)
+
+    def test_o_ver_desligado_diz_por_que(self):
+        """
+        Sem ambiente o botão fica desabilitado, e isso é certo — não há o que
+        mostrar. Mas botão apagado sem explicação se lê como defeito: foi
+        exatamente assim que ele foi reportado como quebrado.
+        """
+        with io.open(os.path.join("static", "imoveis.html"), encoding="utf-8") as f:
+            html = f.read()
+        pedaco = html[html.index("window.open('/tour/"):]
+        pedaco = pedaco[:pedaco.index("</button>")]
+        self.assertIn("disabled", pedaco)
+        self.assertIn("title=", pedaco, "desabilitado sem dizer o motivo")
+
+
 class TestMaquete(Base):
     """
     A vista 3D do imovel, dentro do sistema.

@@ -102,11 +102,18 @@ async function sair(){
   location.href = '/entrar';
 }
 
+// A lista fica fora de carregar() porque o botao de excluir precisa do
+// TITULO na hora de confirmar. Passar texto por dentro de um atributo
+// onclick foi onde isto quebrou: JSON.stringify devolve o texto entre
+// aspas duplas, e o proprio onclick e delimitado por aspas duplas — o
+// atributo fechava no meio e o clique virava erro de sintaxe.
+let lista = [];
+
 async function carregar(){
   const r = await fetch('/api/imoveis');
   if (r.status === 401){ location.href = '/entrar'; return; }
   const j = await r.json();
-  const lista = j.imoveis || [];
+  lista = j.imoveis || [];
   $('quemSou').textContent = j.imobiliaria || '';
 
   const totalAmb = lista.reduce((s, i) => s + i.ambientes, 0);
@@ -144,8 +151,9 @@ async function carregar(){
       </div>
       <div class="acoes">
         <button class="primario" onclick="location.href='/painel/${i.id}'">Editar</button>
-        <button onclick="window.open('/tour/${i.id}','_blank')" ${i.ambientes ? '' : 'disabled'}>Ver</button>
-        <button class="perigo" onclick="remover('${i.id}', ${JSON.stringify(i.titulo)})">Excluir</button>
+        <button onclick="window.open('/tour/${i.id}','_blank')" ${i.ambientes ? ''
+          : 'disabled title="Ainda não há ambiente para ver. Clique em Editar e crie o primeiro."'}>Ver</button>
+        <button class="perigo" onclick="remover('${i.id}')">Excluir</button>
       </div>
     </div>`).join('');
 }
@@ -164,7 +172,8 @@ async function criar(){
   location.href = '/painel/' + j.id;
 }
 
-async function remover(id, titulo){
+async function remover(id){
+  const titulo = (lista.find(x => x.id === id) || {}).titulo || 'este imóvel';
   if (!confirm(`Excluir "${titulo}"?\n\nIsso apaga os ambientes, os mapas de profundidade `
              + `e os contatos capturados deste imóvel. Não tem como desfazer.`)) return;
   await fetch('/api/imoveis/' + id, {method: 'DELETE'});

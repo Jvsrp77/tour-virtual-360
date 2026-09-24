@@ -200,6 +200,17 @@ MUT = [
      "    if False:",
      "TestExigirHttps.test_a_saude_continua_respondendo_em_claro"),
 
+    # o defeito de verdade: titulo com aspas fechava o atributo onclick no meio
+    ("excluir volta a passar titulo no onclick", "static/imoveis.html",
+     '        <button class="perigo" onclick="remover(\'${i.id}\')">Excluir</button>',
+     '        <button class="perigo" onclick="remover(\'${i.id}\', ${JSON.stringify(i.titulo)})">Excluir</button>',
+     "TestBotoesDoCartao.test_todo_onclick_do_cartao_e_javascript_valido"),
+    # botao apagado sem explicacao e lido como quebrado — foi reportado assim
+    ("ver desabilitado sem dizer o motivo", "static/imoveis.html",
+     "          : 'disabled title=",
+     "          : 'disabled data-x=",
+     "TestBotoesDoCartao.test_o_ver_desligado_diz_por_que"),
+
     # agendado com console, o vigia morre no CTRL_CLOSE_EVENT: 0xC000013A
     ("vigia agendado com console", "servico.py",
      '    candidato = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")',
