@@ -117,6 +117,87 @@ def listar():
     return 0
 
 
+def conferir_copia(origem):
+    """
+    Diz se da para confiar na copia ANTES de mexer nos dados vivos.
+
+    Devolve (ok, recado, quantidade de arquivos).
+
+    A ordem importa mais do que a checagem em si: a versao anterior movia o
+    data/ para o lado e SO ENTAO abria o zip. Zip corrompido significava perder
+    o atual sem ganhar o antigo — o pior resultado possivel para a ferramenta
+    que existe justamente para quando tudo o mais ja deu errado.
+    """
+    if not os.path.exists(origem):
+        return False, "não encontrei %s" % os.path.basename(origem), 0
+    if not zipfile.is_zipfile(origem):
+        return False, "%s não é um zip" % os.path.basename(origem), 0
+    try:
+        with zipfile.ZipFile(origem) as z:
+            ruim = z.testzip()
+            if ruim:
+                return False, "arquivo corrompido dentro da cópia: %s" % ruim, 0
+            nomes = [n for n in z.namelist()
+                     if n != "_backup.json" and not n.endswith("/")]
+    except (OSError, zipfile.BadZipFile) as e:
+        return False, "não consegui ler a cópia: %s" % e, 0
+
+    if not nomes:
+        return False, "a cópia está vazia", 0
+    # uma copia de verdade tem ao menos um tour.json ou as contas; sem isso e
+    # outro zip qualquer, e restaurar apagaria os dados por nada
+    parece = any(n.endswith("tour.json") or n.endswith("usuarios.json")
+                 for n in nomes)
+    if not parece:
+        return False, "não parece uma cópia do Tour Virtual", len(nomes)
+    return True, "%d arquivo(s)" % len(nomes), len(nomes)
+
+
+def restaurar_de(origem, destino=None):
+    """
+    Restaura sem perguntar nada — quem pergunta e a linha de comando.
+
+    Extrai para uma pasta NOVA e so troca no fim. Assim uma extracao que falha
+    no meio nao deixa data/ pela metade, e o que existia hoje e guardado em vez
+    de apagado: restaurar a copia errada nao pode ser caminho sem volta.
+    """
+    destino = destino or PASTA_DADOS
+    ok, recado, _ = conferir_copia(origem)
+    if not ok:
+        return False, recado, None
+
+    provisorio = destino + ".restaurando"
+    shutil.rmtree(provisorio, ignore_errors=True)
+    os.makedirs(provisorio, exist_ok=True)
+    try:
+        with zipfile.ZipFile(origem) as z:
+            for interno in z.namelist():
+                if interno == "_backup.json":
+                    continue
+                z.extract(interno, provisorio)
+    except (OSError, zipfile.BadZipFile) as e:
+        shutil.rmtree(provisorio, ignore_errors=True)
+        return False, "falhou ao extrair: %s" % e, None
+
+    saiu = sum(len(a) for _, _, a in os.walk(provisorio))
+    if not saiu:
+        shutil.rmtree(provisorio, ignore_errors=True)
+        return False, "nada saiu da cópia", None
+
+    guardado = None
+    if os.path.isdir(destino):
+        guardado = destino + "-antes-de-restaurar-" +             datetime.now().strftime("%Y%m%d%H%M%S")
+        shutil.move(destino, guardado)
+    try:
+        shutil.move(provisorio, destino)
+    except OSError as e:
+        # devolve o que existia: melhor ficar como estava do que ficar sem nada
+        if guardado and not os.path.isdir(destino):
+            shutil.move(guardado, destino)
+        return False, "falhou ao trocar as pastas: %s" % e, None
+    return True, "%d arquivo(s) restaurado(s)" % saiu, guardado
+
+
 def restaurar(argv):
     if not argv:
         print("  uso: python backup.py restaurar <arquivo.zip>")
@@ -124,30 +205,27 @@ def restaurar(argv):
     origem = argv[0]
     if not os.path.exists(origem):
         origem = os.path.join(PASTA_BACKUPS, argv[0])
-    if not os.path.exists(origem):
-        print("  não encontrei %s" % argv[0])
+
+    ok, recado, quantos = conferir_copia(origem)
+    if not ok:
+        print("  %s" % recado)
+        print("  nada foi tocado em data/.")
         return 1
 
+    print("  cópia conferida: %s" % recado)
     print("  ATENÇÃO: isto substitui data/ pelo conteúdo da cópia.")
     print("  Pare o servidor antes, senão ele grava por cima do que for restaurado.")
     if input("  digite RESTAURAR para confirmar: ").strip() != "RESTAURAR":
         print("  cancelado.")
         return 1
 
-    # o que existe hoje vira uma copia antes de ser substituido: restaurar a
-    # copia errada nao pode ser um caminho sem volta
-    if os.path.isdir(PASTA_DADOS):
-        guardado = PASTA_DADOS + "-antes-de-restaurar-" + datetime.now().strftime("%Y%m%d%H%M%S")
-        shutil.move(PASTA_DADOS, guardado)
-        print("  data/ atual guardado em %s" % os.path.basename(guardado))
-
-    os.makedirs(PASTA_DADOS, exist_ok=True)
-    with zipfile.ZipFile(origem) as z:
-        for interno in z.namelist():
-            if interno == "_backup.json":
-                continue
-            z.extract(interno, PASTA_DADOS)
-    print("  restaurado de %s" % os.path.basename(origem))
+    ok, recado, guardado = restaurar_de(origem)
+    if not ok:
+        print("  %s" % recado)
+        return 1
+    if guardado:
+        print("  data/ anterior guardado em %s" % os.path.basename(guardado))
+    print("  %s, de %s" % (recado, os.path.basename(origem)))
     return 0
 
 

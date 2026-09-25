@@ -218,6 +218,27 @@ MUT = [
      '    "api.api_embed", "maquete", "api.api_maquete", "api.api_maquete_obj",',
      "TestExportarObj.test_visitante_ve_a_maquete_mas_nao_leva_o_modelo"),
 
+    # Pular a conferencia nao derruba o caso do zip CORROMPIDO: ali a extracao
+    # falha sozinha e a pasta provisoria e descartada antes de trocar nada — a
+    # estrutura protege. Quem depende da conferencia e o zip VALIDO que nao e
+    # backup: sem ela, ele extrai limpo e substitui os dados por qualquer coisa.
+    ("restaura sem conferir a copia antes", "backup.py",
+     "    ok, recado, _ = conferir_copia(origem)",
+     "    ok, recado, _ = (True, '', 0)",
+     "TestRestaurarBackup.test_zip_que_nao_e_backup_e_recusado"),
+
+    # restaurar a copia errada nao pode ser caminho sem volta
+    ("restaurar apaga o que existia", "backup.py",
+     "        shutil.move(destino, guardado)",
+     "        shutil.rmtree(destino, ignore_errors=True)",
+     "TestRestaurarBackup.test_o_que_existia_fica_guardado_e_nao_apagado"),
+
+    # zip qualquer nao e copia: restaurar apagaria os dados por nada
+    ("aceita zip que nao e backup", "backup.py",
+     "    if not parece:",
+     "    if False:",
+     "TestRestaurarBackup.test_zip_que_nao_e_backup_e_recusado"),
+
     # o defeito que o usuario achou: W andava para tras
     ("w anda para tras", "static/maquete.html",
      "    return {x: -sen * frente + cos * lado,",

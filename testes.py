@@ -1071,6 +1071,130 @@ class TestLinkDireitoParaCena(Base):
         self.assertIn("cena_inicial", pedaco, "não tem para onde cair")
 
 
+class TestRestaurarBackup(unittest.TestCase):
+    """
+    A restauracao — o caminho que so se usa quando tudo o mais ja deu errado.
+
+    Ela existia sem UM teste sequer. Backup que nunca foi restaurado e
+    esperanca, nao backup, e isto deixou de ser hipotese: dia 21 o acervo de
+    imagens sumiu inteiro, e a copia daquele dia gravou 34 KB porque as imagens
+    ja nao existiam quando ela passou.
+
+    O caso mais importante daqui e o do zip ruim. A versao anterior movia o
+    data/ para o lado e SO ENTAO abria a copia — copia corrompida significava
+    perder o atual sem ganhar o antigo. Agora confere primeiro.
+    """
+
+    def setUp(self):
+        self.casa = tempfile.mkdtemp(prefix="tour-restaurar-")
+        self.dados = os.path.join(self.casa, "data")
+        self.copias = os.path.join(self.casa, "backups")
+        os.makedirs(os.path.join(self.dados, "imoveis", "abc", "scenes"))
+        self.antes = (backup.PASTA_DADOS, backup.PASTA_BACKUPS)
+        backup.PASTA_DADOS, backup.PASTA_BACKUPS = self.dados, self.copias
+
+        # um tour, uma conta e uma imagem binaria de verdade
+        self._gravar("usuarios.json", b'{"usuarios": []}')
+        self._gravar(os.path.join("imoveis", "abc", "tour.json"),
+                     '{"titulo": "Casa do João", "cenas": []}'.encode("utf-8"))
+        self.imagem = bytes(range(256)) * 40
+        self._gravar(os.path.join("imoveis", "abc", "scenes", "cena.jpg"),
+                     self.imagem)
+
+    def tearDown(self):
+        backup.PASTA_DADOS, backup.PASTA_BACKUPS = self.antes
+        shutil.rmtree(self.casa, ignore_errors=True)
+
+    def _gravar(self, relativo, conteudo):
+        caminho = os.path.join(self.dados, relativo)
+        os.makedirs(os.path.dirname(caminho), exist_ok=True)
+        with open(caminho, "wb") as f:
+            f.write(conteudo)
+
+    def _copia(self):
+        backup.criar(silencioso=True)
+        nomes = sorted(n for n in os.listdir(self.copias) if n.endswith(".zip"))
+        self.assertTrue(nomes, "não gerou cópia")
+        return os.path.join(self.copias, nomes[-1])
+
+    def test_a_volta_completa_devolve_tudo_igual(self):
+        """
+        Criar, apagar TUDO, restaurar — e os bytes têm de bater. É o único
+        teste que prova que o backup serve para o que existe.
+        """
+        zipe = self._copia()
+        shutil.rmtree(self.dados)
+        self.assertFalse(os.path.isdir(self.dados))
+
+        ok, recado, _ = backup.restaurar_de(zipe)
+        self.assertTrue(ok, recado)
+
+        with open(os.path.join(self.dados, "imoveis", "abc", "scenes",
+                               "cena.jpg"), "rb") as f:
+            self.assertEqual(f.read(), self.imagem, "a imagem voltou diferente")
+        with io.open(os.path.join(self.dados, "imoveis", "abc", "tour.json"),
+                     encoding="utf-8") as f:
+            self.assertIn("Casa do João", f.read())
+
+    def test_copia_corrompida_nao_encosta_nos_dados_vivos(self):
+        """
+        O pior resultado possível: perder o atual sem ganhar o antigo. Era o que
+        a versão anterior fazia, porque movia data/ antes de abrir o zip.
+        """
+        ruim = os.path.join(self.copias, "tour-quebrado.zip")
+        os.makedirs(self.copias, exist_ok=True)
+        with open(ruim, "wb") as f:
+            f.write(b"PK\x03\x04isto nao e um zip de verdade")
+
+        ok, recado, _ = backup.restaurar_de(ruim)
+        self.assertFalse(ok, "aceitou uma cópia corrompida")
+        with open(os.path.join(self.dados, "imoveis", "abc", "scenes",
+                               "cena.jpg"), "rb") as f:
+            self.assertEqual(f.read(), self.imagem, "mexeu nos dados vivos")
+
+    def test_zip_que_nao_e_backup_e_recusado(self):
+        """Restaurar um zip qualquer apagaria os dados por nada."""
+        outro = os.path.join(self.copias, "qualquer.zip")
+        os.makedirs(self.copias, exist_ok=True)
+        with zipfile.ZipFile(outro, "w") as z:
+            z.writestr("foto-do-cachorro.jpg", b"nada a ver")
+        ok, recado, _ = backup.restaurar_de(outro)
+        self.assertFalse(ok, recado)
+        self.assertIn("não parece", recado)
+
+    def test_o_que_existia_fica_guardado_e_nao_apagado(self):
+        """Restaurar a cópia errada não pode ser caminho sem volta."""
+        zipe = self._copia()
+        self._gravar(os.path.join("imoveis", "abc", "depois.txt"), b"so no atual")
+
+        ok, _, guardado = backup.restaurar_de(zipe)
+        self.assertTrue(ok)
+        self.assertIsNotNone(guardado, "não guardou o data/ anterior")
+        self.assertTrue(os.path.exists(
+            os.path.join(guardado, "imoveis", "abc", "depois.txt")),
+            "o que existia foi apagado em vez de guardado")
+
+    def test_copia_vazia_e_recusada(self):
+        vazio = os.path.join(self.copias, "vazio.zip")
+        os.makedirs(self.copias, exist_ok=True)
+        with zipfile.ZipFile(vazio, "w") as z:
+            z.writestr("_backup.json", "{}")
+        ok, recado, _ = backup.restaurar_de(vazio)
+        self.assertFalse(ok, recado)
+
+    def test_a_conferencia_aceita_uma_copia_de_verdade(self):
+        """Conferência que recusa tudo é tão inútil quanto a que aceita tudo."""
+        ok, recado, quantos = backup.conferir_copia(self._copia())
+        self.assertTrue(ok, recado)
+        self.assertGreaterEqual(quantos, 3)
+
+    def test_restaurar_nao_deixa_pasta_provisoria_para_tras(self):
+        zipe = self._copia()
+        backup.restaurar_de(zipe)
+        self.assertFalse(os.path.isdir(self.dados + ".restaurando"),
+                         "sobrou a pasta de trabalho")
+
+
 class TestExportarObj(Base):
     """
     A maquete baixada como OBJ + MTL, para abrir no SketchUp ou no Blender.
