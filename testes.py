@@ -1475,6 +1475,90 @@ console.log(JSON.stringify(saida));
         self.assertIn("pessoa.pos", corpo, "não desenha onde a pessoa está")
         self.assertIn("direcao(pessoa.giro", corpo, "não desenha para onde olha")
 
+    def test_o_manche_anda_para_onde_o_polegar_aponta(self):
+        """
+        No celular nao ha W A S D. O manche traduz o polegar em direcao — e a
+        tela cresce o Y para BAIXO, entao empurrar para cima tem de andar para
+        FRENTE. Trocar esse sinal daria o mesmo defeito do W invertido.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        corpo = self.html[self.html.index("  function doManche(dx, dy, raio){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        programa = corpo + """
+console.log(JSON.stringify({
+  cima:     doManche(0, -46, 46),
+  baixo:    doManche(0,  46, 46),
+  direita:  doManche(46,  0, 46),
+  esquerda: doManche(-46, 0, 46),
+  parado:   doManche(2, 2, 46),
+  meio:     doManche(0, -23, 46),
+  alem:     doManche(0, -200, 46)
+}));
+"""
+        caminho = os.path.join(_TEMP, "manche.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:500])
+        v = json.loads(r.stdout)
+
+        self.assertGreater(v["cima"]["frente"], 0.9, "para cima não anda para frente")
+        self.assertLess(v["baixo"]["frente"], -0.9, "para baixo não anda para trás")
+        self.assertGreater(v["direita"]["lado"], 0.9)
+        self.assertLess(v["esquerda"]["lado"], -0.9)
+
+    def test_polegar_pousado_nao_faz_andar_sozinho(self):
+        """Sem zona morta, o dedo parado na tela empurra a pessoa devagar."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        corpo = self.html[self.html.index("  function doManche(dx, dy, raio){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        caminho = os.path.join(_TEMP, "manche2.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(corpo + "\nconsole.log(JSON.stringify(doManche(2, 2, 46)));\n")
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        v = json.loads(r.stdout)
+        self.assertEqual((v["frente"], v["lado"]), (0, 0))
+
+    def test_o_manche_e_analogico_e_nao_estoura_de_um(self):
+        """
+        Polegar pela metade anda pela metade — é o que permite olhar um cômodo
+        devagar. E além da borda não pode acelerar: fica em 1.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        corpo = self.html[self.html.index("  function doManche(dx, dy, raio){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        caminho = os.path.join(_TEMP, "manche3.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(corpo + "\nconsole.log(JSON.stringify("
+                    "[doManche(0,-23,46), doManche(0,-460,46)]));\n")
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        meio, alem = json.loads(r.stdout)
+        self.assertAlmostEqual(meio["frente"], 0.5, places=2)
+        self.assertAlmostEqual(alem["frente"], 1.0, places=6)
+
+    def test_o_manche_so_aparece_onde_ha_toque(self):
+        """No computador ele seria um estorvo sobre a maquete."""
+        corpo = self.html[self.html.index("function atualizarPessoa()"):]
+        corpo = corpo[:corpo.index("\n  // ")]
+        self.assertIn("temToque()", corpo, "aparece mesmo sem toque")
+        self.assertIn('$("manche")', corpo)
+
+    def test_o_dedo_do_manche_nao_vira_o_olhar(self):
+        """
+        Com dois dedos na tela — um no manche, outro olhando — usar touches[0]
+        pegava o dedo errado e a vista saltava.
+        """
+        self.assertIn("changedTouches", self.html)
+        corpo = self.html[self.html.index("const pegar ="):]
+        corpo = corpo[:corpo.index("const comecar")]
+        self.assertIn("changedTouches", corpo)
+
     def test_o_olho_fica_na_altura_da_camera_do_tour(self):
         """Se divergir, o que se vê aqui deixa de ser o que a cena 360 viu."""
         aqui = float(re.search(r"const OLHO = ([\d.]+)", self.html).group(1))

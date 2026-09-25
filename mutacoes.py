@@ -239,6 +239,19 @@ MUT = [
      "    if False:",
      "TestRestaurarBackup.test_zip_que_nao_e_backup_e_recusado"),
 
+    # a tela cresce o Y para BAIXO: trocar o sinal inverte o manche, o mesmo
+    # defeito do W, so que no celular
+    ("manche com o eixo invertido", "static/maquete.html",
+     "    let frente = -dy / raio, lado = dx / raio;",
+     "    let frente = dy / raio, lado = dx / raio;",
+     "TestPrimeiraPessoa.test_o_manche_anda_para_onde_o_polegar_aponta"),
+
+    # sem zona morta, dedo pousado empurra a pessoa devagar
+    ("manche sem zona morta", "static/maquete.html",
+     "    if (Math.hypot(frente, lado) < 0.18) return {frente: 0, lado: 0};",
+     "    if (false) return {frente: 0, lado: 0};",
+     "TestPrimeiraPessoa.test_polegar_pousado_nao_faz_andar_sozinho"),
+
     # o defeito que o usuario achou: W andava para tras
     ("w anda para tras", "static/maquete.html",
      "    return {x: -sen * frente + cos * lado,",

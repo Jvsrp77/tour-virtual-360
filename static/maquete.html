@@ -127,6 +127,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   @media (max-width: 860px){
     .corpo{grid-template-columns:1fr;grid-template-rows:minmax(300px,52vh) auto}
+    /* durante a visita o palco toma a tela: no telefone, 52vh deixa o manche
+       na beirada e obriga a rolar para ver onde se esta andando */
+    .corpo.visitando{grid-template-rows:minmax(420px,80vh) auto}
     .lado{overflow:visible}
     .app{height:auto;min-height:100%}
     .dica{display:none}
@@ -162,6 +165,15 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       <div class="dica canto">arraste para girar · role para aproximar</div>
       <div class="selo canto" id="ondeEstou" hidden
            style="left:auto;right:13px;top:12px"></div>
+      <div id="manche" hidden aria-hidden="true"
+           style="position:absolute;left:16px;bottom:16px;width:104px;height:104px;
+                  border-radius:50%;border:1px solid var(--line);
+                  background:var(--surface);opacity:.82;touch-action:none;
+                  display:flex;align-items:center;justify-content:center">
+        <div id="mancheBola"
+             style="width:42px;height:42px;border-radius:50%;background:var(--accent);
+                    opacity:.85;transition:transform .05s linear"></div>
+      </div>
       <canvas id="minimapa" width="168" height="126" hidden
               style="position:absolute;right:13px;bottom:11px;border-radius:9px;
                      border:1px solid var(--line);box-shadow:var(--sombra)"></canvas>
@@ -254,6 +266,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
   let cameraOrto = null, emPlanta = false;
   let emPessoa = false, corteAntes = null, solidos = [], teclas = {};
+  let manche = {frente: 0, lado: 0};
   const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0};
 
   // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
@@ -280,6 +293,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     redimensionar();
     addEventListener("resize", redimensionar);
     ligarControles();
+    ligarManche();
     desenhar();
   }
 
@@ -509,7 +523,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         : "W A S D ou setas para andar · clique para o mouse livre · Esc sai";
     });
 
-    const pegar = e => e.touches ? e.touches[0] : e;
+    // changedTouches, e nao touches[0]: com dois dedos na tela (um no manche,
+    // outro olhando), touches[0] podia ser o do manche e o olhar saltava.
+    const pegar = e => (e.changedTouches && e.changedTouches.length)
+      ? e.changedTouches[0] : (e.touches ? e.touches[0] : e);
     const comecar = e => {
       arrastando = true; ocioso = false;
       const t = pegar(e); ux = t.clientX; uy = t.clientY;
@@ -787,6 +804,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("chPlanta").disabled = true;
     grupoRotulos.visible = false;
     atualizarPessoa();
+    // no telefone os controles ficam ABAIXO do palco: entrar sem rolar deixaria
+    // a pessoa olhando a barra lateral enquanto o passeio acontece fora da vista
+    document.querySelector(".corpo").classList.add("visitando");
+    redimensionar();
+    if (temToque()) document.querySelector(".palco")
+      .scrollIntoView({behavior: "smooth", block: "center"});
   }
 
   function sairDePessoa(){
@@ -796,6 +819,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     }
     $("corte").disabled = false;
     $("chPlanta").disabled = false;
+    document.querySelector(".corpo").classList.remove("visitando");
+    redimensionar();
     if (corteAntes !== null){ $("corte").value = corteAntes; corteAntes = null; }
     aplicarCorte();
     aplicarChaves();
@@ -807,12 +832,19 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (bt) bt.textContent = emPessoa ? "Sair (ver de fora)" : "Entrar no imóvel";
     const dica = $("dicaPessoa");
     if (dica) dica.textContent = emPessoa
-      ? "W A S D ou setas para andar · clique para o mouse livre · Esc sai"
+      ? (temToque()
+          ? "Manche embaixo para andar · arraste na tela para olhar"
+          : "W A S D ou setas para andar · clique para o mouse livre · Esc sai")
       : "Entra na altura dos olhos (1,50 m), a mesma da câmera do tour.";
     const onde = $("ondeEstou");
     if (onde) onde.hidden = !emPessoa;
     const mapa = $("minimapa");
     if (mapa) mapa.hidden = !emPessoa;
+    const m = $("manche");
+    if (m){
+      m.hidden = !(emPessoa && temToque());
+      if (m.hidden) manche = {frente: 0, lado: 0};
+    }
   }
 
   // Colisao: as caixas do imovel viram retangulos no plano, e o corpo e um
@@ -847,6 +879,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (teclas["s"] || teclas["arrowdown"]) frente -= 1;
     if (teclas["d"] || teclas["arrowright"]) lado += 1;
     if (teclas["a"] || teclas["arrowleft"]) lado -= 1;
+    // o manche entra ANALOGICO: polegar pela metade anda pela metade
+    frente += manche.frente;
+    lado += manche.lado;
     if (!frente && !lado) return;
 
     // Shift corre. Quem esta vendo um imovel anda devagar para olhar, mas
@@ -868,6 +903,83 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const onde = $("ondeEstou");
     if (onde) onde.textContent = zona ? zona.nome : "passagem";
   }
+
+  // ---------------------------------------------------------------- manche
+  //
+  // No celular nao ha W A S D, e ate agora dava para GIRAR a cabeca arrastando
+  // mas nao para sair do lugar — metade de quem ve um imovel esta no telefone,
+  // e para essa metade a visita nao existia.
+  //
+  // Manche e nao setas: setas so andam nas quatro direcoes e em velocidade
+  // unica. O manche anda em qualquer angulo, e mais devagar quando o polegar
+  // encosta pouco — que e o que se quer para olhar um comodo.
+
+  function doManche(dx, dy, raio){
+    // tela: y cresce para BAIXO; andar para frente e o polegar para CIMA
+    let frente = -dy / raio, lado = dx / raio;
+    const tamanho = Math.hypot(frente, lado);
+    if (tamanho > 1){ frente /= tamanho; lado /= tamanho; }
+    // zona morta: polegar pousado nao pode fazer a pessoa andar sozinha
+    if (Math.hypot(frente, lado) < 0.18) return {frente: 0, lado: 0};
+    return {frente: frente, lado: lado};
+  }
+
+  function ligarManche(){
+    const base = $("manche"), bola = $("mancheBola");
+    if (!base) return;
+    const raio = 46;
+    let dedo = null;
+
+    function mover(t){
+      const r = base.getBoundingClientRect();
+      const dx = t.clientX - (r.left + r.width / 2);
+      const dy = t.clientY - (r.top + r.height / 2);
+      const k = Math.min(1, Math.hypot(dx, dy) / raio);
+      const ang = Math.atan2(dy, dx);
+      bola.style.transform = "translate(" + (Math.cos(ang) * raio * k) + "px,"
+                           + (Math.sin(ang) * raio * k) + "px)";
+      manche = doManche(dx, dy, raio);
+    }
+
+    function soltar(){
+      dedo = null;
+      manche = {frente: 0, lado: 0};
+      bola.style.transform = "translate(0,0)";
+    }
+
+    base.addEventListener("touchstart", e => {
+      dedo = e.changedTouches[0].identifier;
+      mover(e.changedTouches[0]);
+      e.preventDefault();
+      e.stopPropagation();
+    }, {passive: false});
+
+    base.addEventListener("touchmove", e => {
+      for (const t of e.changedTouches){
+        if (t.identifier === dedo) mover(t);
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    }, {passive: false});
+
+    ["touchend", "touchcancel"].forEach(qual =>
+      base.addEventListener(qual, e => {
+        for (const t of e.changedTouches){
+          if (t.identifier === dedo) soltar();
+        }
+        e.stopPropagation();
+      }));
+
+    // no computador o manche nao aparece, mas o mouse tambem funciona nele
+    base.addEventListener("mousedown", e => {
+      dedo = "mouse"; mover(e); e.preventDefault(); e.stopPropagation();
+    });
+    addEventListener("mousemove", e => { if (dedo === "mouse") mover(e); });
+    addEventListener("mouseup", () => { if (dedo === "mouse") soltar(); });
+  }
+
+  const temToque = () => (("ontouchstart" in window) ||
+                          matchMedia("(pointer: coarse)").matches);
 
   // -------------------------------------------------------------- minimapa
   //
