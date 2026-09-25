@@ -34,6 +34,7 @@ import profundidade
 import tarefas
 import aviso
 import maquete3d
+import modelo3d
 import area
 import fundo
 import usuarios
@@ -74,8 +75,17 @@ def arq_maquete(imovel_id):
     return os.path.join(pasta_imovel(imovel_id), "maquete.json")
 
 
+def arq_modelo(imovel_id, ext=".obj"):
+    """O modelo 3D importado de um escaneamento, quando existe."""
+    return os.path.join(pasta_imovel(imovel_id), "modelo" + ext)
+
+
+def tem_modelo(imovel_id):
+    return os.path.exists(arq_modelo(imovel_id))
+
+
 def tem_maquete(imovel_id):
-    return os.path.exists(arq_maquete(imovel_id))
+    return os.path.exists(arq_maquete(imovel_id)) or tem_modelo(imovel_id)
 
 
 def pasta_cenas(imovel_id=None):
@@ -240,6 +250,7 @@ ROTAS_PUBLICAS = {
     "static", "api_entrar", "api_estado_conta",
     "api.api_obter_tour", "api.api_registrar_lead", "api.api_registrar_visita",
     "api.api_embed", "maquete", "api.api_maquete",
+    "api.api_baixar_modelo", "api.api_baixar_modelo_mtl",
 }
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
@@ -1137,7 +1148,23 @@ def api_maquete():
     maquete sem precisar de conta.
     """
     caminho = arq_maquete(g.imovel)
+    tour_agora = carregar_tour()
     if not os.path.exists(caminho):     # imovel de fotos nao tem geometria
+        # ...a nao ser que alguem tenha importado um escaneamento. Ai a
+        # geometria vem do OBJ, e a pagina busca o arquivo em vez das caixas.
+        if tem_modelo(g.imovel):
+            info = tour_agora.get("modelo", {})
+            return jsonify({"ok": True, "maquete": {
+                "importado": True,
+                "titulo": tour_agora.get("titulo", ""),
+                "descricao": tour_agora.get("descricao", ""),
+                "medidas": info.get("medidas", {}),
+                "avisos": info.get("avisos", []),
+                "tem_mtl": os.path.exists(arq_modelo(g.imovel, ".mtl")),
+                "zonas": [], "caixas": [], "pontos": [], "janelas": [],
+                "larg": (info.get("medidas") or {}).get("largura", 10),
+                "fundo": (info.get("medidas") or {}).get("fundo", 10),
+                "pe": (info.get("medidas") or {}).get("altura", 2.7)}})
         return jsonify({"ok": False, "erro":
                         "Este imóvel não tem geometria: a maquete só existe "
                         "para ambiente gerado, não para foto."}), 404
@@ -1155,6 +1182,79 @@ def api_maquete():
     for ponto in dados.get("pontos", []):
         ponto["cena_id"] = por_nome.get(ponto.get("nome"))
     return jsonify({"ok": True, "maquete": dados})
+
+
+@api.route("/modelo", methods=["POST"])
+def api_enviar_modelo():
+    """
+    Recebe o OBJ de um escaneamento e passa a usa-lo como maquete do imovel.
+
+    A conferencia acontece ANTES de gravar: OBJ e texto, qualquer arquivo pode
+    se chamar .obj, e modelo que so se descobre quebrado na hora de abrir deixa
+    o corretor sem entender o que houve.
+    """
+    arquivo = request.files.get("modelo")
+    if not arquivo:
+        return jsonify({"ok": False, "erro": "Nenhum arquivo enviado."}), 400
+    if not arquivo.filename.lower().endswith(".obj"):
+        return jsonify({"ok": False, "erro":
+                        "Envie o arquivo .obj. No aplicativo de escaneamento, "
+                        "exporte em OBJ — não em USDZ nem em PLY."}), 422
+
+    bruto = arquivo.read()
+    try:
+        texto = bruto.decode("utf-8", errors="replace")
+        medidas, avisos = modelo3d.conferir(texto, len(bruto))
+    except modelo3d.ErroModelo as e:
+        return jsonify({"ok": False, "erro": str(e)}), 422
+
+    with open(arq_modelo(g.imovel), "wb") as f:
+        f.write(bruto)
+    mtl = request.files.get("mtl")
+    if mtl and mtl.filename.lower().endswith(".mtl"):
+        mtl.save(arq_modelo(g.imovel, ".mtl"))
+
+    tour = carregar_tour()
+    tour["modelo"] = {"medidas": medidas, "avisos": avisos,
+                      "enviado_em": datetime.now().isoformat(timespec="seconds")}
+    salvar_tour(tour)
+    return jsonify({"ok": True, "medidas": medidas, "avisos": avisos})
+
+
+@api.route("/modelo", methods=["DELETE"])
+def api_apagar_modelo():
+    for ext in (".obj", ".mtl"):
+        caminho = arq_modelo(g.imovel, ext)
+        if os.path.exists(caminho):
+            os.remove(caminho)
+    tour = carregar_tour()
+    tour.pop("modelo", None)
+    salvar_tour(tour)
+    return jsonify({"ok": True})
+
+
+@api.route("/modelo.obj", methods=["GET"])
+def api_baixar_modelo():
+    """
+    Serve o modelo para a pagina desenhar.
+
+    E publico por NECESSIDADE, nao por escolha: a maquete roda no navegador de
+    quem abre o link, e desenhar exige que os bytes cheguem ate la. Quem
+    importa um escaneamento esta publicando a geometria junto com o tour — e o
+    painel diz isso na hora do envio.
+    """
+    caminho = arq_modelo(g.imovel)
+    if not os.path.exists(caminho):
+        return jsonify({"ok": False, "erro": "Sem modelo importado."}), 404
+    return send_file(caminho, mimetype="text/plain")
+
+
+@api.route("/modelo.mtl", methods=["GET"])
+def api_baixar_modelo_mtl():
+    caminho = arq_modelo(g.imovel, ".mtl")
+    if not os.path.exists(caminho):
+        return jsonify({"ok": False, "erro": "Sem materiais."}), 404
+    return send_file(caminho, mimetype="text/plain")
 
 
 @api.route("/maquete/obj", methods=["GET"])

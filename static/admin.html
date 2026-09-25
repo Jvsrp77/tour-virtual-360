@@ -154,6 +154,9 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <button id="btRecarregar" onclick="recarregarServidor()" style="display:none"
           title="Aplicar a versão publicada">Recarregar servidor</button>
   <button onclick="location.href=API + '/exportar'">Exportar ZIP</button>
+  <button onclick="$('arqModelo').click()"
+          title="Importar um escaneamento 3D (.obj)">Importar 3D</button>
+  <input type="file" id="arqModelo" accept=".obj" style="display:none">
   <button id="btMaquete" onclick="window.open('/maquete/' + IMOVEL,'_blank')"
           style="display:none" title="Ver o imóvel por fora, em 3D">Maquete</button>
   <button class="primario" onclick="window.open(URL_VOLTAR,'_blank')">Ver o tour</button>
@@ -1435,6 +1438,30 @@ async function recarregarServidor(){
 }
 
 // So imovel gerado tem geometria; o de fotos nao tem maquete e o botao some.
+// Importar um escaneamento: o imovel de FOTOS passa a ter maquete tambem.
+// O aviso sobre publicacao aparece ANTES de enviar, nao depois: desenhar no
+// navegador de quem abre o link exige que os bytes cheguem ate la, entao
+// importar e publicar a geometria junto com o tour.
+async function enviarModelo(arquivo){
+  if (!arquivo) return;
+  if (!confirm('Importar "' + arquivo.name + '" como maquete deste imóvel?\n\n'
+             + 'Quem abrir o link da maquete vai baixar essa geometria para o '
+             + 'navegador — é assim que ela aparece na tela. Continuar?')) return;
+  const dados = new FormData();
+  dados.append('modelo', arquivo);
+  aviso('Enviando o modelo…');
+  try{
+    const r = await fetch(API + '/modelo', {method: 'POST', body: dados});
+    const j = await r.json();
+    if (!j.ok){ aviso(j.erro, 'erro'); return; }
+    const m = j.medidas;
+    aviso('Modelo importado: ' + m.vertices.toLocaleString('pt-BR') + ' vértices, '
+        + m.largura + ' × ' + m.fundo + ' × ' + m.altura + ' m.');
+    (j.avisos || []).forEach(a => aviso(a, 'erro'));
+    verSeTemMaquete();
+  }catch(e){ aviso('Falha ao enviar: ' + e, 'erro'); }
+}
+
 async function verSeTemMaquete(){
   try{
     const r = await fetch(API + '/maquete');
@@ -1520,7 +1547,8 @@ function abrirGuia(){ $('dlgGuia').showModal(); }
 
 carregar();
 verVersao();
-verSeTemMaquete();          // avisa se ha versao publicada esperando
+verSeTemMaquete();
+$('arqModelo').addEventListener('change', e => enviarModelo(e.target.files[0]));          // avisa se ha versao publicada esperando
 </script>
 </body>
 </html>

@@ -41,6 +41,7 @@ import servico                    # noqa: E402
 import servidor                   # noqa: E402
 import aviso                      # noqa: E402
 import maquete3d                  # noqa: E402
+import modelo3d                   # noqa: E402
 import numpy as np                # noqa: E402
 import plantas                    # noqa: E402
 import cena_apartamento           # noqa: E402
@@ -1195,6 +1196,133 @@ class TestRestaurarBackup(unittest.TestCase):
                          "sobrou a pasta de trabalho")
 
 
+class TestImportarModelo(Base):
+    """
+    O escaneamento de celular virando maquete.
+
+    Ate aqui a maquete so existia em imovel GERADO, porque ela precisa de
+    geometria e foto nao tem geometria. Um aplicativo de escaneamento produz um
+    OBJ com paredes e moveis medidos — e com ele a maquete passa a valer para
+    imovel de verdade.
+
+    A conferencia acontece ANTES de gravar, de proposito: OBJ e texto, qualquer
+    arquivo pode se chamar .obj, e modelo que so se descobre quebrado na hora de
+    abrir deixa o corretor sem entender o que houve.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("dona-modelo")
+        self.iid = self.imovel(self.dona, "Casa fotografada")
+
+    def _obj(self, escala=1.0):
+        """Um cubo de 4 x 2,7 x 3 m — as medidas de um cômodo."""
+        L, A, F = 4.0 * escala, 2.7 * escala, 3.0 * escala
+        v = [(0, 0, 0), (L, 0, 0), (L, A, 0), (0, A, 0),
+             (0, 0, F), (L, 0, F), (L, A, F), (0, A, F)]
+        linhas = ["# cubo de teste", "mtllib modelo.mtl", "usemtl parede"]
+        linhas += ["v %.3f %.3f %.3f" % p for p in v]
+        for face in ((1, 2, 3, 4), (5, 6, 7, 8), (1, 5, 8, 4),
+                     (2, 3, 7, 6), (1, 2, 6, 5), (4, 8, 7, 3)):
+            linhas.append("f " + " ".join(str(i) for i in face))
+        return ("\n".join(linhas) + "\n").encode("utf-8")
+
+    def _enviar(self, conteudo, nome="scan.obj"):
+        return self.dona.post(
+            "/api/imoveis/%s/modelo" % self.iid,
+            data={"modelo": (io.BytesIO(conteudo), nome)},
+            content_type="multipart/form-data")
+
+    def test_o_escaneamento_vira_maquete_do_imovel(self):
+        """
+        O ponto todo: um imóvel que só tinha fotos passa a ter maquete.
+        """
+        antes = self.dona.get("/api/imoveis/%s/maquete" % self.iid)
+        self.assertEqual(antes.status_code, 404, "já tinha maquete antes")
+
+        r = self._enviar(self._obj())
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True)[:300])
+
+        depois = self.dona.get("/api/imoveis/%s/maquete" % self.iid)
+        self.assertEqual(depois.status_code, 200)
+        m = depois.get_json()["maquete"]
+        self.assertTrue(m["importado"])
+        self.assertAlmostEqual(m["medidas"]["largura"], 4.0, places=2)
+        self.assertAlmostEqual(m["medidas"]["fundo"], 3.0, places=2)
+
+    def test_arquivo_sem_geometria_e_recusado_antes_de_gravar(self):
+        """
+        Qualquer arquivo pode se chamar .obj. Aceitar e descobrir depois deixa
+        o corretor com uma maquete quebrada e sem explicação.
+        """
+        r = self._enviar(b"isto nao e um obj, e um bilhete")
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("geometria", r.get_json()["erro"])
+        self.assertFalse(os.path.exists(aplicacao.arq_modelo(self.iid)),
+                         "gravou um arquivo que já sabia estar errado")
+
+    def test_outro_formato_de_escaneamento_recebe_o_recado_certo(self):
+        """USDZ e PLY são o que os aplicativos oferecem junto com OBJ."""
+        r = self._enviar(b"qualquer coisa", nome="scan.usdz")
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("OBJ", r.get_json()["erro"])
+
+    def test_modelo_em_centimetros_e_aceito_com_aviso(self):
+        """
+        Escala errada não impede de usar — decidir isso pelo corretor seria
+        demais. Mas passar batido faria a maquete abrir com um cômodo de 400 m
+        e ninguém entenderia.
+        """
+        r = self._enviar(self._obj(escala=100.0))
+        self.assertEqual(r.status_code, 200)
+        avisos = " ".join(r.get_json()["avisos"])
+        self.assertIn("centímetros", avisos)
+
+    def test_o_visitante_ve_o_modelo_porque_precisa(self):
+        """
+        Aqui a publicidade é por NECESSIDADE, não escolha: desenhar no
+        navegador de quem abre o link exige que os bytes cheguem até lá.
+        """
+        self._enviar(self._obj())
+        visitante = aplicacao.app.test_client()
+        r = visitante.get("/api/imoveis/%s/modelo.obj" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(b"v ", r.get_data())
+
+    def test_apagar_o_modelo_devolve_o_imovel_ao_que_era(self):
+        self._enviar(self._obj())
+        self.assertEqual(
+            self.dona.delete("/api/imoveis/%s/modelo" % self.iid).status_code, 200)
+        self.assertEqual(
+            self.dona.get("/api/imoveis/%s/maquete" % self.iid).status_code, 404)
+        self.assertFalse(os.path.exists(aplicacao.arq_modelo(self.iid)))
+
+    def test_modelo_grande_demais_e_recusado_com_o_caminho_da_solucao(self):
+        """
+        Recusa sem saída é só um muro. O recado diz o que fazer no aplicativo.
+        """
+        with self.assertRaises(modelo3d.ErroModelo) as c:
+            modelo3d.conferir("v 0 0 0\nf 1 1 1\n",
+                              modelo3d.LIMITE_BYTES + 1)
+        self.assertIn("qualidade média", str(c.exception))
+
+    def test_a_pagina_traz_o_proprio_leitor_de_obj(self):
+        """
+        O three.js embarcado não traz carregador de OBJ — ele mora nos
+        "examples", fora do pacote. Sem leitor próprio, a página abriria vazia.
+        """
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        # a assinatura inteira, e a CHAMADA. Conferir só "function lerObj"
+        # passava com "function lerObjDesativado" — o nome trocado contém o
+        # nome certo como pedaço, e a mutação passou batida por isso.
+        self.assertIn("function lerObj(texto, cores){", html)
+        self.assertIn("function lerMtl(texto){", html)
+        self.assertIn("= lerObj(texto", html, "define o leitor mas não usa")
+        self.assertIn("lerMtl(await", html, "define o leitor de materiais mas não usa")
+        self.assertIn("livreNaMalha", html, "anda atravessando a malha")
+        self.assertIn("seguirOChao", html, "flutua em vez de seguir o piso")
+
+
 class TestExportarObj(Base):
     """
     A maquete baixada como OBJ + MTL, para abrir no SketchUp ou no Blender.
@@ -1340,6 +1468,10 @@ class TestPrimeiraPessoa(unittest.TestCase):
                 solidos.append({"x0": c[0] + cx, "x1": c[3] + cx,
                                 "z0": c[2] + cz, "z1": c[5] + cz})
         programa = ("const RAIO_CORPO = " + raio + ";\n"
+                    # a colisao por malha e do modelo IMPORTADO;
+                    # aqui se exercita a de caixas, sem malha
+                    "const malhaImportada = null;\n"
+                    "const livreNaMalha = () => true;\n"
                     "const solidos = " + json.dumps(solidos) + ";\n"
                     "const atual = 0;\n"
                     "const imoveis = [" + json.dumps(

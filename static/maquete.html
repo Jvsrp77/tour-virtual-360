@@ -39,6 +39,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     --sombra:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.35);
   }
 
+  /* hidden sozinho NAO vence um display: flex definido no CSS — o manche
+     aparecia fora da visita e as chaves inuteis continuavam na tela */
+  [hidden]{display:none !important}
   html,body{height:100%}
   body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--fonte);
     font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
@@ -187,7 +190,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           <div><dt>Área construída</dt><dd id="nArea">—</dd></div>
           <div><dt>Cômodos</dt><dd id="nComodos">—</dd></div>
           <div><dt>Pontos de captura</dt><dd id="nPontos">—</dd></div>
-          <div><dt>Volumes</dt><dd id="nVolumes">—</dd></div>
+          <div><dt id="rotVolumes">Volumes</dt><dd id="nVolumes">—</dd></div>
         </dl>
       </div>
 
@@ -199,7 +202,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         </div>
         <div class="chaves" style="margin-top:13px">
           <label class="chave"><input type="checkbox" id="chMoveis" checked> Mobiliário</label>
-          <label class="chave"><input type="checkbox" id="chPontos" checked> Pontos de captura</label>
+          <label class="chave"><input type="checkbox" id="chPontos"> Pontos de captura</label>
           <label class="chave"><input type="checkbox" id="chRotulos" checked> Nomes dos cômodos</label>
           <label class="chave"><input type="checkbox" id="chPlanta"> Planta baixa (vista de cima)</label>
         </div>
@@ -264,7 +267,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let cena, camera, renderizador, grupoObra, grupoMoveis, grupoPontos, grupoRotulos;
   let imoveis = [], atual = 0, selecionado = null, paredes = [], pisos = [];
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
-  let cameraOrto = null, emPlanta = false;
+  let cameraOrto = null, emPlanta = false, malhaImportada = null;
   let emPessoa = false, corteAntes = null, solidos = [], teclas = {};
   let manche = {frente: 0, lado: 0};
   const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0};
@@ -368,6 +371,42 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     g.arcTo(x, y + a, x, y, r);
     g.arcTo(x, y, x + l, y, r);
     g.closePath();
+  }
+
+  // Imovel importado nao tem caixas nem comodos: a geometria inteira vem do
+  // OBJ. Monta-se so a malha, e os controles que dependem de planta se
+  // recolhem — prometer metragem por comodo num escaneamento seria inventar.
+  async function montarImportado(imovel){
+    [grupoObra, grupoMoveis, grupoPontos, grupoRotulos].forEach(g => {
+      if (g) cena.remove(g);
+    });
+    grupoObra = new THREE.Group(); grupoMoveis = new THREE.Group();
+    grupoPontos = new THREE.Group(); grupoRotulos = new THREE.Group();
+    paredes = []; pisos = []; pinos = []; solidos = []; selecionado = null;
+    limparTrena();
+
+    const base = "/api/imoveis/" + IMOVEL;
+    let cores = null;
+    if (imovel.tem_mtl){
+      try { cores = lerMtl(await (await fetch(base + "/modelo.mtl")).text()); }
+      catch (e) { cores = null; }
+    }
+    const texto = await (await fetch(base + "/modelo.obj")).text();
+    const lido = lerObj(texto, cores);
+
+    // centraliza pelo chao, como a maquete gerada faz
+    const caixa = new THREE.Box3().setFromObject(lido.conjunto);
+    const meio = caixa.getCenter(new THREE.Vector3());
+    lido.conjunto.position.set(-meio.x, -caixa.min.y, -meio.z);
+    malhaImportada = lido.conjunto;
+    grupoObra.add(lido.conjunto);
+    cena.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
+
+    const tam = caixa.getSize(new THREE.Vector3());
+    orbita.raio = Math.max(tam.x, tam.z, 3) * 1.4;
+    orbita.alvo.set(0, Math.min(tam.y, 3) * 0.4, 0);
+    imovel.larg = tam.x; imovel.fundo = tam.z; imovel.pe = tam.y;
+    return lido.triangulos;
   }
 
   function montar(imovel){
@@ -786,13 +825,15 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   function entrarEmPessoa(){
     const im = imoveis[atual];
-    if (!im || !im.pontos.length) return;
-    const p = pontoDeEntrada(im);
+    if (!im) return;
+    // modelo importado nao tem ponto de captura: entra-se no meio dele
+    const p = im.importado ? {x: 0, z: 0} : pontoDeEntrada(im);
     if (!p){
       avisarTrena("Não achei lugar livre para entrar neste imóvel.");
       return;
     }
     pessoa.pos.set(p.x, OLHO, p.z);
+    seguirOChao();
     pessoa.giro = 0;
     pessoa.inclinacao = 0;
     emPessoa = true;
@@ -851,6 +892,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // circulo. Testa-se um eixo de cada vez — assim, ao esbarrar na parede de
   // lado, ainda se desliza ao longo dela em vez de travar.
   function livre(x, z){
+    // Modelo importado nao tem caixas: a geometria e malha. Ali a pergunta
+    // vira "ha triangulo entre onde estou e onde quero pisar?", respondida com
+    // um raio na altura do quadril — no pe passaria por baixo do sofa, na
+    // cabeca passaria por cima da bancada.
+    if (malhaImportada) return livreNaMalha(x, z);
+
     for (const b of solidos){
       if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO
           && z > b.z0 - RAIO_CORPO && z < b.z1 + RAIO_CORPO) return false;
@@ -858,6 +905,33 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const im = imoveis[atual];
     const meiaL = im.larg / 2 - 0.2, meiaF = im.fundo / 2 - 0.2;
     return x > -meiaL && x < meiaL && z > -meiaF && z < meiaF;
+  }
+
+  const raioColisao = new THREE.Raycaster();
+
+  function livreNaMalha(x, z){
+    const de = new THREE.Vector3(pessoa.pos.x, pessoa.pos.y - 0.6, pessoa.pos.z);
+    const para = new THREE.Vector3(x - pessoa.pos.x, 0, z - pessoa.pos.z);
+    const dist = para.length();
+    if (dist < 1e-6) return true;
+    para.normalize();
+    raioColisao.set(de, para);
+    raioColisao.far = dist + RAIO_CORPO;
+    const bateu = raioColisao.intersectObject(malhaImportada, true)[0];
+    return !bateu || bateu.distance > dist + RAIO_CORPO;
+  }
+
+  // Escaneamento nao tem chao plano em y=0: tem degrau, tapete, desnivel. O
+  // olho acompanha o piso em vez de flutuar numa altura fixa.
+  const raioChao = new THREE.Raycaster();
+
+  function seguirOChao(){
+    if (!malhaImportada) return;
+    raioChao.set(new THREE.Vector3(pessoa.pos.x, pessoa.pos.y + 2.0, pessoa.pos.z),
+                 new THREE.Vector3(0, -1, 0));
+    raioChao.far = 12;
+    const chao = raioChao.intersectObject(malhaImportada, true)[0];
+    if (chao) pessoa.pos.y = chao.point.y + OLHO;
   }
 
   // Para onde o passo leva.
@@ -893,6 +967,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
     if (livre(pessoa.pos.x + dx, pessoa.pos.z)) pessoa.pos.x += dx;
     if (livre(pessoa.pos.x, pessoa.pos.z + dz)) pessoa.pos.z += dz;
+    seguirOChao();
     mostrarOnde();
   }
 
@@ -902,6 +977,90 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const zona = im.zonas.find(q => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1);
     const onde = $("ondeEstou");
     if (onde) onde.textContent = zona ? zona.nome : "passagem";
+  }
+
+  // ------------------------------------------------- modelo vindo de fora
+  //
+  // O three.js que este projeto embarca nao traz o carregador de OBJ (ele mora
+  // nos "examples", fora do pacote). Em vez de puxar mais um arquivo, o leitor
+  // vive aqui: OBJ e texto simples, e o que um escaneamento usa e um punhado de
+  // comandos — v, vn, f, usemtl, mtllib. Escrito assim, tambem da para testar.
+
+  function lerMtl(texto){
+    const cores = {};
+    let atual = null;
+    for (const bruta of texto.split("\n")){
+      const linha = bruta.trim();
+      if (linha.startsWith("newmtl ")){
+        atual = linha.slice(7).trim();
+        cores[atual] = "#c8c8c8";
+      } else if (linha.startsWith("Kd ") && atual){
+        const [r, g, b] = linha.split(/\s+/).slice(1, 4).map(Number);
+        const oito = v => Math.max(0, Math.min(255, Math.round((v || 0) * 255)));
+        cores[atual] = "#" + [oito(r), oito(g), oito(b)]
+          .map(v => v.toString(16).padStart(2, "0")).join("");
+      }
+    }
+    return cores;
+  }
+
+  function lerObj(texto, cores){
+    const vs = [], vns = [];
+    const grupos = new Map();          // material -> {pos: [], nor: []}
+    let material = "padrao";
+
+    const indice = (i, total) => i > 0 ? i - 1 : total + i;   // OBJ aceita negativo
+
+    for (const bruta of texto.split("\n")){
+      const linha = bruta.trim();
+      if (!linha || linha[0] === "#") continue;
+      const p = linha.split(/\s+/);
+
+      if (p[0] === "v"){
+        vs.push(+p[1], +p[2], +p[3]);
+      } else if (p[0] === "vn"){
+        vns.push(+p[1], +p[2], +p[3]);
+      } else if (p[0] === "usemtl"){
+        material = p.slice(1).join(" ") || "padrao";
+      } else if (p[0] === "f"){
+        if (!grupos.has(material)) grupos.set(material, {pos: [], nor: []});
+        const g = grupos.get(material);
+        const cantos = p.slice(1).map(c => {
+          const partes = c.split("/");
+          return {v: indice(parseInt(partes[0], 10), vs.length / 3),
+                  n: partes[2] ? indice(parseInt(partes[2], 10), vns.length / 3) : -1};
+        });
+        // leque de triangulos: escaneamento as vezes traz quadrilatero
+        for (let k = 1; k + 1 < cantos.length; k++){
+          for (const c of [cantos[0], cantos[k], cantos[k + 1]]){
+            g.pos.push(vs[c.v * 3], vs[c.v * 3 + 1], vs[c.v * 3 + 2]);
+            if (c.n >= 0 && vns.length){
+              g.nor.push(vns[c.n * 3], vns[c.n * 3 + 1], vns[c.n * 3 + 2]);
+            }
+          }
+        }
+      }
+    }
+
+    const conjunto = new THREE.Group();
+    let triangulos = 0;
+    grupos.forEach((g, nome) => {
+      if (!g.pos.length) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position",
+        new THREE.BufferAttribute(new Float32Array(g.pos), 3));
+      if (g.nor.length === g.pos.length){
+        geo.setAttribute("normal",
+          new THREE.BufferAttribute(new Float32Array(g.nor), 3));
+      } else {
+        geo.computeVertexNormals();     // escaneamento nem sempre traz normais
+      }
+      const cor = (cores && cores[nome]) || "#c2c2c2";
+      conjunto.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+        color: new THREE.Color(cor), side: THREE.DoubleSide})));
+      triangulos += g.pos.length / 9;
+    });
+    return {conjunto: conjunto, triangulos: triangulos};
   }
 
   // ---------------------------------------------------------------- manche
@@ -1030,10 +1189,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     });
     ctx.globalAlpha = 1;
 
-    // os pontos de captura
+    // os pontos de captura, so se a chave estiver ligada: ve-los sumir da
+    // maquete e continuarem no mapa seria a mesma cena contando duas historias
     ctx.fillStyle = acento;
     ctx.globalAlpha = 0.45;
-    im.pontos.forEach(p => {
+    (($("chPontos") || {}).checked ? im.pontos : []).forEach(p => {
       ctx.beginPath();
       ctx.arc(px(p.x), pz(p.z), 2, 0, Math.PI * 2);
       ctx.fill();
@@ -1094,13 +1254,52 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     ficha.hidden = false;
   }
 
-  function mostrar(i){
+  async function mostrar(i){
     atual = i;
     const im = imoveis[i];
-    montar(im);
+    malhaImportada = null;
+    if (im.importado){
+      const tri = await montarImportado(im);
+      im.nome = im.titulo || "Modelo importado";
+      im.triangulos = tri;
+    } else {
+      montar(im);
+    }
     $("titulo").textContent = im.nome;
     $("descricao").textContent = im.descricao;
     $("seloNome").textContent = im.nome;
+
+    // Escaneamento nao vem com comodos nem metragem por ambiente. Mostrar "0
+    // cômodos · 0,0 m²" seria dizer que o imovel nao tem nada; melhor mostrar
+    // o que o modelo REALMENTE sabe dizer — o tamanho que ele ocupa.
+    if (im.importado){
+      const m = im.medidas || {};
+      $("nArea").textContent = nBR((m.largura || 0) * (m.fundo || 0), 1) + " m²";
+      $("nComodos").textContent = "—";
+      $("nPontos").textContent = "—";
+      $("nVolumes").textContent = nBR(im.triangulos || 0, 0);
+      $("rotVolumes").textContent = "Triângulos";
+      $("nArea").previousElementSibling.textContent = "Ocupa";
+      document.querySelector('[for="corte"]') &&
+        ($("corte").closest(".corte").hidden = true);
+      $("comodos").innerHTML =
+        '<li><button class="comodo" disabled><span>Modelo importado: ' +
+        'sem divisão por cômodo</span></button></li>';
+      $("seloNome").textContent = im.nome + " · " + nBR(m.largura || 0, 1)
+        + " × " + nBR(m.fundo || 0, 1) + " m";
+      // Planta baixa CONTINUA valendo num modelo importado: a camera
+      // ortografica serve a malha tanto quanto as caixas. As outras tres nao
+      // tem o que ligar ou desligar — escaneamento nao separa movel de parede.
+      ["chMoveis", "chPontos", "chRotulos"].forEach(id => {
+        const campo = $(id);
+        if (campo && campo.parentNode) campo.parentNode.hidden = true;
+      });
+      if (emPessoa) sairDePessoa();
+      ocioso = girarSozinho;
+      mostrarCotas();
+      return;
+    }
+
     const area = im.zonas.reduce((s, z) => s + z.m2, 0);
     $("nArea").textContent = nBR(area, 1) + " m²";
     $("nComodos").textContent = im.zonas.length;

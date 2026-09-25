@@ -239,6 +239,24 @@ MUT = [
      "    if False:",
      "TestRestaurarBackup.test_zip_que_nao_e_backup_e_recusado"),
 
+    # arquivo que so se descobre quebrado ao abrir deixa o corretor sem saber
+    ("modelo importado entra sem conferencia", "app.py",
+     "        medidas, avisos = modelo3d.conferir(texto, len(bruto))",
+     "        medidas, avisos = modelo3d.medir(texto), []",
+     "TestImportarModelo.test_modelo_em_centimetros_e_aceito_com_aviso"),
+
+    # sem leitor proprio de OBJ a pagina abre vazia: o three.js embarcado nao traz
+    ("pagina perde o leitor de OBJ", "static/maquete.html",
+     "  function lerObj(texto, cores){",
+     "  function lerObjDesativado(texto, cores){",
+     "TestImportarModelo.test_a_pagina_traz_o_proprio_leitor_de_obj"),
+
+    # escaneamento sem geometria nao pode ser gravado
+    ("aceita obj sem geometria", "modelo3d.py",
+     "    if not vertices or not faces:",
+     "    if False:",
+     "TestImportarModelo.test_arquivo_sem_geometria_e_recusado_antes_de_gravar"),
+
     # a tela cresce o Y para BAIXO: trocar o sinal inverte o manche, o mesmo
     # defeito do W, so que no celular
     ("manche com o eixo invertido", "static/maquete.html",
