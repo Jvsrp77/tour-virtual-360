@@ -487,6 +487,82 @@ MUT = [
      'addEventListener("fullscreenchange", () => setTimeout(redimensionar, 60));',
      'addEventListener("fullscreenchange", () => {});',
      "TestCompartilharAMaquete.test_tela_cheia_recalcula_a_camera"),
+    # --- a maquete abrindo sem internet, sem 3D, e sabendo do sol ---
+
+    # a pagina carregava o three.js duas vezes e a segunda vinha do cdnjs:
+    # rede de empresa com CDN bloqueado deixava a maquete numa versao que
+    # ninguem nunca exercitou
+    ("three.js volta a vir da internet", "static/maquete.html",
+     "<script>\n(function(){",
+     '<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>\n<script>\n(function(){',
+     "TestBibliotecaPropria"),
+
+    # sem o guarda, notebook sem aceleracao grafica fica com a tela preta e
+    # nenhuma palavra de explicacao
+    ("pagina monta sem conferir o 3D", "static/maquete.html",
+     "if (!iniciar3d()) return;",
+     "iniciar3d();",
+     "TestSemAceleracao3D.test_a_pagina_desiste_de_montar_quando_nao_da"),
+
+    # ha navegador que LANCA ao perguntar pelo contexto em vez de devolver
+    # null; devolver true ali levaria direto ao erro que o guarda evita
+    ("navegador que explode passa por bom", "static/maquete.html",
+     "    }catch(e){ return false; }",
+     "    }catch(e){ return true; }",
+     "TestSemAceleracao3D.test_navegador_que_explode_ao_perguntar_nao_derruba_a_pagina"),
+
+    ("recado fica fora do palco", "static/maquete.html",
+     '    $("recado").hidden = false;',
+     '    $("recado").hidden = true;',
+     "TestSemAceleracao3D.test_o_recado_aparece_no_palco_e_nao_so_no_texto_lateral"),
+
+    # o erro classico: a formula do livro poe o sol do meio-dia ao SUL, que
+    # vale para a Europa e esta invertido no Brasil inteiro
+    ("sol do meio-dia ao sul, como na Europa", "static/maquete.html",
+     "        (-Math.sin(alt) * Math.sin(lat)) / baixo));",
+     "        (Math.sin(alt) * Math.sin(lat)) / baixo));",
+     "TestSolDoImovel.test_ao_meio_dia_no_brasil_o_sol_esta_ao_NORTE"),
+
+    ("sol nasce a oeste", "static/maquete.html",
+     "    if (H > 0) az = 360 - az;",
+     "    if (H < 0) az = 360 - az;",
+     "TestSolDoImovel.test_o_sol_nasce_a_leste_e_se_poe_a_oeste"),
+
+    # janela ao sul nao pega sol direto nenhum dia do ano, visto do Brasil
+    ("sol entra por tras da parede", "static/maquete.html",
+     "      if (d > 80) continue;",
+     "      if (d > 100) continue;",
+     "TestSolDoImovel.test_janela_ao_sul_no_brasil_nao_pega_sol_nenhum_dia"),
+
+    # orientacao que ninguem informou nao pode virar "norte por padrao"
+    ("imovel sem orientacao e tratado como ao norte", "static/maquete.html",
+     "    if (frente === null || frente === undefined) return null;\n    const perto = 0.2;",
+     "    const perto = 0.2;",
+     "TestSolDoImovel.test_sem_orientacao_a_pagina_nao_chuta"),
+
+    ("comodo herda a janela do vizinho", "static/maquete.html",
+     "    const perto = 0.36, minimo = 0.2;",
+     "    const perto = 5, minimo = 0.2;",
+     "TestSolDoImovel.test_cada_comodo_recebe_a_janela_da_propria_parede"),
+
+    ("a luz da cena ignora a hora", "static/maquete.html",
+     "    const alt = Math.max(s.altura, 6) * grau;",
+     "    const alt = 45 * grau;",
+     "TestSolDoImovel.test_a_luz_da_cena_segue_a_hora"),
+
+    # a orientacao e publica para LER e privada para escrever: ela muda o que
+    # o anuncio afirma sobre o imovel
+    ("qualquer um gira o imovel alheio", "app.py",
+     '"maquete", "api.api_maquete",',
+     '"maquete", "api.api_maquete", "api.api_orientacao",',
+     "TestOrientacaoDoImovel.test_visitante_nao_reorienta_imovel_alheio"),
+
+    # zero e "a frente olha para o norte", que e informacao; None e "ninguem
+    # disse". Confundir os dois anuncia sol em imovel que ninguem orientou
+    ("frente ao norte vira nao informado", "app.py",
+     "    valor = tour.get(\"frente\")\n    if valor is None:",
+     "    valor = tour.get(\"frente\")\n    if not valor:",
+     "TestOrientacaoDoImovel.test_a_frente_ao_norte_nao_se_confunde_com_nao_informado"),
 ]
 
 

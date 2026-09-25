@@ -1161,6 +1161,7 @@ def api_maquete():
                 "medidas": info.get("medidas", {}),
                 "avisos": info.get("avisos", []),
                 "tem_mtl": os.path.exists(arq_modelo(g.imovel, ".mtl")),
+                "frente": _orientacao(tour_agora),
                 "zonas": [], "caixas": [], "pontos": [], "janelas": [],
                 "larg": (info.get("medidas") or {}).get("largura", 10),
                 "fundo": (info.get("medidas") or {}).get("fundo", 10),
@@ -1173,6 +1174,7 @@ def api_maquete():
     tour = carregar_tour()
     dados["titulo"] = tour.get("titulo") or dados.get("nome", "")
     dados["descricao"] = tour.get("descricao") or dados.get("descricao", "")
+    dados["frente"] = _orientacao(tour)
 
     # Costura a maquete ao tour: cada ponto de captura vira um link para a cena
     # 360 tirada dali. O casamento e pelo NOME, que e o mesmo dos dois lados
@@ -1182,6 +1184,51 @@ def api_maquete():
     for ponto in dados.get("pontos", []):
         ponto["cena_id"] = por_nome.get(ponto.get("nome"))
     return jsonify({"ok": True, "maquete": dados})
+
+
+def _orientacao(tour):
+    """
+    Para que lado aponta a frente do imovel, em graus de bussola.
+
+    None quando ninguem disse. E diferente de zero: zero e "a frente olha para
+    o NORTE", que e uma informacao; None e "nao sabemos", e a pagina precisa
+    saber a diferenca para nao inventar a hora do sol.
+    """
+    valor = tour.get("frente")
+    if valor is None:
+        return None
+    try:
+        return int(float(valor)) % 360
+    except (TypeError, ValueError):
+        return None
+
+
+@api.route("/orientacao", methods=["PUT", "DELETE"])
+def api_orientacao():
+    """
+    Guarda para que lado a frente do imovel esta voltada.
+
+    Isto nao sai da geometria: planta nenhuma carrega o norte. Quem sabe e
+    quem esteve no imovel, e por isso e do dono — e fica gravado no tour, e
+    nao no endereco, para que TODO visitante veja a mesma coisa. Orientacao
+    que viajasse so no link daria sol da manha para um e sol da tarde para
+    outro, no mesmo imovel.
+    """
+    tour = carregar_tour()
+    if request.method == "DELETE":
+        tour.pop("frente", None)
+        salvar_tour(tour)
+        return jsonify({"ok": True, "frente": None})
+
+    bruto = (request.get_json(silent=True) or {}).get("frente")
+    try:
+        graus = int(float(bruto)) % 360
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "erro":
+                        "Informe a direção da frente em graus, de 0 a 359."}), 422
+    tour["frente"] = graus
+    salvar_tour(tour)
+    return jsonify({"ok": True, "frente": graus})
 
 
 @api.route("/modelo", methods=["POST"])

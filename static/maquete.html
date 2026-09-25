@@ -69,6 +69,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   #tela{display:block;width:100%;height:100%;touch-action:none;cursor:grab}
   #tela:active{cursor:grabbing}
 
+  .recado{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:7px;text-align:center;
+    padding:26px;background:var(--surface)}
+  .recado b{font-size:15px}
+  .recado span{font-size:12.5px;color:var(--muted);max-width:44ch}
   .canto{position:absolute;font-family:var(--mono);font-size:11px;color:var(--muted);
     letter-spacing:.02em;pointer-events:none;user-select:none}
   .dica{right:12px;bottom:11px;text-align:right}
@@ -167,6 +172,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   <div class="corpo">
     <section class="palco">
       <canvas id="tela"></canvas>
+      <div class="recado" id="recado" hidden><b id="recadoT"></b><span id="recadoP"></span></div>
       <div class="selo canto"><b id="seloNome">—</b> · pé-direito <b>2,70 m</b></div>
       <div class="escala canto"><span class="regua" id="regua"></span><span id="reguaTxt">2 m</span></div>
       <div class="dica canto">arraste para girar · role para aproximar</div>
@@ -212,6 +218,33 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         </div>
       </div>
 
+      <div class="cartao" id="cartaoSol">
+        <p class="rotulo">Sol</p>
+        <div class="corte">
+          <label for="hora">Hora do dia <b id="horaTxt">10h</b></label>
+          <input type="range" id="hora" min="6" max="18" step="0.5" value="10">
+        </div>
+        <div id="frenteDona" hidden style="margin-top:13px">
+          <label for="frente" style="font-size:13px">A frente do imóvel está
+          voltada para</label>
+          <select id="frente" style="width:100%;margin-top:6px;font:inherit;
+                  font-size:13px;padding:7px 9px;border-radius:8px;
+                  border:1px solid var(--line);background:var(--ground);
+                  color:var(--ink)">
+            <option value="">— não informado —</option>
+            <option value="0">Norte</option>
+            <option value="45">Nordeste</option>
+            <option value="90">Leste</option>
+            <option value="135">Sudeste</option>
+            <option value="180">Sul</option>
+            <option value="225">Sudoeste</option>
+            <option value="270">Oeste</option>
+            <option value="315">Noroeste</option>
+          </select>
+        </div>
+        <p class="nota" id="solTxt" style="margin-top:10px"></p>
+      </div>
+
       <div class="cartao" id="cartaoExportar" hidden>
         <p class="rotulo">Modelo 3D</p>
         <a class="bt" id="btObj" style="width:100%;text-align:center">Baixar OBJ</a>
@@ -242,6 +275,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           <div><dt>Área</dt><dd id="comodoA">—</dd></div>
           <div><dt>Volume</dt><dd id="comodoV">—</dd></div>
         </dl>
+        <p class="nota" id="comodoSol" style="margin-top:10px"></p>
         <p class="nota" id="comodoPontos" style="margin-top:10px"></p>
       </div>
 
@@ -259,7 +293,6 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -273,7 +306,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
   let cameraOrto = null, emPlanta = false, malhaImportada = null;
   let emPessoa = false, corteAntes = null, solidos = [], teclas = {};
-  let manche = {frente: 0, lado: 0};
+  let manche = {frente: 0, lado: 0}, luzDoSol = null;
   const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0};
 
   // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
@@ -283,21 +316,48 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   const girarSozinho = !matchMedia("(prefers-reduced-motion: reduce)").matches;
   let ocioso = girarSozinho;
 
+  // Notebook antigo da imobiliaria, maquina virtual, navegador com aceleracao
+  // desligada por politica da empresa: em todos, criar o renderizador LANCA, e
+  // ate aqui a pagina simplesmente ficava preta. O corretor abria na frente do
+  // cliente e nao tinha o que dizer.
+  function temWebGL(){
+    try{
+      const c = document.createElement("canvas");
+      return !!(c.getContext("webgl2") || c.getContext("webgl")
+                || c.getContext("experimental-webgl"));
+    }catch(e){ return false; }
+  }
+
   function iniciar3d(){
+    if (!temWebGL()){
+      erro("Este navegador não desenha 3D",
+           "A maquete precisa de aceleração gráfica (WebGL), que está "
+           + "desligada ou indisponível aqui. O tour 360 do mesmo imóvel abre "
+           + "normalmente — o botão está no canto superior direito.");
+      return false;
+    }
     // preserveDrawingBuffer para conseguir salvar a vista como imagem: sem
     // ele, toDataURL devolve tela em branco, porque o navegador descarta o
     // desenho assim que o quadro termina.
-    renderizador = new THREE.WebGLRenderer({canvas: tela, antialias: true,
-                                            alpha: true,
-                                            preserveDrawingBuffer: true});
+    try{
+      renderizador = new THREE.WebGLRenderer({canvas: tela, antialias: true,
+                                              alpha: true,
+                                              preserveDrawingBuffer: true});
+    }catch(e){
+      erro("Não foi possível abrir a maquete",
+           "O navegador aceitou o 3D mas falhou ao começar a desenhar. "
+           + "O tour 360 do mesmo imóvel abre normalmente.");
+      return false;
+    }
     renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
     cena = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
 
     cena.add(new THREE.AmbientLight(0xffffff, 0.72));
-    const sol = new THREE.DirectionalLight(0xffffff, 0.62);
-    sol.position.set(9, 16, 7);
-    cena.add(sol);
+    // a luz principal deixa de ser fixa: ela segue a hora escolhida
+    luzDoSol = new THREE.DirectionalLight(0xffffff, 0.62);
+    luzDoSol.position.set(9, 16, 7);
+    cena.add(luzDoSol);
     const contraluz = new THREE.DirectionalLight(0xffffff, 0.22);
     contraluz.position.set(-8, 7, -9);
     cena.add(contraluz);
@@ -306,7 +366,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     addEventListener("resize", redimensionar);
     ligarControles();
     ligarManche();
+    aplicarSol();
     desenhar();
+    return true;
   }
 
   function redimensionar(){
@@ -690,6 +752,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("btPessoa").addEventListener("click", () => {
       if (emPessoa) sairDePessoa(); else entrarEmPessoa();
     });
+    $("hora").addEventListener("input", () => {
+      horaDoSol = parseFloat($("hora").value);
+      $("horaTxt").textContent = hhmm(horaDoSol);
+      aplicarSol();
+    });
+    $("frente").addEventListener("change", guardarOrientacao);
     $("btCheia").addEventListener("click", telaCheia);
     $("btImagem").addEventListener("click", salvarImagem);
     $("btLinkComodo").addEventListener("click", copiarLinkDoComodo);
@@ -1320,6 +1388,192 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     }
   }
 
+  // -------------------------------------------------------------------- sol
+  //
+  // "Que horas bate sol na sala?" e a segunda pergunta de quem procura imovel,
+  // logo depois da metragem — e a maquete nao sabia responder, mesmo tendo as
+  // janelas medidas e sabendo para que lado cada uma aponta. O que faltava era
+  // o NORTE, que geometria nenhuma carrega: planta baixa nao tem bussola.
+  //
+  // Por isso a orientacao e do corretor, nao do programa. Ele diz uma vez para
+  // que lado a frente do imovel esta voltada, fica gravado no imovel, e todo
+  // mundo que abrir o link ve a mesma resposta.
+
+  const LATITUDE = -23.55;     // Sao Paulo; o Brasil quase todo no hemisferio sul
+  let frenteGraus = null;      // null e "ninguem disse", e nao "a frente olha ao norte"
+  let horaDoSol = 10;
+
+  // Altura e azimute do sol numa hora, no EQUINOCIO.
+  //
+  // Equinocio de proposito: e a media do ano, e prometer precisao de dia
+  // especifico exigiria data, longitude e fuso do imovel — ninguem vai digitar
+  // isso, e um numero preciso que ninguem conferiu e pior do que um honesto.
+  // O azimute conta a partir do norte, no sentido do relogio: 0 N, 90 L,
+  // 180 S, 270 O.
+  function posicaoDoSol(hora, latGraus){
+    const grau = Math.PI / 180;
+    const lat = (latGraus === undefined ? LATITUDE : latGraus) * grau;
+    const H = (hora - 12) * 15 * grau;            // angulo horario
+    const alt = Math.asin(Math.cos(lat) * Math.cos(H));
+    let az = 0;
+    const baixo = Math.cos(alt) * Math.cos(lat);
+    if (Math.abs(baixo) > 1e-9){
+      const cosAz = Math.max(-1, Math.min(1,
+        (-Math.sin(alt) * Math.sin(lat)) / baixo));
+      az = Math.acos(cosAz) / grau;               // 0 a 180, do lado LESTE
+    }
+    // de tarde o sol esta do lado oeste; de manha o acos ja da o lado certo
+    if (H > 0) az = 360 - az;
+    return {altura: alt / grau, azimute: (az + 360) % 360};
+  }
+
+  // Para que lado uma janela olha, em graus de bussola.
+  //
+  // A geometria guarda a janela como uma caixa rente a uma parede externa. Se
+  // ela estiver colada na parede da frente, olha para onde a frente olha; se
+  // estiver na da esquerda, olha 90 graus para tras, e assim por diante.
+  // Janela que nao encosta em parede externa nao ve o sol e devolve null.
+  function ladoDaJanela(j, im, frente){
+    if (frente === null || frente === undefined) return null;
+    const perto = 0.2;
+    const [x0, x1, z0, z1] = j;
+    let giro = null;
+    if (Math.abs(z0) < perto && Math.abs(z1) < perto) giro = 0;            // frente
+    else if (Math.abs(z0 - im.fundo) < perto && Math.abs(z1 - im.fundo) < perto) giro = 180;
+    else if (Math.abs(x0) < perto && Math.abs(x1) < perto) giro = 270;     // esquerda
+    else if (Math.abs(x0 - im.larg) < perto && Math.abs(x1 - im.larg) < perto) giro = 90;
+    if (giro === null) return null;
+    return (frente + giro + 360) % 360;
+  }
+
+  // As janelas que dao para o comodo: mesma parede externa, com sobreposicao.
+  function janelasDoComodo(z, im){
+    const perto = 0.36, minimo = 0.2;
+    return (im.janelas || []).filter(j => {
+      const [x0, x1, z0, z1] = j;
+      if (Math.abs(z1 - z0) < 0.001){                  // janela na frente ou no fundo
+        const naParede = Math.abs(z0 - z.z0) < perto || Math.abs(z0 - z.z1) < perto;
+        return naParede && Math.min(x1, z.x1) - Math.max(x0, z.x0) > minimo;
+      }
+      const naParede = Math.abs(x0 - z.x0) < perto || Math.abs(x0 - z.x1) < perto;
+      return naParede && Math.min(z1, z.z1) - Math.max(z0, z.z0) > minimo;
+    });
+  }
+
+  // De que horas a que horas o sol entra por uma abertura voltada para `lado`.
+  //
+  // O limite de 80 graus nao e capricho: sol raspando a fachada quase de lado
+  // nao entra no comodo, e prometer sol das 6h as 18h para uma janela que so
+  // pega o fim da tarde seria o tipo de exagero que o cliente descobre na
+  // primeira visita.
+  function horasDeSol(lado){
+    if (lado === null || lado === undefined) return null;
+    let inicio = null, fim = null;
+    for (let h = 5; h <= 19.0001; h += 0.25){
+      const s = posicaoDoSol(h);
+      if (s.altura <= 3) continue;
+      // diferenca entre dois rumos de bussola, de 0 (mesma direcao) a 180
+      const d = Math.abs(((s.azimute - lado + 540) % 360) - 180);
+      if (d > 80) continue;                          // o sol esta atras da parede
+      if (inicio === null) inicio = h;
+      fim = h;
+    }
+    return inicio === null ? null : {inicio: inicio, fim: fim};
+  }
+
+  function hhmm(h){
+    const inteiras = Math.floor(h + 1e-6);
+    const minutos = Math.round((h - inteiras) * 60);
+    return minutos ? inteiras + "h" + String(minutos).padStart(2, "0")
+                   : inteiras + "h";
+  }
+
+  // A frase que vai na ficha do comodo. Junta as janelas do comodo num
+  // intervalo so: quem pergunta quer saber se bate sol de manha, nao a lista
+  // de aberturas.
+  function solDoComodo(z, im, frente){
+    if (frente === null || frente === undefined) return "";
+    // so janela de parede EXTERNA ve o sol; passagem interna nao conta
+    const lados = janelasDoComodo(z, im)
+      .map(j => ladoDaJanela(j, im, frente))
+      .filter(l => l !== null);
+    if (!lados.length) return "Sem janela para fora.";
+
+    let inicio = null, fim = null;
+    lados.forEach(lado => {
+      const faixa = horasDeSol(lado);
+      if (!faixa) return;
+      inicio = inicio === null ? faixa.inicio : Math.min(inicio, faixa.inicio);
+      fim = fim === null ? faixa.fim : Math.max(fim, faixa.fim);
+    });
+    // no hemisferio sul o sol nunca passa ao sul: janela para la nao pega sol
+    // direto nenhum dia do ano, e dizer "sem sol" sem dizer POR QUE pareceria
+    // defeito da conta
+    if (inicio === null){
+      return "Janela voltada para o " + rumo(lados[0])
+           + ": não recebe sol direto.";
+    }
+    const quando = fim <= 12 ? "Sol da manhã"
+                 : inicio >= 12 ? "Sol da tarde"
+                 : "Sol de manhã e de tarde";
+    return quando + ", das " + hhmm(inicio) + " às " + hhmm(fim) + ".";
+  }
+
+  const RUMOS = ["norte", "nordeste", "leste", "sudeste",
+                 "sul", "sudoeste", "oeste", "noroeste"];
+
+  function rumo(graus){
+    return RUMOS[Math.round(((graus % 360) + 360) % 360 / 45) % 8];
+  }
+
+  // Poe a luz do sol na direcao certa dentro da cena.
+  //
+  // A cena nao tem bussola: o que ela tem e a frente do imovel virada para o
+  // -Z. Entao o azimute de bussola vira angulo de cena descontando a frente.
+  function direcaoDoSol(hora, frente){
+    const s = posicaoDoSol(hora);
+    const grau = Math.PI / 180;
+    const naCena = ((s.azimute - (frente || 0)) + 360) % 360 * grau;
+    const alt = Math.max(s.altura, 6) * grau;        // nunca rente ao chao
+    const plano = Math.cos(alt);
+    return {x: Math.sin(naCena) * plano,
+            y: Math.sin(alt),
+            z: -Math.cos(naCena) * plano};
+  }
+
+  function aplicarSol(){
+    if (!luzDoSol) return;
+    const d = direcaoDoSol(horaDoSol, frenteGraus);
+    luzDoSol.position.set(d.x * 24, d.y * 24, d.z * 24);
+    const s = posicaoDoSol(horaDoSol);
+    const txt = $("solTxt");
+    if (txt){
+      txt.textContent = frenteGraus === null
+        ? "Defina a frente do imóvel para saber as horas de sol."
+        : hhmm(horaDoSol) + " · sol a " + rumo(s.azimute)
+          + ", " + Math.round(s.altura) + "° acima do horizonte";
+    }
+  }
+
+  // A orientacao fica gravada no IMOVEL, e nao no endereco. Se viajasse so no
+  // link, dois visitantes do mesmo imovel poderiam ver sol da manha e sol da
+  // tarde — e a pergunta "bate sol na sala?" so vale se a resposta for uma so.
+  async function guardarOrientacao(){
+    const bruto = $("frente").value;
+    frenteGraus = bruto === "" ? null : parseInt(bruto, 10);
+    aplicarSol();
+    mostrarCotas();
+    try{
+      await fetch("/api/imoveis/" + IMOVEL + "/orientacao", {
+        method: bruto === "" ? "DELETE" : "PUT",
+        headers: {"Content-Type": "application/json"},
+        credentials: "same-origin",
+        body: bruto === "" ? null : JSON.stringify({frente: frenteGraus})});
+    }catch(e){
+      avisarTrena("Não consegui gravar a orientação: o servidor não respondeu.");
+    }
+  }
+
   // ----------------------------------------------------------------- ficha
 
   function selecionar(nome){
@@ -1352,6 +1606,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("comodoP").textContent = nBR(P, 2) + " m";
     $("comodoA").textContent = nBR(z.m2, 1) + " m²";
     $("comodoV").textContent = nBR(z.m2 * im.pe, 1) + " m³";
+
+    const sol = solDoComodo(z, im, frenteGraus);
+    $("comodoSol").textContent = sol;
+    $("comodoSol").hidden = !sol;
 
     const dentro = (im.pontos || []).filter(p =>
       p.x >= z.x0 && p.x <= z.x1 && p.z >= z.z0 && p.z <= z.z1);
@@ -1433,9 +1691,15 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     }
   }
 
+  // O recado vai no PALCO, e nao so na coluna lateral. Um retangulo preto com
+  // a explicacao escrita do lado parece defeito; quem abre olha para o lugar
+  // onde a maquete deveria estar.
   function erro(titulo, texto){
-    document.getElementById("titulo").textContent = titulo;
-    document.getElementById("descricao").textContent = texto;
+    $("titulo").textContent = titulo;
+    $("descricao").textContent = texto;
+    $("recadoT").textContent = titulo;
+    $("recadoP").textContent = texto;
+    $("recado").hidden = false;
   }
 
   document.getElementById("btTour").href = URL_TOUR_PG;
@@ -1452,6 +1716,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       document.getElementById("btObj").href =
         "/api/imoveis/" + IMOVEL + "/maquete/obj";
       document.getElementById("cartaoExportar").hidden = false;
+      // so quem esteve no imovel sabe para que lado ele olha
+      document.getElementById("frenteDona").hidden = false;
     }catch(e){ /* sem sessao ou sem servidor: fica escondido */ }
   })();
   fetch(URL_MAQUETE).then(r => r.json()).then(j => {
@@ -1459,8 +1725,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (!dados || !dados.zonas) throw new Error("sem geometria");
     if (dados.titulo) dados.nome = dados.titulo;
     imoveis = [dados];
+    frenteGraus = (dados.frente === undefined || dados.frente === null)
+      ? null : Number(dados.frente);
+    if (frenteGraus !== null) $("frente").value = String(frenteGraus);
     document.getElementById("marcaImovel").textContent = "· " + dados.nome;
-    iniciar3d();
+    if (!iniciar3d()) return;
     mostrar(0);
   }).catch(() => {
     erro("Este imóvel não tem maquete",

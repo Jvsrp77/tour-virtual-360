@@ -2832,18 +2832,12 @@ class TestConferenciaDaCaptura(unittest.TestCase):
         self.assertEqual(stitcher._com_conferencia("Recusado.", []), "Recusado.")
 
 
-class TestCompartilharAMaquete(unittest.TestCase):
+class PaginaNoNode:
     """
-    Tirar a maquete de dentro da tela: link de um comodo, imagem para o
-    anuncio, tela cheia e a metragem escrita no chao.
+    Recorta funcoes da maquete e roda no Node.
 
-    Todas nascem da mesma queixa: a maquete so servia para quem estava com ela
-    aberta. Corretor manda "olha a cozinha" pelo WhatsApp, cola a planta no
-    classificado e mostra no tablet — e nada disso dava para fazer.
-
-    As funcoes sao EXTRAIDAS da pagina e rodadas no Node, contra a geometria
-    real do apartamento. Conferir por texto so provaria que a linha existe, e
-    linha que existe ainda pode enquadrar o comodo errado.
+    Conferir a pagina por texto so prova que a linha existe. Linha que existe
+    ainda pode enquadrar o comodo errado, ou por o sol do meio-dia ao sul.
     """
 
     @classmethod
@@ -2857,7 +2851,7 @@ class TestCompartilharAMaquete(unittest.TestCase):
         abre = "  function %s(" % nome
         self.assertIn(abre, self.html, "a página não tem mais %s" % nome)
         corpo = self.html[self.html.index(abre):]
-        return corpo[:corpo.index("\n  }") + 4]
+        return corpo[:corpo.index(chr(10) + "  }") + 4]
 
     def _rodar(self, programa, arquivo):
         caminho = os.path.join(_TEMP, arquivo)
@@ -2870,6 +2864,21 @@ class TestCompartilharAMaquete(unittest.TestCase):
                            encoding="utf-8", errors="replace")
         self.assertEqual(r.returncode, 0, r.stderr[:600])
         return json.loads(r.stdout.strip())
+
+
+class TestCompartilharAMaquete(PaginaNoNode, unittest.TestCase):
+    """
+    Tirar a maquete de dentro da tela: link de um comodo, imagem para o
+    anuncio, tela cheia e a metragem escrita no chao.
+
+    Todas nascem da mesma queixa: a maquete so servia para quem estava com ela
+    aberta. Corretor manda "olha a cozinha" pelo WhatsApp, cola a planta no
+    classificado e mostra no tablet — e nada disso dava para fazer.
+
+    As funcoes sao EXTRAIDAS da pagina e rodadas no Node, contra a geometria
+    real do apartamento. Conferir por texto so provaria que a linha existe, e
+    linha que existe ainda pode enquadrar o comodo errado.
+    """
 
     def _planta(self):
         """O apartamento de verdade, no formato que a API entrega."""
@@ -3042,6 +3051,407 @@ class TestCompartilharAMaquete(unittest.TestCase):
         """
         depois = self.html[self.html.index('addEventListener("fullscreenchange"'):]
         self.assertIn("redimensionar", depois[:200])
+
+
+class TestBibliotecaPropria(unittest.TestCase):
+    """
+    A maquete nao pode depender da internet para abrir.
+
+    Medido: a pagina carregava o three.js DUAS vezes — o do projeto, no
+    cabecalho, e um r128 do cdnjs logo antes do codigo. O segundo ganhava.
+    Na pratica a maquete rodava numa versao mais velha do que a que o projeto
+    distribui, e numa rede sem saida (ou com o cdnjs bloqueado, que e comum em
+    rede de empresa) caia numa versao que ninguem nunca tinha exercitado.
+
+    Imovel se mostra em lugar nenhum: no stand, no notebook da imobiliaria, no
+    celular com sinal ruim. Pagina que precisa de CDN para desenhar e pagina
+    que escolhe a pior hora para falhar.
+    """
+
+    PAGINAS = ["maquete.html", "andar.html", "visualizador.html", "admin.html",
+               "imoveis.html", "entrar.html"]
+
+    def _ler(self, nome):
+        caminho = os.path.join("static", nome)
+        if not os.path.exists(caminho):
+            self.skipTest("%s não existe" % nome)
+        with io.open(caminho, encoding="utf-8") as f:
+            return f.read()
+
+    def test_nenhuma_pagina_busca_codigo_na_internet(self):
+        """Script ou folha de estilo de fora é ponto de falha que não é nosso."""
+        for nome in self.PAGINAS:
+            caminho = os.path.join("static", nome)
+            if not os.path.exists(caminho):
+                continue
+            with io.open(caminho, encoding="utf-8") as f:
+                html = f.read()
+            for achado in re.findall(r'<(?:script|link)[^>]*?(?:src|href)="(https?:)?//[^"]+"',
+                                     html, re.I):
+                self.fail("%s ainda busca recurso de fora: %s" % (nome, achado))
+
+    def test_a_maquete_carrega_a_biblioteca_uma_vez_so(self):
+        """
+        Duas versões da mesma biblioteca na mesma página: a segunda sobrescreve
+        a primeira, e qual das duas roda passa a depender de a rede responder.
+        """
+        html = self._ler("maquete.html")
+        fontes = re.findall(r'<script[^>]*src="([^"]*three[^"]*)"', html, re.I)
+        self.assertEqual(fontes, ["/static/vendor/three.js"],
+                         "a página carrega three.js de mais de um lugar: %s" % fontes)
+
+    def test_a_biblioteca_do_projeto_tem_tudo_o_que_as_paginas_usam(self):
+        """
+        Tirar o CDN só vale se o pacote embarcado atender. Aqui o pacote é
+        carregado de verdade no Node e cada THREE.X citado pelas páginas é
+        procurado nele — porque classe que sumiu entre uma versão e outra só
+        apareceria como tela preta no navegador de quem abriu o link.
+        """
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node não encontrado")
+        usados = set()
+        for nome in ("maquete.html", "andar.html"):
+            caminho = os.path.join("static", nome)
+            if not os.path.exists(caminho):
+                continue
+            with io.open(caminho, encoding="utf-8") as f:
+                usados |= set(re.findall(r"THREE\.([A-Za-z0-9_]+)", f.read()))
+        self.assertGreater(len(usados), 15, "não achei os usos de THREE")
+
+        programa = (
+            "global.self = global; global.window = global;\n"
+            "const T = require(" + json.dumps(
+                os.path.abspath(os.path.join("static", "vendor", "three.js"))) + ");\n"
+            "const faltam = " + json.dumps(sorted(usados)) +
+            ".filter(n => T[n] === undefined);\n"
+            "console.log(JSON.stringify({revisao: T.REVISION, faltam: faltam}));\n")
+        caminho = os.path.join(_TEMP, "three.cjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        saida = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual(saida["faltam"], [],
+                         "o three.js do projeto não tem: %s" % saida["faltam"])
+
+
+class TestSemAceleracao3D(PaginaNoNode, unittest.TestCase):
+    """
+    Notebook velho, maquina virtual, navegador com aceleracao desligada por
+    politica da empresa: em todos, criar o renderizador LANCA.
+
+    Ate aqui a pagina ficava preta, sem uma palavra. O corretor abre na frente
+    do cliente e nao tem o que dizer — e o tour 360 do mesmo imovel abriria
+    normalmente, porque ele nao precisa de WebGL.
+    """
+
+    def _detectar(self, contexto):
+        programa = (
+            # parenteses em volta do objeto: sem eles o arrow vira corpo em
+            # bloco, devolve undefined, e o teste reprovaria uma pagina certa
+            "const document = {createElement: () => ({getContext: () => ("
+            + contexto + ")})};\n"
+            + self._funcao("temWebGL") + "\n"
+            "console.log(JSON.stringify(temWebGL()));\n")
+        return self._rodar(programa, "webgl.mjs")
+
+    def test_navegador_sem_webgl_e_reconhecido(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        self.assertFalse(self._detectar("null"))
+
+    def test_navegador_com_webgl_passa(self):
+        """Guarda que reprova todo mundo tiraria a maquete de quem a tem."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        self.assertTrue(self._detectar("{}"))
+
+    def test_navegador_que_explode_ao_perguntar_nao_derruba_a_pagina(self):
+        """
+        Há navegador que lança ao pedir o contexto em vez de devolver null.
+        Sem o try, a exceção sobe e mata o resto do script — inclusive o
+        recado que existe justamente para essa hora.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        self.assertFalse(self._detectar("(() => { throw new Error('nao'); })()"))
+
+    def test_a_pagina_desiste_de_montar_quando_nao_da(self):
+        """
+        Conferência de texto, e assumida como tal: o que ela garante é que o
+        retorno de iniciar3d é OLHADO. Sem isso o guarda existiria e a página
+        seguiria chamando mostrar() sobre um renderizador que nunca nasceu.
+        """
+        self.assertIn("if (!iniciar3d()) return;", self.html)
+
+    def test_o_recado_aparece_no_palco_e_nao_so_no_texto_lateral(self):
+        """
+        Retângulo preto com a explicação escrita do lado parece defeito. Quem
+        abre olha para o lugar onde a maquete deveria estar.
+        """
+        corpo = self.html[self.html.index("  function erro(titulo, texto){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        self.assertIn('$("recado").hidden = false', corpo)
+        self.assertIn('id="recado"', self.html)
+
+
+class TestSolDoImovel(PaginaNoNode, unittest.TestCase):
+    """
+    "Que horas bate sol na sala?" e a segunda pergunta de quem procura imovel,
+    logo depois da metragem.
+
+    A maquete ja tinha tudo para responder — as janelas medidas e a parede em
+    que cada uma esta — menos o NORTE, que geometria nenhuma carrega. Por isso
+    a orientacao e do corretor.
+
+    As contas sao exercitadas no Node porque erro de hemisferio nao aparece em
+    revisao de codigo: a formula "certa" do livro coloca o sol ao sul ao
+    meio-dia, o que vale para a Europa e esta invertido no Brasil.
+    """
+
+    def _sol(self, expressao, extras=()):
+        nomes = ("posicaoDoSol", "horasDeSol", "ladoDaJanela", "janelasDoComodo",
+                 "hhmm", "rumo", "solDoComodo", "direcaoDoSol") + tuple(extras)
+        programa = ("const LATITUDE = -23.55;\n"
+                    'const RUMOS = ["norte", "nordeste", "leste", "sudeste",\n'
+                    '               "sul", "sudoeste", "oeste", "noroeste"];\n')
+        for n in nomes:
+            programa += self._funcao(n) + "\n"
+        programa += "console.log(JSON.stringify(" + expressao + "));\n"
+        return self._rodar(programa, "sol.mjs")
+
+    def _planta(self):
+        p = plantas.apartamento()
+        return {"larg": p["larg"], "fundo": p["fundo"], "janelas": p["janelas"],
+                "zonas": [{"nome": z[0], "x0": z[1], "x1": z[2],
+                           "z0": z[3], "z1": z[4],
+                           "m2": round((z[2] - z[1]) * (z[4] - z[3]), 1)}
+                          for z in p["zonas"]]}
+
+    def test_ao_meio_dia_no_brasil_o_sol_esta_ao_NORTE(self):
+        """
+        O erro que a fórmula do livro comete: no hemisfério sul o sol do meio-dia
+        vem do norte, não do sul. Invertido, a maquete diria "sol da manhã" para
+        o quarto que passa o dia na sombra — e quem visitasse descobriria.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        s = self._sol("posicaoDoSol(12)")
+        self.assertAlmostEqual(s["azimute"], 0, places=6)
+        # no equinocio a altura maxima e 90 menos a latitude
+        self.assertAlmostEqual(s["altura"], 90 - 23.55, places=1)
+
+    def test_o_sol_nasce_a_leste_e_se_poe_a_oeste(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        nasce = self._sol("posicaoDoSol(6)")
+        poe = self._sol("posicaoDoSol(18)")
+        self.assertAlmostEqual(nasce["azimute"], 90, places=1)
+        self.assertAlmostEqual(poe["azimute"], 270, places=1)
+        self.assertAlmostEqual(nasce["altura"], 0, places=6)
+
+    def test_a_conta_continua_valendo_no_hemisferio_norte(self):
+        """
+        Não é preciosismo: prova que a conta é de astronomia e não um ajuste
+        feito na mão para o Brasil. Em Nova York o sol do meio-dia está ao SUL.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        s = self._sol("posicaoDoSol(12, 40.7)")
+        self.assertAlmostEqual(s["azimute"], 180, places=6)
+        self.assertAlmostEqual(s["altura"], 90 - 40.7, places=1)
+
+    def test_janela_ao_sul_no_brasil_nao_pega_sol_nenhum_dia(self):
+        """
+        O sol nunca cruza o sul visto daqui. Dizer que pega seria o erro que o
+        cliente descobre na primeira visita, de manhã, no quarto frio.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        self.assertIsNone(self._sol("horasDeSol(180)"))
+
+    def test_leste_pega_a_manha_e_oeste_pega_a_tarde(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        leste = self._sol("horasDeSol(90)")
+        oeste = self._sol("horasDeSol(270)")
+        self.assertLess(leste["fim"], 12, "janela a leste pegando sol da tarde")
+        self.assertGreater(oeste["inicio"], 12, "janela a oeste pegando sol da manhã")
+        self.assertLess(leste["inicio"], 7, "o sol nasce e a janela leste não vê")
+
+    def test_janela_ao_norte_pega_o_dia_quase_inteiro(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        norte = self._sol("horasDeSol(0)")
+        self.assertGreater(norte["fim"] - norte["inicio"], 6,
+                           "face norte é a mais procurada justamente por isso")
+
+    def test_girar_a_frente_meia_volta_troca_manha_por_tarde(self):
+        """
+        O teste que prova que a orientação é MESMO usada: o mesmo apartamento,
+        os mesmos cômodos, a frente virada 180° — e o que pegava sol da manhã
+        passa a pegar da tarde.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        planta = self._planta()
+        sala = planta["zonas"][0]["nome"]
+        expressao = ("[solDoComodo(im.zonas[0], im, 90), "
+                     "solDoComodo(im.zonas[0], im, 270)]")
+        leste, oeste = self._solComPlanta(planta, expressao)
+        self.assertIn("manhã", leste, sala + " a leste deveria pegar sol da manhã")
+        self.assertIn("tarde", oeste, sala + " a oeste deveria pegar sol da tarde")
+
+    def _solComPlanta(self, planta, expressao):
+        nomes = ("posicaoDoSol", "horasDeSol", "ladoDaJanela", "janelasDoComodo",
+                 "hhmm", "rumo", "solDoComodo")
+        programa = ("const LATITUDE = -23.55;\n"
+                    'const RUMOS = ["norte", "nordeste", "leste", "sudeste",\n'
+                    '               "sul", "sudoeste", "oeste", "noroeste"];\n'
+                    "const im = " + json.dumps(planta, ensure_ascii=False) + ";\n")
+        for n in nomes:
+            programa += self._funcao(n) + "\n"
+        programa += "console.log(JSON.stringify(" + expressao + "));\n"
+        return self._rodar(programa, "sol-planta.mjs")
+
+    def test_cada_comodo_recebe_a_janela_da_propria_parede(self):
+        """
+        Medido na planta real: cada cômodo do apartamento encosta numa parede
+        externa e tem a sua janela. Cômodo que herdasse a janela do vizinho
+        anunciaria sol onde não há.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        planta = self._planta()
+        achados = self._solComPlanta(
+            planta, "im.zonas.map(z => janelasDoComodo(z, im).length)")
+        self.assertEqual(len(achados), len(planta["zonas"]))
+        for nome, quantas in zip([z["nome"] for z in planta["zonas"]], achados):
+            self.assertGreater(quantas, 0, nome + " ficou sem janela")
+        # e cada janela serve um comodo SO: somar mais do que existe significa
+        # que alguem esta herdando a janela do vizinho e anunciando sol alheio
+        self.assertEqual(sum(achados), len(planta["janelas"]),
+                         "janela contada em mais de um cômodo: %s" % achados)
+
+    def test_comodo_sem_janela_para_fora_diz_isso_em_vez_de_inventar(self):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        planta = self._planta()
+        planta["janelas"] = []
+        frase = self._solComPlanta(planta, "solDoComodo(im.zonas[0], im, 90)")
+        self.assertIn("Sem janela", frase)
+
+    def test_sem_orientacao_a_pagina_nao_chuta(self):
+        """
+        Orientação desconhecida não pode virar "norte por padrão": seria
+        inventar a informação que o corretor ainda não deu, e ela sai impressa
+        na ficha do cômodo como se fosse medida.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        planta = self._planta()
+        self.assertEqual(
+            self._solComPlanta(planta, "solDoComodo(im.zonas[0], im, null)"), "")
+        self.assertIsNone(
+            self._solComPlanta(planta, "ladoDaJanela(im.janelas[0], im, null)"))
+
+    def test_a_luz_da_cena_segue_a_hora_escolhida(self):
+        """
+        A conta pode estar certa e a maquete continuar com a luz de sempre. Ao
+        meio-dia o sol vem de cima; às 7h vem de lado — e é isso que faz a
+        maquete PARECER de manhã.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        meio = self._sol("direcaoDoSol(12, 0)")
+        cedo = self._sol("direcaoDoSol(7, 0)")
+        self.assertGreater(meio["y"], cedo["y"],
+                           "a luz do meio-dia tem de vir de mais alto")
+        self.assertLess(cedo["y"], 0.55, "às 7h o sol ainda está baixo")
+        # frente ao norte: ao meio-dia o sol vem da frente, ou seja, do -Z
+        self.assertLess(meio["z"], 0)
+        self.assertAlmostEqual(meio["x"], 0, places=6)
+
+
+class TestOrientacaoDoImovel(Base):
+    """
+    Para que lado a frente do imovel esta voltada.
+
+    Fica gravado NO IMOVEL, e nao no endereco. Se viajasse so no link, dois
+    visitantes do mesmo imovel veriam respostas diferentes para "bate sol na
+    sala?" — e essa e uma pergunta com uma resposta so.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("dona-sol")
+        self.iid = self.imovel(self.dona, "Apartamento com sol")
+        with io.open(aplicacao.arq_maquete(self.iid), "w", encoding="utf-8") as f:
+            json.dump(TestMaquete.GEOMETRIA, f, ensure_ascii=False)
+
+    def test_a_orientacao_gravada_chega_a_quem_abre_o_link(self):
+        """O visitante não tem como informar o norte; ele recebe o do corretor."""
+        r = self.dona.put("/api/imoveis/%s/orientacao" % self.iid,
+                          json={"frente": 90})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True)[:200])
+
+        visitante = aplicacao.app.test_client()
+        m = visitante.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertEqual(m["frente"], 90)
+
+    def test_sem_ninguem_informar_a_resposta_e_nao_sei(self):
+        """
+        None e zero são coisas diferentes: zero é "a frente olha para o norte",
+        que é informação. Confundir os dois faria a maquete anunciar sol da
+        manhã em imóvel que ninguém orientou.
+        """
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertIsNone(m["frente"])
+
+    def test_a_frente_ao_norte_nao_se_confunde_com_nao_informado(self):
+        self.dona.put("/api/imoveis/%s/orientacao" % self.iid, json={"frente": 0})
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertEqual(m["frente"], 0)
+        self.assertIsNotNone(m["frente"])
+
+    def test_apagar_devolve_ao_nao_informado(self):
+        self.dona.put("/api/imoveis/%s/orientacao" % self.iid, json={"frente": 180})
+        self.assertEqual(
+            self.dona.delete("/api/imoveis/%s/orientacao" % self.iid).status_code, 200)
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertIsNone(m["frente"])
+
+    def test_valor_sem_sentido_e_recusado_com_recado(self):
+        r = self.dona.put("/api/imoveis/%s/orientacao" % self.iid,
+                          json={"frente": "para o mar"})
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("graus", r.get_json()["erro"])
+
+    def test_graus_acima_de_uma_volta_dao_na_mesma_direcao(self):
+        self.dona.put("/api/imoveis/%s/orientacao" % self.iid, json={"frente": 450})
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertEqual(m["frente"], 90)
+
+    def test_visitante_nao_reorienta_imovel_alheio(self):
+        """
+        A orientação é pública para LER e privada para escrever: ela muda o que
+        o anúncio afirma sobre o imóvel.
+        """
+        visitante = aplicacao.app.test_client()
+        r = visitante.put("/api/imoveis/%s/orientacao" % self.iid,
+                          json={"frente": 270})
+        self.assertIn(r.status_code, (401, 403, 404))
+        m = self.dona.get("/api/imoveis/%s/maquete" % self.iid).get_json()["maquete"]
+        self.assertIsNone(m["frente"], "o visitante conseguiu girar o imóvel")
+
+    def test_o_seletor_de_orientacao_e_so_da_dona(self):
+        """Quem visita não tem como saber para que lado o imóvel olha."""
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        trecho = html[html.index('id="frenteDona"'):]
+        self.assertIn("hidden", trecho[:60],
+                      "o seletor nasce visível para qualquer visitante")
 
 
 def limpar():
