@@ -2832,6 +2832,218 @@ class TestConferenciaDaCaptura(unittest.TestCase):
         self.assertEqual(stitcher._com_conferencia("Recusado.", []), "Recusado.")
 
 
+class TestCompartilharAMaquete(unittest.TestCase):
+    """
+    Tirar a maquete de dentro da tela: link de um comodo, imagem para o
+    anuncio, tela cheia e a metragem escrita no chao.
+
+    Todas nascem da mesma queixa: a maquete so servia para quem estava com ela
+    aberta. Corretor manda "olha a cozinha" pelo WhatsApp, cola a planta no
+    classificado e mostra no tablet — e nada disso dava para fazer.
+
+    As funcoes sao EXTRAIDAS da pagina e rodadas no Node, contra a geometria
+    real do apartamento. Conferir por texto so provaria que a linha existe, e
+    linha que existe ainda pode enquadrar o comodo errado.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"), encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _funcao(self, nome):
+        """Recorta uma funcao da pagina pelo nome."""
+        abre = "  function %s(" % nome
+        self.assertIn(abre, self.html, "a página não tem mais %s" % nome)
+        corpo = self.html[self.html.index(abre):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _rodar(self, programa, arquivo):
+        caminho = os.path.join(_TEMP, arquivo)
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        # encoding explicito: o Node escreve UTF-8 e o Windows decodificaria
+        # em cp1252, transformando "12,4 m2" em "12,4 mA2" — e o teste
+        # reprovaria uma pagina certa
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def _planta(self):
+        """O apartamento de verdade, no formato que a API entrega."""
+        p = plantas.apartamento()
+        zonas = [{"nome": z[0], "x0": z[1], "x1": z[2], "z0": z[3], "z1": z[4],
+                  "m2": round((z[2] - z[1]) * (z[4] - z[3]), 1)}
+                 for z in p["zonas"]]
+        return {"larg": p["larg"], "fundo": p["fundo"], "zonas": zonas}
+
+    def _enquadrar(self, pedido):
+        planta = self._planta()
+        return self._comZonas(planta, pedido), planta
+
+    def _comZonas(self, planta, pedido):
+        programa = (
+            "const THREE = {Vector3: class {\n"
+            "  constructor(){ this.x = 0; this.y = 0; this.z = 0; }\n"
+            "  set(x, y, z){ this.x = x; this.y = y; this.z = z; return this; }\n"
+            "}};\n"
+            "const orbita = {giro: 0, altura: 0.86, raio: 20,\n"
+            "                alvo: new THREE.Vector3()};\n"
+            "let ocioso = true;\n"
+            "const atual = 0;\n"
+            "const imoveis = [" + json.dumps(planta, ensure_ascii=False) + "];\n"
+            + self._funcao("enquadrarComodo") + "\n"
+            "const achou = enquadrarComodo(" + json.dumps(pedido, ensure_ascii=False) + ");\n"
+            "console.log(JSON.stringify({achou: achou, raio: orbita.raio,\n"
+            "  x: orbita.alvo.x, z: orbita.alvo.z, ocioso: ocioso}));\n")
+        return self._rodar(programa, "enquadrar.mjs")
+
+    def test_o_link_abre_a_maquete_olhando_para_aquele_comodo(self):
+        """
+        O pedido do corretor: mandar "olha a cozinha" e a pessoa abrir JA na
+        cozinha. Se a câmera apontasse para o meio do imóvel, o link seria o
+        mesmo de sempre e o recado teria sido mentira.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        for zona in self._planta()["zonas"]:
+            with self.subTest(comodo=zona["nome"]):
+                saida, planta = self._enquadrar(zona["nome"])
+                self.assertTrue(saida["achou"])
+                # a página trabalha com o imóvel centrado na origem
+                cx = (zona["x0"] + zona["x1"]) / 2 - planta["larg"] / 2
+                cz = (zona["z0"] + zona["z1"]) / 2 - planta["fundo"] / 2
+                self.assertAlmostEqual(saida["x"], cx, places=3)
+                self.assertAlmostEqual(saida["z"], cz, places=3)
+
+    def test_a_camera_nao_para_dentro_da_parede_de_comodo_pequeno(self):
+        """
+        Raio proporcional ao cômodo põe a câmera a 3,9 m num lavabo de 1,5 m —
+        dentro da parede do cômodo vizinho, com a maquete pelo avesso.
+
+        Medido: nenhuma das três plantas de hoje tem cômodo tão pequeno (o
+        menor lado maior é 4,2 m, na cozinha do compacto). A guarda existe
+        porque a geometria vem de um JSON que aceita qualquer zona, e porque a
+        roda do mouse já usa 4 m como limite — sem ela, o link de um cômodo
+        seria o único caminho capaz de furar o limite da própria página. Por
+        isso o cômodo deste teste é fabricado, e não tirado das plantas.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        planta = self._planta()
+        planta["zonas"] = [{"nome": "Lavabo", "x0": 0.0, "x1": 1.5,
+                            "z0": 0.0, "z1": 1.2, "m2": 1.8}]
+        saida = self._comZonas(planta, "Lavabo")
+        self.assertTrue(saida["achou"])
+        self.assertGreaterEqual(saida["raio"], 4, "câmera dentro da parede")
+
+    def test_comodo_inventado_no_endereco_nao_desmonta_a_vista(self):
+        """
+        Link copiado errado, cômodo renomeado depois, `?comodo=Piscina` de
+        brincadeira: em todos, a maquete tem de abrir normal.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        saida, _ = self._enquadrar("Piscina olímpica")
+        self.assertFalse(saida["achou"])
+        self.assertEqual(saida["raio"], 20, "mexeu na câmera sem ter achado")
+        self.assertTrue(saida["ocioso"], "parou o giro sem ter enquadrado nada")
+
+    def test_a_parada_do_giro_so_acontece_quando_enquadra(self):
+        """
+        Enquadrar e continuar girando sozinho tiraria o cômodo de vista em
+        dois segundos — seria o mesmo que não ter enquadrado.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        saida, _ = self._enquadrar(self._planta()["zonas"][0]["nome"])
+        self.assertFalse(saida["ocioso"])
+
+    def test_o_endereco_entrega_o_comodo_pedido(self):
+        """O link do WhatsApp chega com acento e espaço; tem de voltar igual."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        programa = (
+            "const location = {search: '?comodo=Sala%20de%20estar&x=1'};\n"
+            + self._funcao("comodoDoEndereco") + "\n"
+            "const vazio = {search: ''};\n"
+            "console.log(JSON.stringify(comodoDoEndereco()));\n")
+        self.assertEqual(self._rodar(programa, "endereco.mjs"), "Sala de estar")
+
+    def test_cada_imovel_baixa_com_o_proprio_nome(self):
+        """
+        Medido no navegador: sem isto o arquivo sai "download.png", e quem
+        baixa a planta de três imóveis no mesmo dia fica com download.png,
+        download(1).png e download(2).png.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        casos = [["Apartamento no Jardim Paulista", False],
+                 ["Cobertura Duplex · Térreo/Superior", True],
+                 ["", False], ["!!!", True]]
+        programa = (self._funcao("nomeDeArquivo") + "\n"
+                    "console.log(JSON.stringify(" + json.dumps(casos, ensure_ascii=False)
+                    + ".map(c => nomeDeArquivo(c[0], c[1]))));\n")
+        saida = self._rodar(programa, "nome-arquivo.mjs")
+        self.assertEqual(saida[0], "apartamento-no-jardim-paulista-maquete.png")
+        self.assertEqual(saida[1], "cobertura-duplex-terreo-superior-planta.png")
+        self.assertEqual(saida[2], "maquete-maquete.png", "imóvel sem nome")
+        self.assertEqual(saida[3], "maquete-planta.png", "nome só de símbolos")
+        for nome in saida:
+            self.assertRegex(nome, r"^[a-z0-9-]+\.png$",
+                             "nome de arquivo com acento chega quebrado")
+
+    def test_a_planta_e_a_maquete_nao_se_sobrescrevem(self):
+        """Baixar as duas vistas do mesmo imóvel tem de dar dois arquivos."""
+        if not self.node:
+            self.skipTest("node não encontrado")
+        programa = (self._funcao("nomeDeArquivo") + "\n"
+                    "console.log(JSON.stringify([nomeDeArquivo('Casa', false),\n"
+                    "                            nomeDeArquivo('Casa', true)]));\n")
+        a, b = self._rodar(programa, "duas-vistas.mjs")
+        self.assertNotEqual(a, b)
+
+    def test_o_rotulo_no_chao_diz_a_metragem(self):
+        """
+        Visto de cima, "Quarto" e "Quarto" não dizem qual é o de casal. O
+        tamanho é a primeira pergunta de quem procura imóvel, e estava só na
+        lista lateral — fora da imagem que vai para o anúncio.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        programa = (
+            "const nBR = (n, casas) => n.toLocaleString('pt-BR',\n"
+            "  {minimumFractionDigits: casas, maximumFractionDigits: casas});\n"
+            + self._funcao("textoDoRotulo") + "\n"
+            "console.log(JSON.stringify([\n"
+            "  textoDoRotulo({nome: 'Quarto de casal', m2: 12.35}),\n"
+            "  textoDoRotulo({nome: 'Varanda'})]));\n")
+        com, sem = self._rodar(programa, "rotulo.mjs")
+        self.assertIn("12,4", com, "metragem em formato de fora do Brasil")
+        self.assertIn("m²", com)
+        self.assertEqual(sem, "Varanda",
+                         "cômodo sem metragem não pode virar 'Varanda · 0,0 m²'")
+
+    def test_a_vista_pode_virar_imagem(self):
+        """
+        Medido: sem preserveDrawingBuffer o toDataURL do WebGL devolve um PNG
+        TRANSPARENTE, porque o navegador já limpou o buffer. O botão pareceria
+        funcionar e o arquivo sairia vazio.
+        """
+        self.assertIn("preserveDrawingBuffer: true", self.html)
+
+    def test_tela_cheia_recalcula_a_camera(self):
+        """
+        O palco muda de tamanho ao entrar em tela cheia. Sem recalcular a
+        proporção, a maquete aparece esticada — que é pior do que não ter o
+        botão.
+        """
+        depois = self.html[self.html.index('addEventListener("fullscreenchange"'):]
+        self.assertIn("redimensionar", depois[:200])
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

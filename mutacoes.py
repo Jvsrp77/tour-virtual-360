@@ -438,6 +438,55 @@ MUT = [
      "import aviso",
      "import aviso\nfrom usuarios import redefinir_senha  # noqa",
      "TestSenhaEsquecida.test_nenhuma_rota_web_redefine_senha"),
+    # --- tirar a maquete de dentro da tela: link, imagem e tela cheia ---
+
+    # enquadrar sem descontar o centro aponta a camera para fora do imovel:
+    # o link chegaria com a promessa de mostrar a cozinha e mostraria o vazio
+    ("link do comodo aponta para fora do imovel", "static/maquete.html",
+     "orbita.alvo.set((z.x0 + z.x1) / 2 - im.larg / 2, 0.9,",
+     "orbita.alvo.set((z.x0 + z.x1) / 2, 0.9,",
+     "TestCompartilharAMaquete.test_o_link_abre_a_maquete_olhando_para_aquele_comodo"),
+
+    ("camera entra na parede em comodo pequeno", "static/maquete.html",
+     "Math.max(4, Math.max(z.x1 - z.x0, z.z1 - z.z0) * 2.6)",
+     "Math.max(z.x1 - z.x0, z.z1 - z.z0) * 2.6",
+     "TestCompartilharAMaquete.test_a_camera_nao_para_dentro_da_parede_de_comodo_pequeno"),
+
+    # comodo que nao existe tem de deixar a maquete como estava, e nao cair
+    # no primeiro da lista fingindo que achou
+    ("comodo inventado cai no primeiro da lista", "static/maquete.html",
+     ".find(q => q.nome === nome)",
+     ".find(q => true)",
+     "TestCompartilharAMaquete.test_comodo_inventado_no_endereco_nao_desmonta_a_vista"),
+
+    # sem o buffer preservado o toDataURL do WebGL devolve PNG transparente:
+    # o botao pareceria funcionar e o arquivo sairia vazio
+    ("imagem salva sai em branco", "static/maquete.html",
+     "preserveDrawingBuffer: true",
+     "preserveDrawingBuffer: false",
+     "TestCompartilharAMaquete.test_a_vista_pode_virar_imagem"),
+
+    ("planta e maquete baixam com o mesmo nome", "static/maquete.html",
+     '(planta ? "-planta" : "-maquete")',
+     '""',
+     "TestCompartilharAMaquete.test_a_planta_e_a_maquete_nao_se_sobrescrevem"),
+
+    # nome de arquivo com acento ainda chega quebrado em anexo de e-mail
+    ("acento sobrevive no nome do arquivo", "static/maquete.html",
+     '.normalize("NFD")',
+     '.normalize("NFC")',
+     "TestCompartilharAMaquete.test_cada_imovel_baixa_com_o_proprio_nome"),
+
+    # metragem so na lista lateral fica de fora da imagem que vai ao anuncio
+    ("rotulo no chao perde a metragem", "static/maquete.html",
+     "return z.m2 ? z.nome",
+     "return false ? z.nome",
+     "TestCompartilharAMaquete.test_o_rotulo_no_chao_diz_a_metragem"),
+
+    ("tela cheia deixa a maquete esticada", "static/maquete.html",
+     'addEventListener("fullscreenchange", () => setTimeout(redimensionar, 60));',
+     'addEventListener("fullscreenchange", () => {});',
+     "TestCompartilharAMaquete.test_tela_cheia_recalcula_a_camera"),
 ]
 
 

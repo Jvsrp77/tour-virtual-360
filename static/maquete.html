@@ -152,6 +152,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 <body>
 
 <div class="topo-dir">
+  <button class="bt" id="btLinkComodo" title="Copiar link deste cômodo"
+          hidden>Link do cômodo</button>
+  <button class="bt" id="btImagem" title="Salvar a vista como imagem">Imagem</button>
+  <button class="bt" id="btCheia" title="Tela cheia">⛶</button>
   <a class="bt" id="btTour" href="#">Ver o tour 360</a>
 </div>
 
@@ -280,7 +284,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let ocioso = girarSozinho;
 
   function iniciar3d(){
-    renderizador = new THREE.WebGLRenderer({canvas: tela, antialias: true, alpha: true});
+    // preserveDrawingBuffer para conseguir salvar a vista como imagem: sem
+    // ele, toDataURL devolve tela em branco, porque o navegador descarta o
+    // desenho assim que o quadro termina.
+    renderizador = new THREE.WebGLRenderer({canvas: tela, antialias: true,
+                                            alpha: true,
+                                            preserveDrawingBuffer: true});
     renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
     cena = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
@@ -334,6 +343,13 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const m = new THREE.Mesh(g, mat);
     m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     return m;
+  }
+
+  // Metragem junto do nome no proprio chao da maquete. Sem ela, quem olha de
+  // cima ve "Quarto" e "Quarto" e nao sabe qual e o de casal — o tamanho e a
+  // primeira pergunta de quem procura imovel, e estava so na lista lateral.
+  function textoDoRotulo(z){
+    return z.m2 ? z.nome + " · " + nBR(z.m2, 1) + " m²" : z.nome;
   }
 
   function rotulo(texto, cor){
@@ -433,7 +449,10 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       pisos.push(m);
       grupoObra.add(m);
 
-      const r = rotulo(z.nome, "#171a20");
+      // o nome sozinho nao ajuda quem esta comparando imoveis; a metragem ao
+      // lado transforma a maquete em algo que se le como planta
+      const r = rotulo(textoDoRotulo(z),
+                       "#171a20");
       r.position.set((z.x0 + z.x1) / 2 + cx, 1.25, (z.z0 + z.z1) / 2 + cz);
       grupoRotulos.add(r);
     });
@@ -671,6 +690,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("btPessoa").addEventListener("click", () => {
       if (emPessoa) sairDePessoa(); else entrarEmPessoa();
     });
+    $("btCheia").addEventListener("click", telaCheia);
+    $("btImagem").addEventListener("click", salvarImagem);
+    $("btLinkComodo").addEventListener("click", copiarLinkDoComodo);
     $("btTrena").addEventListener("click", () => {
       if (medindo || medidas.length) { limparTrena(); return; }
       medindo = true;
@@ -1213,6 +1235,91 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     ctx.fill();
   }
 
+  // ------------------------------------------------- tela cheia e imagem
+
+  function telaCheia(){
+    const alvo = document.querySelector(".palco");
+    if (!document.fullscreenElement){
+      if (alvo.requestFullscreen) alvo.requestFullscreen().catch(() => {});
+    } else if (document.exitFullscreen){
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  // Redimensionar ao entrar e sair: em tela cheia o palco muda de tamanho, e
+  // sem recalcular a camera a maquete sai esticada.
+  addEventListener("fullscreenchange", () => setTimeout(redimensionar, 60));
+
+  // O nome do arquivo sai do nome do imovel, e nao "download.png": quem baixa
+  // a planta de tres imoveis no mesmo dia nao quer adivinhar qual e qual.
+  // Acento e barra viram tracinho porque nome de arquivo com acento ainda
+  // chega quebrado em servidor e em anexo de e-mail.
+  function nomeDeArquivo(nome, planta){
+    const limpo = String(nome || "maquete")
+      .normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+    return (limpo || "maquete") + (planta ? "-planta" : "-maquete") + ".png";
+  }
+
+  // Salvar a vista como imagem.
+  //
+  // Serve para o anuncio: a planta baixa da maquete entra no folheto e no
+  // classificado. Por isso o arquivo sai com o nome do imovel, e nao
+  // "download.png" — quem baixa tres imoveis nao quer adivinhar qual e qual.
+  function salvarImagem(){
+    const im = imoveis[atual];
+    renderizador.render(cena, camAtiva());     // garante um quadro fresco
+    let url;
+    try {
+      url = tela.toDataURL("image/png");
+    } catch (e) {
+      avisarTrena("O navegador não deixou salvar a imagem.");
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nomeDeArquivo(im && im.nome, emPlanta);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // ---------------------------------------------------- link de um comodo
+  //
+  // "Olha a cozinha" resolvido: o endereco carrega o comodo selecionado e a
+  // maquete abre ja olhando para ele. Serve no WhatsApp tanto quanto o link
+  // direto para uma cena do tour.
+
+  function comodoDoEndereco(){
+    try { return new URLSearchParams(location.search).get("comodo"); }
+    catch (e) { return null; }
+  }
+
+  function enquadrarComodo(nome){
+    const im = imoveis[atual];
+    const z = (im.zonas || []).find(q => q.nome === nome);
+    if (!z) return false;
+    orbita.alvo.set((z.x0 + z.x1) / 2 - im.larg / 2, 0.9,
+                    (z.z0 + z.z1) / 2 - im.fundo / 2);
+    // o mesmo minimo da roda do mouse: banheiro de 1,5 m poria a camera
+    // dentro da parede se o raio seguisse so o tamanho do comodo
+    orbita.raio = Math.max(4, Math.max(z.x1 - z.x0, z.z1 - z.z0) * 2.6);
+    ocioso = false;
+    return true;
+  }
+
+  function copiarLinkDoComodo(){
+    if (!selecionado) return;
+    const url = location.origin + location.pathname
+              + "?comodo=" + encodeURIComponent(selecionado);
+    const dizer = () => avisarTrena("Link do cômodo copiado.");
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(dizer, () => prompt("Copie:", url));
+    } else {
+      prompt("Copie o link:", url);
+    }
+  }
+
   // ----------------------------------------------------------------- ficha
 
   function selecionar(nome){
@@ -1224,6 +1331,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     });
     [...document.querySelectorAll(".comodo")].forEach(b =>
       b.setAttribute("aria-pressed", String(b.dataset.nome === selecionado)));
+    const bl = $("btLinkComodo");
+    if (bl) bl.hidden = !selecionado;
     mostrarCotas();
   }
 
@@ -1316,6 +1425,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (emPessoa) sairDePessoa();
     ocioso = girarSozinho;
     mostrarCotas();
+
+    const pedido = comodoDoEndereco();
+    if (pedido && (im.zonas || []).some(z => z.nome === pedido)){
+      selecionar(pedido);
+      enquadrarComodo(pedido);
+    }
   }
 
   function erro(titulo, texto){
