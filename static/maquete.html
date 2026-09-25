@@ -162,6 +162,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       <div class="dica canto">arraste para girar · role para aproximar</div>
       <div class="selo canto" id="ondeEstou" hidden
            style="left:auto;right:13px;top:12px"></div>
+      <canvas id="minimapa" width="168" height="126" hidden
+              style="position:absolute;right:13px;bottom:11px;border-radius:9px;
+                     border:1px solid var(--line);box-shadow:var(--sombra)"></canvas>
     </section>
 
     <aside class="lado">
@@ -480,8 +483,31 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     grupoRotulos.visible = $("chRotulos").checked;
   }
 
+  // Olhar com o mouse solto, sem precisar segurar o botao. E o que o olho
+  // espera de primeira pessoa; arrastar funciona, mas cansa e limita o giro ao
+  // tamanho da tela. Nem todo navegador concede — quando nao concede, o arraste
+  // continua valendo, entao nao ha o que consertar.
+  function travarPonteiro(){
+    if (!emPessoa || document.pointerLockElement === tela) return;
+    if (tela.requestPointerLock) { try { tela.requestPointerLock(); } catch (e) {} }
+  }
+
   function ligarControles(){
     let arrastando = false, ux = 0, uy = 0, distancia = 0;
+
+    document.addEventListener("mousemove", e => {
+      if (document.pointerLockElement !== tela || !emPessoa) return;
+      pessoa.giro -= e.movementX * 0.0022;
+      pessoa.inclinacao = Math.max(-1.2, Math.min(1.2,
+        pessoa.inclinacao - e.movementY * 0.0022));
+    });
+    document.addEventListener("pointerlockchange", () => {
+      const preso = document.pointerLockElement === tela;
+      const dica = $("dicaPessoa");
+      if (emPessoa && dica) dica.textContent = preso
+        ? "Mouse livre para olhar · W A S D anda · Shift corre · Esc solta"
+        : "W A S D ou setas para andar · clique para o mouse livre · Esc sai";
+    });
 
     const pegar = e => e.touches ? e.touches[0] : e;
     const comecar = e => {
@@ -544,7 +570,21 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       const noPino = raio.intersectObjects(pinos, false)[0];
       if (noPino){
         const p = noPino.object.userData.ponto;
-        if (p && p.cena_id){
+        if (!p) return;
+        // De FORA, o pino leva ao tour. De DENTRO, sair da visita para abrir
+        // outra pagina seria perder o passeio no meio: ali ele teleporta.
+        if (emPessoa){
+          const im = imoveis[atual];
+          const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
+          if (livre(x, z)){
+            pessoa.pos.set(x, OLHO, z);
+            mostrarOnde();
+          } else {
+            avisarTrena("Não cabe um corpo nesse ponto: ele fica sobre um móvel.");
+          }
+          return;
+        }
+        if (p.cena_id){
           location.href = URL_TOUR_PG + "?cena=" + encodeURIComponent(p.cena_id);
         } else {
           avisarTrena("Este ponto não tem cena correspondente no tour.");
@@ -552,6 +592,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         return;
       }
 
+      if (emPessoa){ travarPonteiro(); return; }
       const achou = raio.intersectObjects(pisos, false)[0];
       if (achou) selecionar(achou.object.userData.zona.nome);
     });
@@ -658,6 +699,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       camera.rotateX(pessoa.inclinacao);
       atualizarRegua();
       renderizador.render(cena, camera);
+      desenharMinimapa();
       return;
     }
 
@@ -749,6 +791,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   function sairDePessoa(){
     emPessoa = false;
+    if (document.exitPointerLock && document.pointerLockElement === tela){
+      try { document.exitPointerLock(); } catch (e) {}
+    }
     $("corte").disabled = false;
     $("chPlanta").disabled = false;
     if (corteAntes !== null){ $("corte").value = corteAntes; corteAntes = null; }
@@ -762,10 +807,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (bt) bt.textContent = emPessoa ? "Sair (ver de fora)" : "Entrar no imóvel";
     const dica = $("dicaPessoa");
     if (dica) dica.textContent = emPessoa
-      ? "W A S D ou setas para andar · arraste para olhar · Esc sai"
+      ? "W A S D ou setas para andar · clique para o mouse livre · Esc sai"
       : "Entra na altura dos olhos (1,50 m), a mesma da câmera do tour.";
     const onde = $("ondeEstou");
     if (onde) onde.hidden = !emPessoa;
+    const mapa = $("minimapa");
+    if (mapa) mapa.hidden = !emPessoa;
   }
 
   // Colisao: as caixas do imovel viram retangulos no plano, e o corpo e um
@@ -781,6 +828,19 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     return x > -meiaL && x < meiaL && z > -meiaF && z < meiaF;
   }
 
+  // Para onde o passo leva.
+  //
+  // Sai daqui, separado, porque ERROU: a camera do three.js olha pelo seu -Z
+  // local, entao depois de rotateY(giro) a frente e (-sen, -cos). A primeira
+  // versao usava (+sen, +cos) e o W andava exatamente para TRAS — produto
+  // escalar -1 com a direcao do olhar, em todos os angulos. O lado estava
+  // certo: a direita e (cos, -sen).
+  function direcao(giro, frente, lado){
+    const sen = Math.sin(giro), cos = Math.cos(giro);
+    return {x: -sen * frente + cos * lado,
+            z: -cos * frente - sen * lado};
+  }
+
   function andar(dt){
     let frente = 0, lado = 0;
     if (teclas["w"] || teclas["arrowup"]) frente += 1;
@@ -789,10 +849,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (teclas["a"] || teclas["arrowleft"]) lado -= 1;
     if (!frente && !lado) return;
 
-    const d = PASSO * dt;
-    const sen = Math.sin(pessoa.giro), cos = Math.cos(pessoa.giro);
-    const dx = (sen * frente + cos * lado) * d;
-    const dz = (cos * frente - sen * lado) * d;
+    // Shift corre. Quem esta vendo um imovel anda devagar para olhar, mas
+    // atravessar um corredor no mesmo ritmo cansa.
+    const correndo = teclas["shift"];
+    const d = PASSO * (correndo ? 2.1 : 1) * dt;
+    const v = direcao(pessoa.giro, frente, lado);
+    const dx = v.x * d, dz = v.z * d;
 
     if (livre(pessoa.pos.x + dx, pessoa.pos.z)) pessoa.pos.x += dx;
     if (livre(pessoa.pos.x, pessoa.pos.z + dz)) pessoa.pos.z += dz;
@@ -805,6 +867,78 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const zona = im.zonas.find(q => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1);
     const onde = $("ondeEstou");
     if (onde) onde.textContent = zona ? zona.nome : "passagem";
+  }
+
+  // -------------------------------------------------------------- minimapa
+  //
+  // Dentro de um imovel em primeira pessoa, o que mais se perde e a nocao de
+  // ONDE se esta. Um mapinha com a planta, a posicao e para onde se olha
+  // resolve isso melhor do que qualquer melhoria na caminhada em si.
+
+  function desenharMinimapa(){
+    const tela2 = $("minimapa");
+    const im = imoveis[atual];
+    if (!tela2 || !im) return;
+    const ctx = tela2.getContext("2d");
+    const L = tela2.width, A = tela2.height, margem = 6;
+    const esc = Math.min((L - margem * 2) / im.larg, (A - margem * 2) / im.fundo);
+    const ox = (L - im.larg * esc) / 2, oz = (A - im.fundo * esc) / 2;
+    const px = v => ox + v * esc, pz = v => oz + v * esc;
+
+    const estilo = getComputedStyle(document.documentElement);
+    const tinta = estilo.getPropertyValue("--ink").trim() || "#171a20";
+    const linha = estilo.getPropertyValue("--line").trim() || "#c7cdd6";
+    const acento = estilo.getPropertyValue("--accent").trim() || "#e07b39";
+    const fundo = estilo.getPropertyValue("--surface").trim() || "#fff";
+
+    ctx.clearRect(0, 0, L, A);
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = fundo;
+    ctx.fillRect(0, 0, L, A);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = linha;
+    im.zonas.forEach(z => {
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(px(z.x0), pz(z.z0), (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = linha;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px(z.x0), pz(z.z0), (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
+    });
+
+    // as paredes, em tinta cheia
+    ctx.fillStyle = tinta;
+    ctx.globalAlpha = 0.55;
+    im.caixas.forEach(c => {
+      if (c.m !== "parede") return;
+      ctx.fillRect(px(c.p[0]), pz(c.p[2]),
+                   Math.max(1, (c.p[3] - c.p[0]) * esc),
+                   Math.max(1, (c.p[5] - c.p[2]) * esc));
+    });
+    ctx.globalAlpha = 1;
+
+    // os pontos de captura
+    ctx.fillStyle = acento;
+    ctx.globalAlpha = 0.45;
+    im.pontos.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(px(p.x), pz(p.z), 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // quem anda: um triangulo apontando para onde se olha
+    const x = px(pessoa.pos.x + im.larg / 2), z = pz(pessoa.pos.z + im.fundo / 2);
+    const v = direcao(pessoa.giro, 1, 0);
+    const ang = Math.atan2(v.z, v.x);
+    ctx.fillStyle = acento;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(ang) * 7, z + Math.sin(ang) * 7);
+    ctx.lineTo(x + Math.cos(ang + 2.5) * 5, z + Math.sin(ang + 2.5) * 5);
+    ctx.lineTo(x + Math.cos(ang - 2.5) * 5, z + Math.sin(ang - 2.5) * 5);
+    ctx.closePath();
+    ctx.fill();
   }
 
   // ----------------------------------------------------------------- ficha

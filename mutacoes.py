@@ -218,6 +218,18 @@ MUT = [
      '    "api.api_embed", "maquete", "api.api_maquete", "api.api_maquete_obj",',
      "TestExportarObj.test_visitante_ve_a_maquete_mas_nao_leva_o_modelo"),
 
+    # o defeito que o usuario achou: W andava para tras
+    ("w anda para tras", "static/maquete.html",
+     "    return {x: -sen * frente + cos * lado,",
+     "    return {x: sen * frente + cos * lado,",
+     "TestPrimeiraPessoa.test_w_anda_para_onde_a_camera_olha"),
+
+    # teleportar para cima de um movel prende a pessoa
+    ("pino teleporta sem conferir se cabe", "static/maquete.html",
+     "          if (livre(x, z)){",
+     "          if (true){",
+     "TestPrimeiraPessoa.test_o_pino_teleporta_de_dentro_em_vez_de_sair"),
+
     # colisao que nunca barra deixa atravessar o imovel inteiro
     ("primeira pessoa atravessa parede", "static/maquete.html",
      "      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",

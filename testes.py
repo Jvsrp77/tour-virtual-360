@@ -1290,6 +1290,67 @@ class TestPrimeiraPessoa(unittest.TestCase):
         self.assertIn('$("corte").value = 270', corpo)
         self.assertIn("aplicarCorte()", corpo)
 
+    def test_w_anda_para_onde_a_camera_olha(self):
+        """
+        O defeito que o usuario encontrou: W andava para TRAS.
+
+        A camera do three.js olha pelo seu -Z local, entao depois de
+        rotateY(giro) a frente e (-sen, -cos). A primeira versao usava
+        (+sen, +cos) — produto escalar -1 com a direcao do olhar, em TODOS os
+        angulos. Aqui o produto tem de ser +1.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        corpo = self.html[self.html.index("  function direcao(giro, frente, lado){"):]
+        corpo = corpo[:corpo.index("\n  }") + 4]
+        programa = corpo + """
+const casos = [0, Math.PI/2, Math.PI, -Math.PI/2, 0.7, -2.3];
+const saida = casos.map(g => {
+  const olha = {x: -Math.sin(g), z: -Math.cos(g)};
+  const dir  = {x:  Math.cos(g), z: -Math.sin(g)};
+  const w = direcao(g, 1, 0), s = direcao(g, -1, 0);
+  const d = direcao(g, 0, 1), a = direcao(g, 0, -1);
+  return {w: w.x*olha.x + w.z*olha.z, s: s.x*olha.x + s.z*olha.z,
+          d: d.x*dir.x + d.z*dir.z,  a: a.x*dir.x + a.z*dir.z};
+});
+console.log(JSON.stringify(saida));
+"""
+        caminho = os.path.join(_TEMP, "direcao.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:500])
+        for caso in json.loads(r.stdout):
+            self.assertAlmostEqual(caso["w"], 1.0, places=6,
+                                   msg="W não anda para onde a câmera olha")
+            self.assertAlmostEqual(caso["s"], -1.0, places=6,
+                                   msg="S não anda para trás")
+            self.assertAlmostEqual(caso["d"], 1.0, places=6,
+                                   msg="D não anda para a direita")
+            self.assertAlmostEqual(caso["a"], -1.0, places=6,
+                                   msg="A não anda para a esquerda")
+
+    def test_o_pino_teleporta_de_dentro_em_vez_de_sair(self):
+        """
+        De fora o pino leva ao tour. De dentro, abrir outra página seria perder
+        o passeio no meio.
+        """
+        corpo = self.html[self.html.index("const noPino ="):]
+        corpo = corpo[:corpo.index("const achou =")]
+        self.assertIn("if (emPessoa)", corpo)
+        self.assertIn("pessoa.pos.set", corpo)
+        self.assertIn("livre(x, z)", corpo,
+                      "teleporta sem conferir se cabe um corpo")
+
+    def test_o_minimapa_mostra_posicao_e_direcao(self):
+        """Dentro de um imóvel, o que mais se perde é a noção de onde se está."""
+        self.assertIn("desenharMinimapa", self.html)
+        corpo = self.html[self.html.index("function desenharMinimapa"):]
+        corpo = corpo[:corpo.index("\n  }\n")]
+        self.assertIn("pessoa.pos", corpo, "não desenha onde a pessoa está")
+        self.assertIn("direcao(pessoa.giro", corpo, "não desenha para onde olha")
+
     def test_o_olho_fica_na_altura_da_camera_do_tour(self):
         """Se divergir, o que se vê aqui deixa de ser o que a cena 360 viu."""
         aqui = float(re.search(r"const OLHO = ([\d.]+)", self.html).group(1))
