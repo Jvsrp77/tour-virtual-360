@@ -151,7 +151,9 @@ const $ = id => document.getElementById(id);
 
 let cena3d, camera, renderizador;
 let pontos = [];                 // {cena, mundo:Vector3, malha, carregando}
-let ativo = null, saindo = null, fade = 1;
+// `misturado` e o segundo ponto que esta na tela AGORA, somado ao mais
+// proximo. Antes isto era `saindo`, um ponto de passagem que sumia.
+let ativo = null, misturado = null;
 const teclas = {};
 let yaw = 0, pitch = 0, arrastando = false, ultimo = null;
 const posicao = new THREE.Vector3();
@@ -483,7 +485,7 @@ async function carregarFundo(p){
 function limparAntigas(){
   const vivos = pontos.filter(p => p.malha).sort((a,b) => b.usoEm - a.usoEm);
   vivos.slice(MAX_MALHAS).forEach(p => {
-    if (p === ativo || p === saindo) return;
+    if (p === ativo || p === misturado) return;
     cena3d.remove(p.malha);
     p.malha.geometry.dispose();
     p.malha.material[0].map.dispose();
@@ -573,15 +575,16 @@ function podeEstar(p){
 
 function trocarAtivo(novo){
   if (novo === ativo) return;
-  saindo = ativo;
   ativo = novo;
-  fade = 0;
   ativo.usoEm = performance.now();
   atualizarPainel();
   avisar('Você está em ' + ativo.cena.nome);
   // adianta o carregamento dos vizinhos, para a proxima transicao nao travar
   pontos.filter(p => p !== ativo && p.mundo.distanceTo(ativo.mundo) < 5)
         .slice(0, 2).forEach(p => carregarPonto(p).catch(()=>{}));
+  // a dissolvencia acabava aqui e so entao liberava textura; agora a
+  // mistura nao tem fim marcado, e a troca de ponto e o momento natural
+  limparAntigas();
 }
 
 function atualizarPainel(){
@@ -627,7 +630,7 @@ function recentrar(){ viajarAte(ativo); }
 // longe, mais o software deduz.
 //
 // Entao a seta passa a ser a forma principal de se locomover, e o WASD vira
-// ajuste fino. A dissolvencia (`fade`) e a troca de ponto (`trocarAtivo`) ja
+// ajuste fino. A mistura entre vizinhos e a troca de ponto (`trocarAtivo`) ja
 // existiam: o que faltava era convidar o visitante a usa-las.
 
 const _proj = new THREE.Vector3();
@@ -661,7 +664,8 @@ function atualizarSetas(){
   const L = tela.clientWidth, A = tela.clientHeight;
   for (const p of pontos){
     if (!p.seta) continue;
-    if (p === ativo || p === saindo){ p.seta.style.display = 'none'; continue; }
+    // sem seta para onde ja se esta nem para o ponto que ja esta misturado
+    if (p === ativo || p === misturado){ p.seta.style.display = 'none'; continue; }
 
     _proj.copy(p.mundo);
     _proj.y -= ALTURA_DA_SETA;
@@ -787,6 +791,54 @@ function irPeloMapa(ev){
   carregarPonto(alvo).then(() => viajarAte(alvo)).catch(()=>{});
 }
 
+// ------------------------------------------------- mistura entre dois pontos
+//
+// Ate aqui, andando entre dois pontos de captura, via-se UM panorama esticado.
+// A dissolvencia so acontecia no instante da troca: antes dela, o ponto que
+// ficou para tras sumia de vez; depois, o novo aparecia inteiro. E o pior lugar
+// possivel para isso, porque e no meio do caminho que um panorama sozinho
+// estica mais - justamente onde ele tem menos a dizer sobre o que se ve.
+//
+// Agora os dois vizinhos aparecem ao mesmo tempo, com peso pela posicao: em
+// cima de um ponto ve-se so ele (a foto de verdade, sem esticar), e no meio do
+// caminho ve-se metade de cada um. O erro de cada panorama e diferente, entao a
+// media dos dois incomoda menos do que um deles inteiro.
+//
+// Isto NAO conserta o esticamento: ele e consequencia de a foto ter sido tirada
+// de um ponto so, e a cura continua sendo capturar mais pontos. O que a mistura
+// tira e o salto - e o compromisso com uma versao errada quando existe outra ao
+// lado, igualmente perto e errada de outro jeito.
+
+// Alem disto o vizinho quase sempre e outro ambiente, e mistura-lo poria a
+// cozinha por cima do quarto. O peso ja cai sozinho com a distancia; o corte
+// existe para o caso de dois comodos com pontos esparsos.
+const MISTURA_MAX = 7.0;         // metros
+const MISTURA_RAMPA = 2.0;       // em quantos metros o corte entra, para nao dar salto
+const MISTURA_MIN = 0.02;        // abaixo disto nao vale o custo de desenhar
+
+function doisMaisProximos(p){
+  return pontos
+    .filter(pt => pt.malha)      // ponto ainda nao carregado nao entra na mistura
+    .map(pt => ({ponto: pt, dist: pt.mundo.distanceTo(p)}))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 2);
+}
+
+// Quanto do SEGUNDO ponto entra na imagem.
+//
+// dPerto/(dPerto+dLonge) da exatamente 0,5 no meio do caminho e 0 em cima do
+// ponto. E continua na troca: quando o mais proximo passa a ser o outro, as
+// duas distancias sao iguais e o peso vale 0,5 dos dois lados - entao o papel
+// de base e de camada troca sem piscar.
+function pesoDaMistura(dPerto, dLonge){
+  if (!isFinite(dLonge) || dLonge > MISTURA_MAX) return 0;
+  const soma = dPerto + dLonge;
+  if (soma < 1e-6) return 0;
+  const corte = Math.max(0, Math.min(1, (MISTURA_MAX - dLonge) / MISTURA_RAMPA));
+  const peso = (dPerto / soma) * corte;
+  return peso < MISTURA_MIN ? 0 : peso;
+}
+
 // ------------------------------------------------------ viagem entre pontos
 //
 // A seta TELEPORTAVA: `posicao.copy(p.mundo)` e pronto. Piscar de um ponto ao
@@ -839,6 +891,32 @@ function avancarViagem(agora){
   }
 }
 
+// O vizinho tem de estar pronto ANTES de se chegar perto dele.
+//
+// Medido no navegador, e foi uma surpresa: com a mistura ja escrita e certa
+// (peso 0,5 no meio do caminho, conferido), ela nunca acontecia. So UM ponto
+// tinha malha. O carregamento de vizinho so era disparado no INSTANTE da troca
+// de ponto ativo — e a mistura precisa do vizinho enquanto se CAMINHA na
+// direcao dele, que e antes disso.
+//
+// Um de cada vez de proposito: cada ponto e um panorama grande mais um mapa de
+// profundidade, e disparar quatro juntos trava o celular justamente enquanto a
+// pessoa anda. MAX_MALHAS = 3 cabe certo: a base, a camada e o que esta vindo.
+let vindoAi = null;
+
+function garantirVizinho(){
+  if (vindoAi) return;
+  const candidato = pontos
+    .filter(p => !p.malha && !p.carregando
+                 && p.mundo.distanceTo(posicao) <= MISTURA_MAX)
+    .sort((a, b) => a.mundo.distanceTo(posicao) - b.mundo.distanceTo(posicao))[0];
+  if (!candidato) return;
+  vindoAi = candidato;
+  carregarPonto(candidato)
+    .catch(() => {})
+    .then(() => { vindoAi = null; limparAntigas(); });
+}
+
 // ------------------------------------------------------------------ laço
 
 function animar(){
@@ -876,32 +954,36 @@ function animar(){
 
   atualizarSetas();
 
-  // Cada ponto e uma esfera que envolve a camera; se duas ficarem visiveis ao mesmo
-  // tempo, uma tapa a outra e a tela fica preta pela metade. So o ponto atual aparece,
-  // mais o anterior enquanto dura a transicao.
+  // Cada ponto e uma esfera que envolve a camera. Duas visiveis ao mesmo
+  // tempo so nao se tapam porque uma fica por cima da outra na ordem de
+  // desenho, e a de baixo nao escreve profundidade.
+  const par = doisMaisProximos(posicao);
+  const base = par.length ? par[0].ponto : ativo;
+  const peso = par.length > 1 ? pesoDaMistura(par[0].dist, par[1].dist) : 0;
+  misturado = peso > 0 ? par[1].ponto : null;
+
+  // quem esta na tela e o mais recentemente usado: sem isto o
+  // `limparAntigas` poderia descartar a textura que acabou de entrar
+  const agoraMs = performance.now();
+  if (base) base.usoEm = agoraMs;
+  if (misturado) misturado.usoEm = agoraMs;
+  garantirVizinho();
+
   for (const p of pontos){
-    if (p.malha) p.malha.visible = (p === ativo || p === saindo);
-    if (p.fundo) p.fundo.visible = (p === ativo || p === saindo);
+    const aparece = (p === base || p === misturado);
+    if (p.malha) p.malha.visible = aparece;
+    if (p.fundo) p.fundo.visible = aparece;
   }
 
-  if (fade < 1){
-    fade = Math.min(1, fade + 0.045);
-    if (ativo.malha){
-      aplicarEstado(ativo, fade, true);
-      ativo.malha.renderOrder = 1;
-    }
-    if (saindo && saindo.malha){
-      // fica atras, sem competir na mistura
-      aplicarEstado(saindo, 1, false);
-      saindo.malha.renderOrder = 0;
-    }
-    if (fade >= 1 && saindo){
-      if (saindo.malha) saindo.malha.visible = false;
-      saindo = null;
-      limparAntigas();
-    }
-  } else if (ativo.malha){
-    aplicarEstado(ativo, 1, true);
+  if (base && base.malha){
+    // sozinha ela escreve profundidade; com camada por cima, quem escreve
+    // e a de cima, senao a de baixo recorta a mistura
+    aplicarEstado(base, 1, !misturado);
+    base.malha.renderOrder = 0;
+  }
+  if (misturado && misturado.malha){
+    aplicarEstado(misturado, peso, true);
+    misturado.malha.renderOrder = 1;
   }
 
   camera.position.copy(posicao);

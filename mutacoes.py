@@ -695,6 +695,61 @@ MUT = [
      "  if (metros < 0.05){ trocarAtivo(p); return; }",
      "  if (false){ trocarAtivo(p); return; }",
      "TestViagemEntrePontos.test_ponto_onde_ja_se_esta_nao_vira_viagem"),
+    # --- a mistura continua entre os dois pontos mais proximos ---
+
+    ("a tela volta a mostrar so o ponto ativo", "static/andar.html",
+     "  const peso = par.length > 1 ? pesoDaMistura(par[0].dist, par[1].dist) : 0;",
+     "  const peso = 0;",
+     "TestMisturaEntrePontos.test_a_pagina_desenha_os_dois_e_nao_so_o_ativo"),
+
+    # no ponto de captura o panorama nao estica nada: misturar ali sujaria a
+    # unica imagem perfeita do passeio
+    ("mistura suja a foto em cima do ponto", "static/andar.html",
+     "  const peso = (dPerto / soma) * corte;",
+     "  const peso = 0.5 * corte;",
+     "TestMisturaEntrePontos.test_em_cima_do_ponto_ve_se_so_a_foto_de_verdade"),
+
+    ("no meio do caminho um ponto pesa mais que o outro", "static/andar.html",
+     "  const peso = (dPerto / soma) * corte;",
+     "  const peso = (dPerto / MISTURA_MAX) * corte;",
+     "TestMisturaEntrePontos.test_no_meio_do_caminho_cada_um_entra_com_metade"),
+
+    # ponto a nove metros quase sempre e outro ambiente: poria a cozinha por
+    # cima do quarto
+    ("o vizinho de outro comodo entra na mistura", "static/andar.html",
+     "const MISTURA_MAX = 7.0;",
+     "const MISTURA_MAX = 30.0;",
+     "TestMisturaEntrePontos.test_o_vizinho_de_outro_comodo_nao_entra"),
+
+    # cortar seco faria o vizinho sumir de uma vez no meio do corredor
+    ("o corte da distancia vira piscada", "static/andar.html",
+     "  const corte = Math.max(0, Math.min(1, (MISTURA_MAX - dLonge) / MISTURA_RAMPA));",
+     "  const corte = 1;",
+     "TestMisturaEntrePontos.test_o_corte_da_distancia_nao_produz_piscada"),
+
+    # cada ponto e um panorama grande mais um mapa de profundidade: quatro
+    # juntos travam o celular justamente enquanto a pessoa anda
+    ("dispara todos os vizinhos no mesmo quadro", "static/andar.html",
+     "  if (vindoAi) return;",
+     "  if (false) return;",
+     "TestMisturaEntrePontos.test_um_vizinho_de_cada_vez"),
+
+    # fora do alcance da mistura ele nunca entraria na tela: baixar seria
+    # gastar a internet de quem ve por nada
+    ("baixa panorama do outro canto do imovel", "static/andar.html",
+     "                 && p.mundo.distanceTo(posicao) <= MISTURA_MAX)",
+     "                 )",
+     "TestMisturaEntrePontos.test_ponto_de_outro_canto_do_imovel_nao_e_carregado_a_toa"),
+
+    ("carrega o vizinho mais longe primeiro", "static/andar.html",
+     "    .sort((a, b) => a.mundo.distanceTo(posicao) - b.mundo.distanceTo(posicao))[0];",
+     "    .sort((a, b) => b.mundo.distanceTo(posicao) - a.mundo.distanceTo(posicao))[0];",
+     "TestMisturaEntrePontos.test_o_vizinho_e_carregado_antes_de_se_precisar_dele"),
+
+    ("baixa de novo o que ja esta na memoria", "static/andar.html",
+     "    .filter(p => !p.malha && !p.carregando",
+     "    .filter(p => !p.carregando",
+     "TestMisturaEntrePontos.test_o_vizinho_e_carregado_antes_de_se_precisar_dele"),
 ]
 
 

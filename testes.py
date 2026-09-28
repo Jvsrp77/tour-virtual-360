@@ -3949,6 +3949,234 @@ class TestViagemEntrePontos(PaginaNoNode, unittest.TestCase):
                         "a viagem avança antes de olhar o comando de quem vê")
 
 
+class TestMisturaEntrePontos(PaginaNoNode, unittest.TestCase):
+    """
+    Andando entre dois pontos de captura, ve-se os DOIS, com peso pela posicao.
+
+    Antes via-se um panorama esticado, e a dissolvencia acontecia so no instante
+    da troca. E o pior lugar possivel para ela: no meio do caminho e onde um
+    panorama sozinho estica mais, e era exatamente ali que o programa se
+    comprometia com uma versao so.
+
+    Isto nao conserta o esticamento - ele vem de a foto ter sido tirada de um
+    ponto so, e a cura continua sendo capturar mais pontos. O que a mistura tira
+    e o SALTO, e o compromisso com uma versao errada quando ha outra ao lado,
+    igualmente perto e errada de outro jeito.
+
+    O que se mede aqui e a curva do peso. Curva com degrau aparece como um
+    piscar no meio do corredor, e isso nao se ve lendo o codigo.
+    """
+
+    PAGINA = "andar.html"
+
+    def _funcao(self, nome):
+        """No andar.html as funcoes nao sao indentadas."""
+        abre = "function %s(" % nome
+        self.assertIn(abre, self.html, "a pagina nao tem mais %s" % nome)
+        corpo = self.html[self.html.index(abre):]
+        return corpo[:corpo.index(chr(10) + "}") + 2]
+
+    def _constante(self, nome):
+        achado = re.search(r"const %s = ([\d.]+)" % nome, self.html)
+        self.assertTrue(achado, "sumiu a constante %s" % nome)
+        return float(achado.group(1))
+
+    def _pesos(self, pares):
+        """pesoDaMistura(dPerto, dLonge) para cada par pedido."""
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        programa = ("const MISTURA_MAX = %s;" % self._constante("MISTURA_MAX") + '\n'
+                    + "const MISTURA_RAMPA = %s;" % self._constante("MISTURA_RAMPA") + '\n'
+                    + "const MISTURA_MIN = %s;" % self._constante("MISTURA_MIN") + '\n'
+                    + self._funcao("pesoDaMistura") + '\n'
+                    + "console.log(JSON.stringify(" + json.dumps(pares)
+                    + ".map(p => pesoDaMistura(p[0], p[1]))));" + '\n')
+        return self._rodar(programa, "peso.mjs")
+
+    # ----------------------------------------------------------- o peso
+
+    def test_em_cima_do_ponto_ve_se_so_a_foto_de_verdade(self):
+        """
+        No ponto de captura o panorama nao estica nada: ele foi tirado dali.
+        Misturar o vizinho ali seria sujar a unica imagem perfeita do passeio.
+        """
+        self.assertEqual(self._pesos([[0.0, 3.0]])[0], 0)
+
+    def test_no_meio_do_caminho_cada_um_entra_com_metade(self):
+        """
+        E o ponto em que os dois estao igualmente esticados e igualmente
+        errados - cada um de um jeito. Metade de cada incomoda menos do que um
+        inteiro.
+        """
+        self.assertAlmostEqual(self._pesos([[2.0, 2.0]])[0], 0.5, places=6)
+
+    def test_o_vizinho_de_outro_comodo_nao_entra(self):
+        """
+        Ponto a nove metros quase sempre e outro ambiente. Misturado, poria a
+        cozinha por cima do quarto.
+        """
+        self.assertEqual(self._pesos([[1.0, 9.0]])[0], 0)
+
+    def test_o_corte_da_distancia_nao_produz_piscada(self):
+        """
+        Cortar seco em sete metros faria o vizinho sumir de uma vez no meio do
+        corredor. A rampa existe para que ele se apague, e nao pisque.
+        """
+        maximo = self._constante("MISTURA_MAX")
+        rampa = self._constante("MISTURA_RAMPA")
+        passo = rampa / 12.0
+        dists = [maximo - rampa + k * passo for k in range(13)]
+        pesos = self._pesos([[3.0, d] for d in dists])
+        for antes, depois in zip(pesos, pesos[1:]):
+            self.assertLessEqual(depois, antes + 1e-9, "o peso subiu ao afastar")
+            self.assertLess(antes - depois, 0.12, "degrau no peso: pisca na tela")
+        self.assertEqual(pesos[-1], 0)
+
+    def test_afastar_do_ponto_aumenta_o_peso_do_vizinho(self):
+        """A imagem tem de migrar de um para o outro conforme se anda."""
+        pesos = self._pesos([[d / 10.0, 4.0 - d / 10.0] for d in range(0, 21)])
+        for antes, depois in zip(pesos, pesos[1:]):
+            self.assertGreaterEqual(depois + 1e-9, antes, "o peso caiu ao avancar")
+
+    # ------------------------------------------- a curva vista de fora
+
+    def test_a_imagem_de_um_ponto_nao_salta_na_troca(self):
+        """
+        O TESTE QUE IMPORTA. No meio do caminho o papel de base e o de camada se
+        invertem. Se a parcela visivel de um panorama desse um pulo nesse
+        instante, a mistura teria trocado um salto no fim por um salto no meio.
+
+        Aqui se anda de A a B em passos pequenos e se mede quanto de B aparece
+        na tela a cada passo: peso, quando B e a camada; 1 menos o peso, quando
+        B virou a base.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        programa = ("const MISTURA_MAX = %s;" % self._constante("MISTURA_MAX") + '\n'
+                    + "const MISTURA_RAMPA = %s;" % self._constante("MISTURA_RAMPA") + '\n'
+                    + "const MISTURA_MIN = %s;" % self._constante("MISTURA_MIN") + '\n'
+                    + self._funcao("pesoDaMistura") + '\n'
+                    + "const vao = 4.0, parcelas = [];" + '\n'
+                    + "for (let k = 0; k <= 200; k++){" + '\n'
+                    + "  const x = vao * k / 200;" + '\n'
+                    + "  const dA = x, dB = vao - x;" + '\n'
+                    + "  const perto = Math.min(dA, dB), longe = Math.max(dA, dB);" + '\n'
+                    + "  const w = pesoDaMistura(perto, longe);" + '\n'
+                    + "  // B e a camada enquanto estiver mais longe; depois vira base" + '\n'
+                    + "  parcelas.push(dB > dA ? w : 1 - w);" + '\n'
+                    + "}" + '\n'
+                    + "console.log(JSON.stringify(parcelas));" + '\n')
+        parcelas = self._rodar(programa, "curva.mjs")
+
+        self.assertAlmostEqual(parcelas[0], 0, places=6, msg="em cima de A ja aparecia B")
+        self.assertAlmostEqual(parcelas[-1], 1, places=6, msg="em cima de B faltava B")
+        for antes, depois in zip(parcelas, parcelas[1:]):
+            self.assertLess(abs(depois - antes), 0.05,
+                            "a imagem de um ponto salta no meio do caminho")
+            self.assertGreaterEqual(depois + 1e-9, antes, "a imagem de B recuou")
+
+    # ------------------------------------------------ o par escolhido
+
+    def test_ponto_ainda_nao_carregado_fica_fora_da_mistura(self):
+        """
+        Escolher um ponto sem malha o poria como base e a tela ficaria preta.
+        Ele entra assim que terminar de carregar.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        programa = (
+            "class V3 { constructor(x,z){ this.x=x; this.z=z; }" + '\n'
+            + "  distanceTo(o){ return Math.hypot(this.x-o.x, this.z-o.z); } }" + '\n'
+            + "const pontos = [" + '\n'
+            + "  {nome: 'perto sem malha', mundo: new V3(0.5, 0), malha: null}," + '\n'
+            + "  {nome: 'carregado A', mundo: new V3(2, 0), malha: {}}," + '\n'
+            + "  {nome: 'carregado B', mundo: new V3(5, 0), malha: {}}];" + '\n'
+            + self._funcao("doisMaisProximos") + '\n'
+            + "const par = doisMaisProximos(new V3(0, 0));" + '\n'
+            + "console.log(JSON.stringify(par.map(p => p.ponto.nome)));" + '\n')
+        self.assertEqual(self._rodar(programa, "par.mjs"),
+                         ["carregado A", "carregado B"])
+
+    def _garantir(self, pontos, chamadas=3):
+        """
+        Roda garantirVizinho algumas vezes contra um acervo de mentira e
+        devolve a ordem em que os pontos foram pedidos.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        programa = (
+            "const MISTURA_MAX = %s;" % self._constante("MISTURA_MAX") + '\n'
+            + "class V3 { constructor(x, z){ this.x = x; this.z = z; }" + '\n'
+            + "  distanceTo(o){ return Math.hypot(this.x-o.x, this.z-o.z); } }" + '\n'
+            + "const posicao = new V3(0, 0);" + '\n'
+            + "const pedidos = [];" + '\n'
+            + "const limparAntigas = () => {};" + '\n'
+            + "const carregarPonto = p => { pedidos.push(p.nome);" + '\n'
+            + "  p.malha = {}; return Promise.resolve(); };" + '\n'
+            + "const pontos = " + json.dumps(pontos) + ".map(p => (" + '\n'
+            + "  {nome: p[0], mundo: new V3(p[1], p[2]), malha: p[3] ? {} : null}));" + '\n'
+            + self._funcao("garantirVizinho") + '\n'
+            + "let vindoAi = null;" + '\n'
+            + "(async () => {" + '\n'
+            + "  for (let k = 0; k < " + str(chamadas) + "; k++){" + '\n'
+            + "    garantirVizinho();" + '\n'
+            + "    garantirVizinho();      // uma segunda no mesmo quadro" + '\n'
+            + "    await null;             // deixa o .then correr" + '\n'
+            + "  }" + '\n'
+            + "  console.log(JSON.stringify(pedidos));" + '\n'
+            + "})();" + '\n')
+        return self._rodar(programa, "vizinho.mjs")
+
+    def test_o_vizinho_e_carregado_antes_de_se_precisar_dele(self):
+        """
+        MEDIDO NO NAVEGADOR, e foi uma surpresa: com a mistura ja escrita e
+        certa - peso 0,5 no meio do caminho, conferido na mao - ela nunca
+        acontecia. So UM ponto tinha malha.
+
+        O carregamento de vizinho so era disparado no INSTANTE da troca de
+        ponto ativo, e a mistura precisa dele enquanto se CAMINHA na direcao
+        dele, que e antes disso. Conta certa, sem nada com que misturar.
+        """
+        pedidos = self._garantir([["perto", 2, 0, False],
+                                  ["medio", 4, 0, False],
+                                  ["ja carregado", 1, 0, True]])
+        self.assertEqual(pedidos[:2], ["perto", "medio"],
+                         "nao pediu do mais perto para o mais longe")
+        self.assertNotIn("ja carregado", pedidos, "pediu de novo o que ja tinha")
+
+    def test_um_vizinho_de_cada_vez(self):
+        """
+        Cada ponto e um panorama grande mais um mapa de profundidade. Disparar
+        quatro juntos trava o celular justamente enquanto a pessoa anda.
+        """
+        pedidos = self._garantir([["a", 1, 0, False], ["b", 2, 0, False],
+                                  ["c", 3, 0, False], ["d", 4, 0, False]],
+                                 chamadas=1)
+        self.assertEqual(len(pedidos), 1,
+                         "disparou mais de um carregamento no mesmo quadro")
+
+    def test_ponto_de_outro_canto_do_imovel_nao_e_carregado_a_toa(self):
+        """
+        Fora do alcance da mistura ele nunca entraria na tela: baixar o
+        panorama seria gastar a internet de quem ve por nada.
+        """
+        longe = self._constante("MISTURA_MAX") + 3
+        pedidos = self._garantir([["longe demais", longe, 0, False]])
+        self.assertEqual(pedidos, [])
+
+    def test_a_pagina_desenha_os_dois_e_nao_so_o_ativo(self):
+        """
+        Conferencia de texto, e assumida como tal: garante que o laco usa o par
+        e o peso, e nao voltou a mostrar so o ponto ativo.
+        """
+        laco = self.html[self.html.index("function animar()"):]
+        self.assertIn("const par = doisMaisProximos(posicao);", laco)
+        self.assertIn("pesoDaMistura(par[0].dist, par[1].dist)", laco,
+                      "o peso deixou de sair da posicao")
+        self.assertIn("aplicarEstado(misturado, peso, true);", laco)
+        self.assertNotIn("p === saindo", laco, "voltou a dissolvencia por relogio")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
