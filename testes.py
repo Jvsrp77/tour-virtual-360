@@ -2841,10 +2841,12 @@ class PaginaNoNode:
     ainda pode enquadrar o comodo errado, ou por o sol do meio-dia ao sul.
     """
 
+    PAGINA = "maquete.html"
+
     @classmethod
     def setUpClass(cls):
         cls.node = shutil.which("node")
-        with io.open(os.path.join("static", "maquete.html"), encoding="utf-8") as f:
+        with io.open(os.path.join("static", cls.PAGINA), encoding="utf-8") as f:
             cls.html = f.read()
 
     def _funcao(self, nome):
@@ -3796,6 +3798,155 @@ class TestVizinhanca(Base):
         html = self._desenhado(bravo)["html"]
         self.assertNotIn("<img", html)
         self.assertIn("&lt;img", html)
+
+
+class TestViagemEntrePontos(PaginaNoNode, unittest.TestCase):
+    """
+    A seta deixa de teleportar: a camera caminha ate o ponto.
+
+    Antes era `posicao.copy(p.mundo)` — piscava de um ponto ao outro. Piscar
+    nao e caminhar: quem ve perde a nocao de onde estava e de quanto andou, e
+    cada salto parece um corte de video em vez de um passo dentro da mesma
+    casa.
+
+    As contas rodam no Node contra um vetor de mentira, porque o que decide se
+    aquilo PARECE um passo e a curva do movimento, e curva errada nao aparece
+    em revisao de codigo — aparece como camera de trilho de cinema.
+    """
+
+    PAGINA = "andar.html"
+
+    def _viagem(self, de, para, passos=40, ms=25):
+        """Simula a viagem quadro a quadro e devolve o caminho andado."""
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        programa = (
+            "class V3 {" + '\n'
+            + "  constructor(x = 0, y = 0, z = 0){ this.x = x; this.y = y; this.z = z; }" + '\n'
+            + "  copy(o){ this.x = o.x; this.y = o.y; this.z = o.z; return this; }" + '\n'
+            + "  clone(){ return new V3(this.x, this.y, this.z); }" + '\n'
+            + "  distanceTo(o){ return Math.hypot(this.x-o.x, this.y-o.y, this.z-o.z); }" + '\n'
+            + "  lerp(o, t){ this.x += (o.x-this.x)*t; this.y += (o.y-this.y)*t;" + '\n'
+            + "              this.z += (o.z-this.z)*t; return this; }" + '\n'
+            + "}" + '\n'
+            + "const posicao = new V3(" + ", ".join(str(v) for v in de) + ");" + '\n'
+            + "let trocou = null;" + '\n'
+            + "const trocarAtivo = p => { trocou = p; };" + '\n'
+            + "let agora = 0;" + '\n'
+            + "const performance = {now: () => agora};" + '\n'
+            # `viagem` e variavel de modulo na pagina, e nao mora dentro de
+            # funcao nenhuma: sem declarar aqui, o Node reclama dela
+            + "let viagem = null;" + '\n')
+        for nome in ("suavizar", "duracaoDaViagem", "avancoDaViagem",
+                     "viajarAte", "avancarViagem"):
+            programa += self._funcao(nome) + '\n'
+        programa += (
+            "const alvo = {mundo: new V3(" + ", ".join(str(v) for v in para) + ")};" + '\n'
+            + "viajarAte(alvo);" + '\n'
+            + "const dur = viagem ? viagem.dur : 0;" + '\n'
+            + "const caminho = [];" + '\n'
+            + "for (let k = 0; k <= " + str(passos) + "; k++){" + '\n'
+            + "  agora = k * " + str(ms) + ";" + '\n'
+            + "  if (viagem) avancarViagem(agora);" + '\n'
+            + "  caminho.push([posicao.x, posicao.y, posicao.z, viagem ? 1 : 0]);" + '\n'
+            + "}" + '\n'
+            + "console.log(JSON.stringify({dur: dur, caminho: caminho," + '\n'
+            + "                            trocou: trocou !== null}));" + '\n')
+        return self._rodar(programa, "viagem.mjs")
+
+    def _funcao(self, nome):
+        """No andar.html as funcoes nao sao indentadas."""
+        abre = "function %s(" % nome
+        self.assertIn(abre, self.html, "a pagina nao tem mais %s" % nome)
+        corpo = self.html[self.html.index(abre):]
+        return corpo[:corpo.index(chr(10) + "}") + 2]
+
+    # ------------------------------------------------------------ o percurso
+
+    def test_a_camera_chega_exatamente_no_ponto(self):
+        """
+        Parar a 10 cm do ponto seria pior do que teletransportar: o panorama
+        so esta certo EM CIMA do ponto de captura, e e de la que ele foi
+        fotografado.
+        """
+        saida = self._viagem((0, 1.5, 0), (4, 1.5, 3))
+        fim = saida["caminho"][-1]
+        self.assertAlmostEqual(fim[0], 4, places=6)
+        self.assertAlmostEqual(fim[2], 3, places=6)
+        self.assertEqual(fim[3], 0, "a viagem nunca terminou")
+
+    def test_a_camera_nao_anda_para_tras_em_momento_nenhum(self):
+        saida = self._viagem((0, 1.5, 0), (4, 1.5, 3))
+        andado = [((p[0] ** 2 + p[2] ** 2) ** 0.5) for p in saida["caminho"]]
+        for antes, depois in zip(andado, andado[1:]):
+            self.assertGreaterEqual(depois + 1e-9, antes, "voltou no caminho")
+
+    def test_a_camera_nao_passa_do_ponto_e_volta(self):
+        """Ultrapassar e corrigir e o que faz o estomago embrulhar."""
+        saida = self._viagem((0, 1.5, 0), (4, 1.5, 3))
+        alcance = max((p[0] ** 2 + p[2] ** 2) ** 0.5 for p in saida["caminho"])
+        self.assertLessEqual(alcance, 5.0 + 1e-6, "passou do alvo")
+
+    def test_sai_devagar_e_para_devagar(self):
+        """
+        Velocidade constante parece trilho de camera de cinema, nao passo de
+        gente. Isto e o que separa "parece que eu andei" de "a tela deslizou".
+        """
+        saida = self._viagem((0, 1.5, 0), (6, 1.5, 0), passos=40, ms=25)
+        xs = [p[0] for p in saida["caminho"]]
+        andando = [b - a for a, b in zip(xs, xs[1:]) if b < 5.999]
+        self.assertGreater(len(andando), 6, "a viagem foi curta demais para medir")
+        comeco = andando[0]
+        meio = max(andando)
+        self.assertLess(comeco, meio * 0.6,
+                        "saiu na velocidade cheia: parece trilho, nao passo")
+
+    def test_viagem_curta_e_viagem_longa_nao_levam_o_mesmo_tempo(self):
+        perto = self._viagem((0, 1.5, 0), (1, 1.5, 0))["dur"]
+        longe = self._viagem((0, 1.5, 0), (7, 1.5, 0))["dur"]
+        self.assertLess(perto, longe, "dois metros levam o tempo de oito")
+
+    def test_nenhuma_viagem_passa_de_um_segundo(self):
+        """
+        Ninguem espera seis segundos de camera para ver o quarto do lado.
+        Proporcional puro daria isso num imovel grande.
+        """
+        for metros in (1, 5, 12, 40):
+            saida = self._viagem((0, 1.5, 0), (metros, 1.5, 0), passos=2)
+            self.assertLessEqual(saida["dur"], 900, "%d m demorou demais" % metros)
+            self.assertGreaterEqual(saida["dur"], 260, "%d m foi um piscar" % metros)
+
+    def test_ponto_onde_ja_se_esta_nao_vira_viagem(self):
+        """
+        Clicar no ponto em que se esta nao pode iniciar uma viagem de 260 ms
+        para lugar nenhum: a tela tremeria sem motivo.
+        """
+        saida = self._viagem((2, 1.5, 2), (2.01, 1.5, 2), passos=2)
+        self.assertEqual(saida["dur"], 0)
+        self.assertTrue(saida["trocou"], "nem trocou de ponto nem viajou")
+
+    # ------------------------------------------------ o que mudou na pagina
+
+    def test_a_seta_nao_teleporta_mais(self):
+        """
+        Conferencia de texto, e assumida como tal: garante que o caminho da
+        seta passa pela viagem, e nao voltou a copiar a posicao direto.
+        """
+        corpo = self.html[self.html.index("function irAoPonto("):]
+        corpo = corpo[:corpo.index(chr(10) + "}") + 2]
+        self.assertIn("viajarAte", corpo)
+        self.assertNotIn("posicao.copy", corpo, "voltou a teleportar")
+
+    def test_apertar_uma_tecla_cancela_a_viagem(self):
+        """
+        Ficar preso vendo a camera terminar o passeio enquanto se aperta W e o
+        tipo de coisa que faz a pessoa achar que a pagina travou.
+        """
+        laco = self.html[self.html.index("function animar()"):]
+        laco = laco[:laco.index("const perto = maisProximo")]
+        self.assertIn("if (viagem && !tentativa.equals(posicao)) viagem = null;", laco)
+        self.assertLess(laco.index("viagem = null"), laco.index("avancarViagem("),
+                        "a viagem avança antes de olhar o comando de quem vê")
 
 
 def limpar():

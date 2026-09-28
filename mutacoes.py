@@ -653,6 +653,48 @@ MUT = [
      "    return '<b>' + escapar(p.tipo) + '</b> ' + metrosBR(p.metros) + nome;",
      "    return '<b>' + escapar(p.tipo) + '</b>' + nome;",
      "TestVizinhanca.test_o_cartao_mostra_tipo_e_distancia_de_cada_lugar"),
+    # --- a camera caminha ate o ponto, em vez de piscar ---
+
+    ("a seta volta a teleportar", "static/andar.html",
+     "    .then(() => viajarAte(p))",
+     "    .then(() => { posicao.copy(p.mundo); trocarAtivo(p); })",
+     "TestViagemEntrePontos.test_a_seta_nao_teleporta_mais"),
+
+    # velocidade constante parece trilho de camera de cinema, nao passo de gente
+    ("movimento sem aceleracao nem freio", "static/andar.html",
+     "  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;",
+     "  return t;",
+     "TestViagemEntrePontos.test_sai_devagar_e_para_devagar"),
+
+    ("dois metros levam o tempo de oito", "static/andar.html",
+     "  return Math.max(260, Math.min(900, metros * 150));",
+     "  return 500;",
+     "TestViagemEntrePontos.test_viagem_curta_e_viagem_longa_nao_levam_o_mesmo_tempo"),
+
+    # proporcional puro daria seis segundos de camera num imovel grande
+    ("viagem longa vira espera de seis segundos", "static/andar.html",
+     "  return Math.max(260, Math.min(900, metros * 150));",
+     "  return metros * 150;",
+     "TestViagemEntrePontos.test_nenhuma_viagem_passa_de_um_segundo"),
+
+    # o panorama so esta certo EM CIMA do ponto: parar a 10 cm e pior que piscar
+    ("a camera para antes de chegar no ponto", "static/andar.html",
+     "  return Math.max(0, Math.min(1, (agora - v.inicio) / v.dur));",
+     "  return Math.max(0, Math.min(0.97, (agora - v.inicio) / v.dur));",
+     "TestViagemEntrePontos.test_a_camera_chega_exatamente_no_ponto"),
+
+    # ficar preso vendo a camera terminar o passeio enquanto se aperta W faz a
+    # pessoa achar que a pagina travou
+    ("o comando de quem ve nao cancela a viagem", "static/andar.html",
+     "  if (viagem && !tentativa.equals(posicao)) viagem = null;",
+     "  if (false) viagem = null;",
+     "TestViagemEntrePontos.test_apertar_uma_tecla_cancela_a_viagem"),
+
+    # clicar no ponto em que ja se esta faria a tela tremer sem motivo
+    ("clicar onde se esta inicia uma viagem a lugar nenhum", "static/andar.html",
+     "  if (metros < 0.05){ trocarAtivo(p); return; }",
+     "  if (false){ trocarAtivo(p); return; }",
+     "TestViagemEntrePontos.test_ponto_onde_ja_se_esta_nao_vira_viagem"),
 ]
 
 

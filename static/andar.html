@@ -617,7 +617,7 @@ function atualizarPainel(){
   }
 }
 
-function recentrar(){ posicao.copy(ativo.mundo); }
+function recentrar(){ viajarAte(ativo); }
 
 // ------------------------------------------------------- setas entre pontos
 //
@@ -652,7 +652,7 @@ function criarSetas(){
 function irAoPonto(p){
   if (p === ativo) return;
   carregarPonto(p)
-    .then(() => { posicao.copy(p.mundo); trocarAtivo(p); })
+    .then(() => viajarAte(p))
     .catch(() => avisar('Não consegui carregar ' + p.cena.nome));
 }
 
@@ -784,8 +784,59 @@ function irPeloMapa(ev){
     if (d < melhor){ melhor = d; alvo = p; }
   });
   if (!alvo) return;
-  carregarPonto(alvo).then(() => { posicao.copy(alvo.mundo); trocarAtivo(alvo); })
-                     .catch(()=>{});
+  carregarPonto(alvo).then(() => viajarAte(alvo)).catch(()=>{});
+}
+
+// ------------------------------------------------------ viagem entre pontos
+//
+// A seta TELEPORTAVA: `posicao.copy(p.mundo)` e pronto. Piscar de um ponto ao
+// outro nao e caminhar. Quem ve perde a nocao de onde estava e de quanto andou,
+// e cada salto parece um corte de video em vez de um passo dentro da mesma casa.
+//
+// Uma viagem curta de camera conserta isso sem exigir uma foto a mais: o olho
+// acompanha o deslocamento e entende que os dois panoramas sao o mesmo lugar. A
+// dissolvencia entre eles ja existia, e agora acontece no MEIO do caminho, que
+// e justamente onde ela menos se nota.
+//
+// A viagem corta parede: a reta entre dois pontos de captura pode raspar a
+// quina de um corredor. E de proposito. O caminho real exigiria uma rota pelo
+// piso livre, e o que se ganharia com isso e menos do que se perde em meio
+// segundo de camera dando a volta.
+
+let viagem = null;
+
+// Aceleracao e desaceleracao. Velocidade constante parece trilho de camera de
+// cinema, e nao passo de gente: quem caminha sai devagar e para devagar.
+function suavizar(t){
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+// Dois metros nao podem levar o mesmo tempo que oito. Mas proporcional puro
+// tambem nao serve: oito metros a passo de gente dariam uns seis segundos, e
+// ninguem espera tudo isso para ver o quarto do lado.
+function duracaoDaViagem(metros){
+  return Math.max(260, Math.min(900, metros * 150));
+}
+
+function avancoDaViagem(v, agora){
+  if (!v || !v.dur) return 1;
+  return Math.max(0, Math.min(1, (agora - v.inicio) / v.dur));
+}
+
+function viajarAte(p){
+  const metros = posicao.distanceTo(p.mundo);
+  if (metros < 0.05){ trocarAtivo(p); return; }
+  viagem = {de: posicao.clone(), para: p.mundo.clone(), alvo: p,
+            inicio: performance.now(), dur: duracaoDaViagem(metros)};
+}
+
+function avancarViagem(agora){
+  const bruto = avancoDaViagem(viagem, agora);
+  posicao.copy(viagem.de).lerp(viagem.para, suavizar(bruto));
+  if (bruto >= 1){
+    posicao.copy(viagem.para);
+    viagem = null;
+  }
 }
 
 // ------------------------------------------------------------------ laço
@@ -805,8 +856,17 @@ function animar(){
   if (teclas['q']) tentativa.y -= passo;
   if (teclas['e']) tentativa.y += passo;
 
-  // so anda para onde algum ponto de captura alcança: e o que forma o corredor
-  if (podeEstar(tentativa)) posicao.copy(tentativa);
+  // Comando de quem ve cancela a viagem na hora. Ficar preso vendo a camera
+  // terminar o passeio enquanto se aperta W e o tipo de coisa que faz a
+  // pessoa achar que a pagina travou.
+  if (viagem && !tentativa.equals(posicao)) viagem = null;
+
+  if (viagem){
+    avancarViagem(performance.now());
+  } else if (podeEstar(tentativa)){
+    // so anda para onde algum ponto de captura alcança: e o que forma o corredor
+    posicao.copy(tentativa);
+  }
 
   const perto = maisProximo(posicao);
   if (perto.ponto !== ativo){
