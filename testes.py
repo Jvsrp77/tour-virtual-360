@@ -48,7 +48,8 @@ import cena_apartamento           # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
 import stitcher                  # noqa: E402
-import vizinhanca                   # noqa: E402
+import vizinhanca               # noqa: E402
+import captura                   # noqa: E402
 import video                      # noqa: E402
 import nivelamento                # noqa: E402
 
@@ -4175,6 +4176,225 @@ class TestMisturaEntrePontos(PaginaNoNode, unittest.TestCase):
                       "o peso deixou de sair da posicao")
         self.assertIn("aplicarEstado(misturado, peso, true);", laco)
         self.assertNotIn("p === saindo", laco, "voltou a dissolvencia por relogio")
+
+
+class TestGuiaDeCaptura(Base):
+    """
+    O que ja foi capturado e o que ainda falta.
+
+    Todo caminho deste projeto desembocou no mesmo lugar: quem decide a
+    qualidade do passeio e a CAPTURA, nao o codigo. E no entanto o corretor
+    capturava no escuro - so descobria que ficou ruim com o tour pronto, e ai
+    ninguem volta ao imovel.
+
+    O guia que ja existia ensina a fotografar UM panorama. Este responde a
+    outra pergunta: quantos pontos, onde, e o que falta NESTE imovel.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("dona-captura")
+        self.iid = self.imovel(self.dona, "Apartamento a capturar")
+
+    def _cena(self, nome, x, y, prof=True, escorrido=None):
+        c = {"id": nome.lower().replace(" ", "-"), "nome": nome,
+             "arquivo": "c.jpg", "hotspots": []}
+        if x is not None:
+            c["posicao"] = {"x": x, "y": y}
+        if prof:
+            c["profundidade"] = "prof.png"
+        if escorrido is not None:
+            c["escorrido"] = {"fracao": escorrido}
+        return c
+
+    def _gravar(self, cenas):
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["cenas"] = cenas
+        aplicacao.salvar_tour(tour, self.iid)
+        return tour
+
+    # ------------------------------------------------------- o nome do comodo
+
+    def test_o_comodo_sai_do_nome_que_o_corretor_ja_usa(self):
+        """
+        Ninguem vai preencher um campo "cômodo" a mais. O corretor ja escreve
+        "Cozinha - junto à mesa" por conta propria, porque e como se fala.
+        """
+        self.assertEqual(captura.comodo_da_cena("Cozinha - junto à mesa"), "Cozinha")
+        self.assertEqual(captura.comodo_da_cena("Suíte — entrada"), "Suíte")
+        self.assertEqual(captura.comodo_da_cena("Varanda"), "Varanda")
+        self.assertEqual(captura.comodo_da_cena(""), "")
+
+    # ------------------------------------------------------------ os vaos
+
+    def test_o_vao_medido_e_ate_o_vizinho_mais_proximo(self):
+        """
+        O pior lugar do passeio e sempre o meio do caminho entre dois pontos.
+        Entao o que importa nao e a media do imovel: e a distancia ate o
+        vizinho, ponto a ponto.
+        """
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 1.5, 0),
+                 self._cena("Sala - C", 6.0, 0)]
+        medidos = dict((c["nome"], round(d, 2)) for c, d in captura.vaos(cenas))
+        self.assertEqual(medidos["Sala - A"], 1.5)
+        self.assertEqual(medidos["Sala - B"], 1.5)
+        self.assertEqual(medidos["Sala - C"], 4.5)
+
+    def test_cena_sem_posicao_fica_fora_da_conta_de_vao(self):
+        """Ponto sem lugar no croqui nao tem distancia a coisa nenhuma."""
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", None, None)]
+        self.assertEqual(len(captura.vaos(cenas)), 1)
+
+    def test_ponto_unico_nao_inventa_um_vizinho(self):
+        cena, metros = captura.vaos([self._cena("Sala - A", 0, 0)])[0]
+        self.assertIsNone(metros)
+
+    # ---------------------------------------------------------- o diagnostico
+
+    def test_vao_maior_que_o_alcance_do_passeio_impede_de_caminhar(self):
+        """
+        O numero nao e de gosto: cada ponto alcança 2,50 m. Dois pontos mais
+        distantes que isso deixam, no meio, um trecho que ponto nenhum cobre -
+        a caminhada para ali.
+        """
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 4.0, 0)]
+        _resumo, achados = captura.diagnosticar({"cenas": cenas})
+        graves = [a for a in achados if a["grau"] == "impede"]
+        self.assertTrue(graves, "vão de 4 m passou como aceitável")
+        self.assertIn("meio", graves[0]["fazer"])
+
+    def test_vao_folgado_avisa_sem_impedir(self):
+        """
+        Entre o ideal e o maximo a caminhada funciona e a imagem estica. Tratar
+        isso como erro grave faria o corretor ignorar os erros graves de
+        verdade.
+        """
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 2.2, 0)]
+        _resumo, achados = captura.diagnosticar({"cenas": cenas})
+        self.assertEqual([a["grau"] for a in achados if a["cena"]],
+                         ["atrapalha", "atrapalha"])
+
+    def test_captura_boa_nao_gera_reclamacao(self):
+        """
+        Silêncio no caso bom. Aviso em captura boa ensina a ignorar avisos, e
+        aí o aviso que importa passa batido.
+        """
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 1.5, 0),
+                 self._cena("Cozinha - A", 3.0, 0), self._cena("Cozinha - B", 4.4, 0)]
+        resumo, achados = captura.diagnosticar({"cenas": cenas})
+        self.assertEqual(achados, [], [a["o_que"] for a in achados])
+        self.assertIn("boa", captura.proximo_passo(resumo, achados))
+
+    def test_comodo_com_um_ponto_so_nao_deixa_caminhar_nele(self):
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 1.5, 0),
+                 self._cena("Lavabo", 1.2, 1.0)]
+        _r, achados = captura.diagnosticar({"cenas": cenas})
+        self.assertTrue(any("Lavabo" in (a["o_que"] + a["fazer"]) for a in achados),
+                        "o cômodo de um ponto só passou batido")
+
+    def test_cena_sem_profundidade_nao_anda_de_jeito_nenhum(self):
+        cenas = [self._cena("Sala - A", 0, 0, prof=False),
+                 self._cena("Sala - B", 1.5, 0)]
+        _r, achados = captura.diagnosticar({"cenas": cenas})
+        graves = [a for a in achados if a["grau"] == "impede"]
+        self.assertTrue(any("profundidade" in a["o_que"] for a in graves))
+
+    def test_imovel_vazio_recebe_por_onde_comecar(self):
+        resumo, achados = captura.diagnosticar({"cenas": []})
+        self.assertEqual(resumo["pontos"], 0)
+        self.assertTrue(achados)
+        self.assertIn("sala", achados[0]["fazer"].lower())
+
+    def test_todo_achado_diz_o_que_fazer(self):
+        """
+        A REGRA DA TELA. O corretor está no imóvel, de pé, com o celular na
+        mão. Achado sem o que fazer é só um muro: ele não sabe se sai dali ou
+        não, e a próxima visita não acontece.
+        """
+        cenas = [self._cena("Sala - A", 0, 0, prof=False),
+                 self._cena("Sala - B", 9.0, 0),
+                 self._cena("Cozinha - A", None, None),
+                 self._cena("Suíte - A", 1.0, 1.0, escorrido=0.09)]
+        _r, achados = captura.diagnosticar({"cenas": cenas})
+        self.assertGreaterEqual(len(achados), 4)
+        for a in achados:
+            self.assertTrue(a["fazer"].strip(), a["o_que"])
+            self.assertTrue(a["o_que"].strip())
+            self.assertIn(a["grau"], ("impede", "atrapalha"))
+
+    def test_o_proximo_passo_e_um_so_e_o_mais_grave(self):
+        """
+        Lista de dez problemas no celular não vira ação nenhuma. O que vira é
+        uma frase.
+        """
+        cenas = [self._cena("Sala - A", 0, 0, prof=False),
+                 self._cena("Sala - B", 2.2, 0)]
+        resumo, achados = captura.diagnosticar({"cenas": cenas})
+        passo = captura.proximo_passo(resumo, achados)
+        self.assertIn("profundidade", passo,
+                      "sugeriu o problema leve tendo um grave na frente")
+
+    # ------------------------------------------- o guia e o passeio combinam
+
+    def test_o_limite_do_guia_e_o_alcance_real_do_passeio(self):
+        """
+        Se alguém mexer no alcance do passeio e esquecer do guia, o guia passa
+        a mandar o corretor capturar errado — e com toda a autoridade de um
+        número na tela. Os dois têm de ser o mesmo número.
+        """
+        html = io.open(os.path.join("static", "andar.html"),
+                       encoding="utf-8").read()
+        achado = re.search(r"const PASSEIO_CHEIO = ([\d.]+)", html)
+        self.assertTrue(achado, "sumiu o PASSEIO_CHEIO do andar.html")
+        self.assertEqual(float(achado.group(1)), captura.VAO_MAXIMO)
+
+    # -------------------------------------------------------------- as rotas
+
+    def test_o_diagnostico_chega_pela_api(self):
+        self._gravar([self._cena("Sala - A", 0, 0), self._cena("Sala - B", 4.0, 0)])
+        r = self.dona.get("/api/imoveis/%s/captura" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        j = r.get_json()
+        self.assertEqual(j["resumo"]["pontos"], 2)
+        self.assertTrue(j["passo"])
+        self.assertTrue(j["achados"])
+
+    def test_o_que_falta_capturar_nao_e_publico(self):
+        """
+        É o avesso do anúncio: diz onde a captura está fraca, que é exatamente
+        o que não se conta para o comprador.
+        """
+        self._gravar([self._cena("Sala - A", 0, 0)])
+        visitante = aplicacao.app.test_client()
+        r = visitante.get("/api/imoveis/%s/captura" % self.iid)
+        self.assertIn(r.status_code, (401, 403, 404))
+
+    def test_a_pagina_do_guia_abre_para_a_dona(self):
+        self.assertEqual(self.dona.get("/capturar/%s" % self.iid).status_code, 200)
+
+    def test_a_pagina_do_guia_exige_sessao(self):
+        """
+        A docstring da rota afirma isso, entao tem de estar travado: a pagina
+        diz onde a captura esta fraca, e guarda o destino para voltar depois
+        de entrar.
+        """
+        visitante = aplicacao.app.test_client()
+        r = visitante.get("/capturar/%s" % self.iid)
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/entrar", r.headers["Location"])
+        self.assertIn("/capturar/%s" % self.iid, r.headers["Location"],
+                      "perdeu o destino: depois de entrar cai em outro lugar")
+
+    def test_imovel_que_nao_existe_volta_para_a_lista(self):
+        r = self.dona.get("/capturar/naoexiste9")
+        self.assertEqual(r.status_code, 302)
+        self.assertIn("/imoveis", r.headers["Location"])
+
+    def test_a_pagina_nao_busca_nada_na_internet(self):
+        """Guia de captura se abre DENTRO do imóvel, onde o sinal é ruim."""
+        html = io.open(os.path.join("static", "capturar.html"),
+                       encoding="utf-8").read()
+        for achado in re.findall(r'(?:src|href)="(https?:)?//[^"]+"', html):
+            self.fail("o guia busca recurso de fora: %s" % achado)
 
 
 def limpar():

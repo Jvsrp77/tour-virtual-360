@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Guia de captura</title>
+<style>
+  :root{
+    --fundo:#14171c; --caixa:#1c2128; --linha:#2b323c; --texto:#e8ecf2;
+    --suave:#98a1ad; --acento:#e07b39; --impede:#e2564f; --atrapalha:#d9a441;
+    --ok:#4fae6a;
+    --fonte:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--fundo);color:var(--texto);
+    font-family:var(--fonte);font-size:16px;line-height:1.5;
+    -webkit-font-smoothing:antialiased}
+  [hidden]{display:none !important}
+  .pagina{max-width:640px;margin:0 auto;padding:16px 16px 40px}
+
+  header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+    padding:10px 0 14px}
+  h1{font-size:17px;margin:0;font-weight:600}
+  .imovel{color:var(--suave);font-size:14px}
+
+  /* O passo unico vem primeiro e grande: quem esta de pe no corredor, de
+     celular na mao, nao le uma lista de dez problemas. Le uma frase. */
+  .passo{background:var(--caixa);border:1px solid var(--linha);
+    border-left:4px solid var(--acento);border-radius:12px;padding:16px 16px 18px}
+  .passo .rotulo{font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--acento);margin:0 0 7px}
+  .passo p{margin:0;font-size:18px;line-height:1.4}
+
+  .numeros{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;
+    margin:14px 0}
+  .numero{background:var(--caixa);border:1px solid var(--linha);
+    border-radius:11px;padding:12px 13px}
+  .numero dt{font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--suave);margin:0 0 4px}
+  .numero dd{margin:0;font-size:21px;font-weight:600;font-variant-numeric:tabular-nums}
+  .numero .nota{font-size:12px;color:var(--suave);font-weight:400;display:block;
+    margin-top:2px}
+  .numero.ruim dd{color:var(--impede)}
+  .numero.atencao dd{color:var(--atrapalha)}
+  .numero.bom dd{color:var(--ok)}
+
+  h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--suave);margin:22px 0 9px;font-weight:600}
+  .achado{background:var(--caixa);border:1px solid var(--linha);
+    border-radius:11px;padding:13px 14px;margin-bottom:9px}
+  .achado.impede{border-left:4px solid var(--impede)}
+  .achado.atrapalha{border-left:4px solid var(--atrapalha)}
+  .achado .cena{font-size:12px;color:var(--suave);margin:0 0 4px}
+  .achado .oque{margin:0;font-size:14.5px}
+  .achado .fazer{margin:8px 0 0;font-size:14.5px;color:var(--acento)}
+  .achado .fazer b{font-weight:600}
+
+  .tudoBem{background:var(--caixa);border:1px solid var(--linha);
+    border-left:4px solid var(--ok);border-radius:11px;padding:14px}
+
+  .acoes{display:flex;gap:9px;flex-wrap:wrap;margin-top:20px}
+  .bt{flex:1 1 auto;min-width:140px;text-align:center;font:inherit;font-size:15px;
+    background:var(--caixa);color:var(--texto);border:1px solid var(--linha);
+    border-radius:10px;padding:13px 14px;cursor:pointer;text-decoration:none;
+    display:block}
+  .bt.principal{background:var(--acento);border-color:var(--acento);color:#1c1206;
+    font-weight:600}
+  .bt:active{opacity:.75}
+
+  .regra{color:var(--suave);font-size:13px;margin-top:22px;line-height:1.6}
+  .regra b{color:var(--texto)}
+  .aviso{background:var(--caixa);border:1px solid var(--linha);border-radius:11px;
+    padding:14px;color:var(--suave);font-size:14px}
+</style>
+</head>
+<body>
+<div class="pagina">
+
+  <header>
+    <h1>Guia de captura</h1>
+    <span class="imovel" id="imovel"></span>
+  </header>
+
+  <div id="carregando" class="aviso">Vendo o que já foi capturado…</div>
+
+  <div id="tudo" hidden>
+    <div class="passo">
+      <p class="rotulo">Faça agora</p>
+      <p id="passo"></p>
+    </div>
+
+    <dl class="numeros">
+      <div class="numero"><dt>Pontos</dt><dd id="nPontos">—</dd></div>
+      <div class="numero"><dt>Ambientes</dt><dd id="nAmbientes">—</dd></div>
+      <div class="numero" id="cxVao">
+        <dt>Vão entre pontos</dt>
+        <dd id="nVao">—</dd>
+      </div>
+      <div class="numero" id="cxPior">
+        <dt>Maior vão</dt>
+        <dd id="nPior">—</dd>
+      </div>
+    </dl>
+
+    <div id="listaImpede" hidden>
+      <h2>Impede de caminhar</h2>
+      <div id="impede"></div>
+    </div>
+
+    <div id="listaAtrapalha" hidden>
+      <h2>Atrapalha</h2>
+      <div id="atrapalha"></div>
+    </div>
+
+    <div id="semAchados" class="tudoBem" hidden>
+      <b>Nada pendente.</b> A captura deste imóvel cobre os ambientes com
+      espaçamento suficiente para caminhar.
+    </div>
+
+    <div class="acoes">
+      <button class="bt principal" id="btRever">Conferir de novo</button>
+      <a class="bt" id="btPainel">Abrir o painel</a>
+      <a class="bt" id="btAndar">Testar a caminhada</a>
+    </div>
+
+    <p class="regra">
+      <b>A regra que decide tudo:</b> cada ponto de captura alcança no máximo
+      <b id="rMax">2,5</b> m ao redor. Dois pontos mais distantes que isso deixam,
+      no meio, um trecho que ponto nenhum cobre — é ali que a imagem rasga.
+      O ideal é <b id="rIdeal">1,8</b> m entre vizinhos.
+      <br><br>
+      Esta página só conta o que já foi enviado. Ela não sabe onde você está —
+      celular não tem posição dentro de casa, e fingir que tem seria inventar.
+    </p>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const IMOVEL = location.pathname.split("/").filter(Boolean)[1] || "";
+  const API = "/api/imoveis/" + IMOVEL;
+  const nBR = (n, casas) => Number(n).toLocaleString("pt-BR",
+    {minimumFractionDigits: casas, maximumFractionDigits: casas});
+
+  $("btPainel").href = "/painel/" + IMOVEL;
+  $("btAndar").href = "/andar/" + IMOVEL;
+
+  function texto(pai, achados){
+    pai.innerHTML = "";
+    achados.forEach(a => {
+      const caixa = document.createElement("div");
+      caixa.className = "achado " + a.grau;
+      if (a.cena){
+        const c = document.createElement("p");
+        c.className = "cena";
+        c.textContent = a.cena;
+        caixa.appendChild(c);
+      }
+      const o = document.createElement("p");
+      o.className = "oque";
+      o.textContent = a.o_que;
+      caixa.appendChild(o);
+      const f = document.createElement("p");
+      f.className = "fazer";
+      f.innerHTML = "<b>→</b> ";
+      f.appendChild(document.createTextNode(a.fazer));
+      caixa.appendChild(f);
+      pai.appendChild(caixa);
+    });
+  }
+
+  // A cor do numero conta a historia antes de a pessoa ler: vao acima do
+  // alcance do passeio e vermelho, porque ali a caminhada para de verdade.
+  function corDoVao(caixa, metros, resumo){
+    caixa.classList.remove("ruim", "atencao", "bom");
+    if (metros === null || metros === undefined) return;
+    if (metros > resumo.vao_maximo) caixa.classList.add("ruim");
+    else if (metros > resumo.vao_ideal) caixa.classList.add("atencao");
+    else caixa.classList.add("bom");
+  }
+
+  async function conferir(){
+    $("carregando").hidden = false;
+    $("carregando").textContent = "Vendo o que já foi capturado…";
+    try{
+      const r = await fetch(API + "/captura", {credentials: "same-origin"});
+      if (r.status === 401 || r.status === 403){
+        $("carregando").innerHTML = "Entre na sua conta para ver o guia deste "
+          + "imóvel. <a style='color:var(--acento)' href='/entrar'>Entrar</a>";
+        return;
+      }
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.erro || "sem resposta");
+
+      $("imovel").textContent = j.titulo || "";
+      $("passo").textContent = j.passo;
+      const rs = j.resumo;
+      $("nPontos").textContent = rs.pontos;
+      $("nAmbientes").textContent = rs.ambientes;
+      $("nVao").innerHTML = rs.vao_mediano === null ? "—"
+        : nBR(rs.vao_mediano, 2) + " m<span class='nota'>mediana entre vizinhos</span>";
+      $("nPior").innerHTML = rs.vao_maior === null ? "—"
+        : nBR(rs.vao_maior, 2) + " m<span class='nota'>o pior do imóvel</span>";
+      corDoVao($("cxVao"), rs.vao_mediano, rs);
+      corDoVao($("cxPior"), rs.vao_maior, rs);
+      $("rMax").textContent = nBR(rs.vao_maximo, 1);
+      $("rIdeal").textContent = nBR(rs.vao_ideal, 1);
+
+      const impede = j.achados.filter(a => a.grau === "impede");
+      const atrapalha = j.achados.filter(a => a.grau === "atrapalha");
+      texto($("impede"), impede);
+      texto($("atrapalha"), atrapalha);
+      $("listaImpede").hidden = !impede.length;
+      $("listaAtrapalha").hidden = !atrapalha.length;
+      $("semAchados").hidden = (impede.length + atrapalha.length) > 0;
+
+      $("carregando").hidden = true;
+      $("tudo").hidden = false;
+    }catch(e){
+      $("carregando").textContent = "Não consegui falar com o servidor agora. "
+        + "Toque em conferir de novo quando o sinal voltar.";
+      $("tudo").hidden = true;
+    }
+  }
+
+  $("btRever").addEventListener("click", conferir);
+  conferir();
+})();
+</script>
+</body>
+</html>

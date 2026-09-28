@@ -750,6 +750,60 @@ MUT = [
      "    .filter(p => !p.malha && !p.carregando",
      "    .filter(p => !p.carregando",
      "TestMisturaEntrePontos.test_o_vizinho_e_carregado_antes_de_se_precisar_dele"),
+    # --- o guia de captura: o que falta fotografar neste imovel ---
+
+    # o numero nao e de gosto: cada ponto alcanca 2,50 m, e alem disso fica um
+    # trecho que ponto nenhum cobre
+    ("o guia aceita vao maior que o passeio alcanca", "captura.py",
+     "VAO_MAXIMO = 2.50",
+     "VAO_MAXIMO = 9.00",
+     "TestGuiaDeCaptura.test_vao_maior_que_o_alcance_do_passeio_impede_de_caminhar"),
+
+    # aviso em captura boa ensina a ignorar avisos, e ai o que importa passa
+    ("o guia reclama de captura boa", "captura.py",
+     "        elif metros > VAO_IDEAL:",
+     "        elif metros > 0:",
+     "TestGuiaDeCaptura.test_captura_boa_nao_gera_reclamacao"),
+
+    # o corretor esta de pe no imovel: achado sem o que fazer e so um muro
+    ("achado sem o que fazer", "captura.py",
+     '                "fazer": "Capture um ponto no meio do caminho."})',
+     '                "fazer": ""})',
+     "TestGuiaDeCaptura.test_todo_achado_diz_o_que_fazer"),
+
+    # lista de dez problemas no celular nao vira acao nenhuma; uma frase vira
+    ("o passo sugere o problema leve antes do grave", "captura.py",
+     "    impede = [a for a in achados if a[\"grau\"] == \"impede\"]",
+     "    impede = [a for a in achados if a[\"grau\"] == \"atrapalha\"]",
+     "TestGuiaDeCaptura.test_o_proximo_passo_e_um_so_e_o_mais_grave"),
+
+    # o pior lugar do passeio e o meio do caminho ate o VIZINHO, nao a media
+    ("o vao vira media em vez do vizinho mais proximo", "captura.py",
+     "        saida.append((cena, min(outras) if outras else None))",
+     "        saida.append((cena, sum(outras) / len(outras) if outras else None))",
+     "TestGuiaDeCaptura.test_o_vao_medido_e_ate_o_vizinho_mais_proximo"),
+
+    ("o comodo deixa de sair do nome da cena", "captura.py",
+     "            return nome.split(separador)[0].strip()",
+     "            return nome",
+     "TestGuiaDeCaptura.test_o_comodo_sai_do_nome_que_o_corretor_ja_usa"),
+
+    # sem profundidade da para olhar em volta, nao da para andar
+    ("cena sem profundidade passa como pronta", "captura.py",
+     '    sem_profundidade = [c for c in cenas if not c.get(\"profundidade\")]',
+     "    sem_profundidade = []",
+     "TestGuiaDeCaptura.test_cena_sem_profundidade_nao_anda_de_jeito_nenhum"),
+
+    ("comodo com um ponto so passa batido", "captura.py",
+     "        if len(do_comodo) == 1 and nome:",
+     "        if False:",
+     "TestGuiaDeCaptura.test_comodo_com_um_ponto_so_nao_deixa_caminhar_nele"),
+
+    # e o avesso do anuncio: diz onde a captura esta fraca
+    ("o que falta capturar fica publico", "app.py",
+     '"maquete", "api.api_maquete",',
+     '"maquete", "api.api_maquete", "api.api_captura",',
+     "TestGuiaDeCaptura.test_o_que_falta_capturar_nao_e_publico"),
 ]
 
 

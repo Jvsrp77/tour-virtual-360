@@ -36,6 +36,7 @@ import aviso
 import maquete3d
 import modelo3d
 import vizinhanca
+import captura
 import area
 import fundo
 import usuarios
@@ -900,6 +901,19 @@ def maquete(imovel):
     return _com_previa("maquete.html", imovel)
 
 
+@app.route("/capturar/<imovel>")
+def capturar(imovel):
+    """
+    O guia de captura, para abrir no celular DENTRO do imovel.
+
+    Nao e publico: quem entra ve o que falta capturar, e isso e o avesso do
+    anuncio. A pagina exige sessao como qualquer tela de trabalho.
+    """
+    if not imovel_existe(imovel):
+        return redirect("/imoveis")
+    return send_from_directory("static", "capturar.html")
+
+
 @app.route("/data/<imovel>/scenes/<path:nome>")
 def arquivo_cena(imovel, nome):
     if not imovel_existe(imovel):
@@ -1230,6 +1244,21 @@ def api_orientacao():
     tour["frente"] = graus
     salvar_tour(tour)
     return jsonify({"ok": True, "frente": graus})
+
+
+@api.route("/captura", methods=["GET"])
+def api_captura():
+    """
+    O que ja foi capturado neste imovel e o que ainda falta.
+
+    E do dono, e nao publica: e o avesso do anuncio. Diz onde a captura esta
+    fraca, que e exatamente o que nao se conta para o comprador.
+    """
+    tour = carregar_tour()
+    resumo, achados = captura.diagnosticar(tour)
+    return jsonify({"ok": True, "resumo": resumo, "achados": achados,
+                    "passo": captura.proximo_passo(resumo, achados),
+                    "titulo": tour.get("titulo", "")})
 
 
 @api.route("/vizinhanca", methods=["PUT", "DELETE"])
