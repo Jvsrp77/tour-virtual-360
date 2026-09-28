@@ -35,6 +35,7 @@ import tarefas
 import aviso
 import maquete3d
 import modelo3d
+import vizinhanca
 import area
 import fundo
 import usuarios
@@ -1231,6 +1232,32 @@ def api_orientacao():
     return jsonify({"ok": True, "frente": graus})
 
 
+@api.route("/vizinhanca", methods=["PUT", "DELETE"])
+def api_vizinhanca():
+    """
+    Busca (ou apaga) o que existe em volta do imovel.
+
+    E do dono porque e ELE quem chama a rede: quem visita apenas le o que ficou
+    gravado. Se a busca acontecesse a cada visita, o anuncio ficaria refem de
+    dois servicos de terceiro estarem no ar — e a hora em que eles caem e
+    sempre a pior hora possivel.
+    """
+    tour = carregar_tour()
+    if request.method == "DELETE":
+        tour.pop("vizinhanca", None)
+        salvar_tour(tour)
+        return jsonify({"ok": True, "vizinhanca": None})
+
+    try:
+        achado = vizinhanca.buscar(tour.get("endereco", ""))
+    except vizinhanca.ErroVizinhanca as erro:
+        return jsonify({"ok": False, "erro": str(erro)}), 422
+
+    tour["vizinhanca"] = achado
+    salvar_tour(tour)
+    return jsonify({"ok": True, "vizinhanca": achado})
+
+
 @api.route("/modelo", methods=["POST"])
 def api_enviar_modelo():
     """
@@ -1333,6 +1360,13 @@ def api_salvar_tour():
                   "cena_inicial", "lead", "logo"):
         if campo in dados:
             tour[campo] = dados[campo]
+
+    # Endereco corrigido depois da busca deixaria o anuncio mostrando o mercado
+    # do endereco ANTIGO, sem avisar ninguem. Melhor perder a vizinhanca e
+    # pedir para buscar de novo do que exibir a do lugar errado.
+    if vizinhanca.esta_velha(tour):
+        tour.pop("vizinhanca", None)
+
     salvar_tour(tour)
     return jsonify({"ok": True, "tour": tour})
 

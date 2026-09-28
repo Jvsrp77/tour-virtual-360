@@ -47,7 +47,8 @@ import plantas                    # noqa: E402
 import cena_apartamento           # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
-import stitcher                   # noqa: E402
+import stitcher                  # noqa: E402
+import vizinhanca                   # noqa: E402
 import video                      # noqa: E402
 import nivelamento                # noqa: E402
 
@@ -3452,6 +3453,349 @@ class TestOrientacaoDoImovel(Base):
         trecho = html[html.index('id="frenteDona"'):]
         self.assertIn("hidden", trecho[:60],
                       "o seletor nasce visível para qualquer visitante")
+
+
+class TestVizinhanca(Base):
+    """
+    O que existe em volta do imovel.
+
+    O anuncio parava na porta: o tour entrega o interior inteiro — panorama,
+    maquete, caminhada, medidas, sol — e nao dizia uma palavra sobre o bairro,
+    que e metade da decisao de quem compra.
+
+    Nenhum teste aqui toca a rede. Nao e comodismo: teste que depende de dois
+    servicos de terceiro estarem no ar reprova codigo certo num dia ruim, e
+    ensina a ignorar teste vermelho. O caminho de rede e trocado por um
+    gabarito, e o que se exercita e o que o nosso codigo FAZ com a resposta.
+    """
+
+    # Dois pontos reais da Avenida Paulista, com a distancia conferida no mapa.
+    MASP = (-23.561414, -46.655881)
+
+    def setUp(self):
+        self.dona = self.conta("dona-bairro")
+        self.iid = self.imovel(self.dona, "Apartamento no centro")
+
+    # ---------------------------------------------------------------- contas
+
+    def test_a_distancia_e_a_da_esfera_e_nao_a_do_plano(self):
+        """
+        Um grau de latitude são 111,19 km em qualquer lugar do mundo. Tratar
+        latitude e longitude como plano cartesiano erraria mais quanto mais
+        longe do equador — e o Brasil inteiro está longe do equador.
+        """
+        self.assertAlmostEqual(vizinhanca._haversine(0, 0, 1, 0), 111195,
+                               delta=60)
+        # e um grau de LONGITUDE encurta com a latitude: no paralelo de São
+        # Paulo ele vale cerca de 102 km, nao 111
+        self.assertAlmostEqual(vizinhanca._haversine(-23.5, 0, -23.5, 1),
+                               102000, delta=900)
+
+    def test_o_mesmo_ponto_dista_zero(self):
+        self.assertEqual(round(vizinhanca._haversine(*(self.MASP + self.MASP))), 0)
+
+    def test_cada_tipo_de_lugar_cai_na_categoria_certa(self):
+        casos = [
+            ({"shop": "supermarket"}, "mercado"),
+            ({"shop": "bakery"}, "padaria"),
+            ({"amenity": "pharmacy"}, "farmacia"),
+            ({"amenity": "school"}, "escola"),
+            ({"highway": "bus_stop"}, "onibus"),
+            ({"leisure": "park"}, "praca"),
+        ]
+        for tags, esperado in casos:
+            with self.subTest(tags=tags):
+                self.assertEqual(vizinhanca.categoria(tags)[0], esperado)
+
+    def test_lugar_que_nao_interessa_nao_entra_na_lista(self):
+        """
+        O OpenStreetMap tem de tudo: poste, lixeira, banco de praça. Deixar
+        entrar encheria o anúncio de coisa que não ajuda a decidir nada.
+        """
+        for tags in ({"amenity": "waste_basket"}, {"highway": "street_lamp"},
+                     {"amenity": "bench"}, {}):
+            self.assertIsNone(vizinhanca.categoria(tags), tags)
+
+    def test_a_consulta_pede_todas_as_categorias_que_a_lista_declara(self):
+        """
+        Categoria nova na lista e esquecida na consulta ficaria para sempre
+        com zero resultados, sem erro nenhum — o pior tipo de defeito.
+        """
+        texto = vizinhanca.consulta(*self.MASP)
+        for _chave, rotulo, regras in vizinhanca.CATEGORIAS:
+            for campo, valores in regras.items():
+                for valor in valores:
+                    self.assertIn(valor, texto, "%s ficou fora" % rotulo)
+                self.assertIn('"%s"' % campo, texto)
+
+    # ---------------------------------------------------------- a escolha
+
+    def _no(self, tags, lat, lon):
+        return {"type": "node", "lat": lat, "lon": lon, "tags": tags}
+
+    def test_de_cada_categoria_sobra_o_mais_perto(self):
+        """
+        Saber que há catorze padarias no raio não ajuda ninguém a decidir. O
+        que ajuda é saber que a mais perto está a 120 m.
+        """
+        lat, lon = self.MASP
+        # a mais PERTO vem primeiro no gabarito de proposito: assim "fica a
+        # ultima que apareceu" nao consegue se passar por "fica a mais perto"
+        elementos = [
+            self._no({"shop": "bakery", "name": "Padaria perto"}, lat + 0.0005, lon),
+            self._no({"shop": "bakery", "name": "Padaria do meio"}, lat + 0.002, lon),
+            self._no({"shop": "bakery", "name": "Padaria longe"}, lat + 0.004, lon),
+            self._no({"amenity": "pharmacy", "name": "Farmácia"}, lat, lon + 0.002),
+        ]
+        achados = vizinhanca.escolher(elementos, lat, lon)
+        padarias = [p for p in achados if p["chave"] == "padaria"]
+        self.assertEqual(len(padarias), 1, "duas padarias na mesma lista")
+        self.assertEqual(padarias[0]["nome"], "Padaria perto")
+        self.assertLess(padarias[0]["metros"], 100)
+
+    def test_a_lista_sai_do_mais_perto_ao_mais_longe(self):
+        """A ordem é a do anúncio: o que está a 80 m vem antes do que está a 800."""
+        lat, lon = self.MASP
+        elementos = [
+            self._no({"amenity": "school"}, lat + 0.005, lon),
+            self._no({"shop": "bakery"}, lat + 0.0006, lon),
+            self._no({"amenity": "pharmacy"}, lat + 0.002, lon),
+        ]
+        metros = [p["metros"] for p in vizinhanca.escolher(elementos, lat, lon)]
+        self.assertEqual(metros, sorted(metros))
+
+    def test_lugar_fora_do_raio_nao_entra(self):
+        """
+        O `around` do Overpass é aproximado, e o centro de uma área grande cai
+        fora dele. Anunciar como "perto" o que está a 1,4 km seria conversa de
+        corretor, não informação.
+        """
+        lat, lon = self.MASP
+        longe = self._no({"shop": "supermarket"}, lat + 0.02, lon)   # ~2,2 km
+        self.assertEqual(vizinhanca.escolher([longe], lat, lon), [])
+
+    def test_mercado_mapeado_como_area_tambem_conta(self):
+        """
+        Medido no OpenStreetMap: mercado e escola quase sempre estão mapeados
+        como ÁREA, não como ponto. Ler só `lat`/`lon` deixaria de fora
+        justamente os lugares grandes, que são os que interessam.
+        """
+        lat, lon = self.MASP
+        area = {"type": "way", "center": {"lat": lat + 0.001, "lon": lon},
+                "tags": {"shop": "supermarket", "name": "Mercado em área"}}
+        achados = vizinhanca.escolher([area], lat, lon)
+        self.assertEqual(len(achados), 1, "área foi descartada")
+        self.assertEqual(achados[0]["nome"], "Mercado em área")
+
+    def test_elemento_sem_coordenada_nao_derruba_a_busca(self):
+        lat, lon = self.MASP
+        self.assertEqual(
+            vizinhanca.escolher([{"type": "relation", "tags": {"shop": "bakery"}}],
+                                lat, lon), [])
+
+    # ------------------------------------------------- o endereco que mudou
+
+    def test_trocar_o_endereco_apaga_a_vizinhanca_do_endereco_antigo(self):
+        """
+        O defeito silencioso que isto impede: o corretor corrige o endereço
+        depois de ter buscado, e o anúncio passa a mostrar o mercado do lugar
+        ERRADO sem avisar ninguém.
+        """
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["endereco"] = "Rua A, 100"
+        tour["vizinhanca"] = {"endereco": "Rua A, 100", "lugares": [],
+                              "lat": -23.5, "lon": -46.6}
+        aplicacao.salvar_tour(tour, self.iid)
+
+        self.dona.put("/api/imoveis/%s/tour" % self.iid,
+                      json={"endereco": "Rua B, 200"})
+        depois = aplicacao.carregar_tour(self.iid)
+        self.assertNotIn("vizinhanca", depois,
+                         "ficou a vizinhança do endereço antigo")
+
+    def test_salvar_sem_mexer_no_endereco_preserva_a_busca(self):
+        """
+        Perder a busca ao corrigir o preço seria fazer o corretor buscar de
+        novo por nada — e a busca chama serviço de fora, que tem limite de uso.
+        """
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["endereco"] = "Rua A, 100"
+        tour["vizinhanca"] = {"endereco": "Rua A, 100", "lugares": []}
+        aplicacao.salvar_tour(tour, self.iid)
+
+        self.dona.put("/api/imoveis/%s/tour" % self.iid,
+                      json={"preco": "R$ 500.000"})
+        self.assertIn("vizinhanca", aplicacao.carregar_tour(self.iid))
+
+    def test_esta_velha_nao_se_confunde_com_nunca_buscada(self):
+        self.assertFalse(vizinhanca.esta_velha({"endereco": "Rua A"}))
+        self.assertFalse(vizinhanca.esta_velha(
+            {"endereco": "Rua A", "vizinhanca": {"endereco": "Rua A"}}))
+        self.assertTrue(vizinhanca.esta_velha(
+            {"endereco": "Rua B", "vizinhanca": {"endereco": "Rua A"}}))
+
+    # ------------------------------------------------------------- a rota
+
+    def test_imovel_sem_endereco_recebe_o_caminho_da_solucao(self):
+        """
+        Recusa sem saída é só um muro. E aqui nem chega a haver chamada de
+        rede: sem endereço não há o que geocodificar.
+        """
+        r = self.dona.put("/api/imoveis/%s/vizinhanca" % self.iid)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("endereço", r.get_json()["erro"])
+
+    def _gabarito(self, elementos):
+        """Troca a camada de rede por uma resposta conhecida."""
+        chamadas = []
+
+        def falso(url, dados=None):
+            chamadas.append(url)
+            if url.startswith(vizinhanca.NOMINATIM):
+                return [{"lat": "-23.561414", "lon": "-46.655881",
+                         "display_name": "Avenida Paulista, São Paulo"}]
+            return {"elements": elementos}
+
+        return falso, chamadas
+
+    def test_a_busca_grava_o_que_encontrou_no_imovel(self):
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["endereco"] = "Avenida Paulista 1578, São Paulo"
+        aplicacao.salvar_tour(tour, self.iid)
+
+        lat, lon = self.MASP
+        falso, chamadas = self._gabarito([
+            self._no({"shop": "bakery", "name": "Padaria Xodó"}, lat + 0.0006, lon),
+            self._no({"highway": "bus_stop"}, lat + 0.0002, lon)])
+        original = vizinhanca._pedir
+        vizinhanca._pedir = falso
+        try:
+            r = self.dona.put("/api/imoveis/%s/vizinhanca" % self.iid)
+        finally:
+            vizinhanca._pedir = original
+
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True)[:300])
+        self.assertEqual(len(chamadas), 2, "geocodificou e perguntou o entorno")
+        gravada = aplicacao.carregar_tour(self.iid)["vizinhanca"]
+        tipos = [p["tipo"] for p in gravada["lugares"]]
+        self.assertEqual(tipos, ["Ponto de ônibus", "Padaria"])
+        self.assertEqual(gravada["endereco"], tour["endereco"],
+                         "não guardou de qual endereço é esta vizinhança")
+
+    def test_quem_visita_le_a_vizinhanca_sem_conta_e_sem_rede(self):
+        """
+        O ponto todo de guardar: a página de quem abre o link não fala com
+        serviço de terceiro nenhum. Foi a lição do three.js que vinha do
+        cdnjs — a hora em que um serviço de fora cai é sempre a pior hora.
+        """
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["vizinhanca"] = {"endereco": "", "lat": -23.5, "lon": -46.6,
+                              "lugares": [{"chave": "padaria", "tipo": "Padaria",
+                                           "nome": "Xodó", "metros": 120}]}
+        aplicacao.salvar_tour(tour, self.iid)
+
+        visitante = aplicacao.app.test_client()
+        j = visitante.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        self.assertEqual(j["vizinhanca"]["lugares"][0]["metros"], 120)
+
+    def test_apagar_tira_do_anuncio(self):
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["vizinhanca"] = {"endereco": "", "lugares": []}
+        aplicacao.salvar_tour(tour, self.iid)
+        self.assertEqual(
+            self.dona.delete("/api/imoveis/%s/vizinhanca" % self.iid).status_code,
+            200)
+        self.assertNotIn("vizinhanca", aplicacao.carregar_tour(self.iid))
+
+    def test_visitante_nao_dispara_busca_em_imovel_alheio(self):
+        """
+        A busca chama dois serviços de fora que têm limite de uso. Aberta a
+        qualquer um, o link do imóvel viraria um jeito de gastar esse limite.
+        """
+        visitante = aplicacao.app.test_client()
+        r = visitante.put("/api/imoveis/%s/vizinhanca" % self.iid)
+        self.assertIn(r.status_code, (401, 403, 404))
+
+    def _desenhado(self, viz):
+        """
+        Roda a funcao de desenho do viewer no Node, contra um gabarito.
+
+        Procurar a frase no ARQUIVO nao serve: o comentario que explica por que
+        ela existe satisfaz a busca, e o teste passaria com a frase apagada da
+        tela. O que importa e o que sai desenhado.
+        """
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node não encontrado")
+        html = io.open(os.path.join("static", "viewer.html"),
+                       encoding="utf-8").read()
+        corpo = ""
+        for f in ("desenharVizinhanca", "metrosBR", "encurtar", "escapar"):
+            abre = "function %s(" % f
+            self.assertIn(abre, html, "o viewer não tem mais %s" % f)
+            pedaco = html[html.index(abre):]
+            corpo += pedaco[:pedaco.index(chr(10) + "}") + 2] + chr(10)
+
+        programa = (
+            "const VIZ_NO_CARTAO = 5;\n"
+            "const nBR = n => Number(n).toLocaleString('pt-BR');\n"
+            "const caixa = {innerHTML: '', style: {}};\n"
+            "const $ = () => caixa;\n"
+            + corpo +
+            "desenharVizinhanca(" + json.dumps(viz, ensure_ascii=False) + ");\n"
+            "console.log(JSON.stringify({html: caixa.innerHTML,\n"
+            "                            mostrou: caixa.style.display || ''}));\n")
+        caminho = os.path.join(_TEMP, "vizinhanca.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    ENTORNO = {"lat": -23.561414, "lon": -46.655881, "raio": 900,
+               "lugares": [{"chave": "onibus", "tipo": "Ponto de ônibus",
+                            "nome": "Avenida Paulista", "metros": 65},
+                           {"chave": "padaria", "tipo": "Padaria",
+                            "nome": "Padaria Xodó", "metros": 276}]}
+
+    def test_o_anuncio_diz_que_a_distancia_e_em_linha_reta(self):
+        """
+        Anunciar "300 m" que na prática são 700 m de volta no quarteirão é a
+        mentira que o cliente descobre a pé, no dia da visita. Distância de
+        caminhada exigiria um serviço de rotas, que não temos.
+        """
+        saida = self._desenhado(self.ENTORNO)
+        self.assertIn("em linha reta", saida["html"])
+        self.assertIn("OpenStreetMap", saida["html"],
+                      "a licença ODbL pede o crédito")
+
+    def test_o_cartao_mostra_tipo_e_distancia_de_cada_lugar(self):
+        saida = self._desenhado(self.ENTORNO)
+        self.assertIn("Ponto de ônibus", saida["html"])
+        self.assertIn("65 m", saida["html"])
+        self.assertIn("276 m", saida["html"])
+
+    def test_imovel_sem_vizinhanca_nao_ganha_cartao_vazio(self):
+        """
+        Faixa em branco no anúncio parece defeito. Sem nada para dizer, o
+        melhor é não dizer nada.
+        """
+        self.assertEqual(self._desenhado(None)["mostrou"], "")
+        self.assertEqual(
+            self._desenhado({"lat": 1, "lon": 2, "lugares": []})["mostrou"], "")
+
+    def test_nome_de_lugar_nao_pode_injetar_html_no_anuncio(self):
+        """
+        O nome vem do OpenStreetMap, que qualquer pessoa edita. Sem escapar, um
+        nome com marcação entraria direto na página de quem abre o anúncio.
+        """
+        bravo = dict(self.ENTORNO)
+        bravo["lugares"] = [{"chave": "padaria", "tipo": "Padaria", "metros": 90,
+                             "nome": "<img src=x onerror=alert(1)>"}]
+        html = self._desenhado(bravo)["html"]
+        self.assertNotIn("<img", html)
+        self.assertIn("&lt;img", html)
 
 
 def limpar():

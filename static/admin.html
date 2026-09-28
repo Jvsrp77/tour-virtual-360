@@ -313,6 +313,13 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <input type="text" id="tTitulo">
       <label>Endereço</label>
       <input type="text" id="tEndereco">
+      <div style="display:flex;gap:7px;margin-top:7px;flex-wrap:wrap">
+        <button type="button" id="btViz" onclick="buscarVizinhanca()">
+          Buscar o que há em volta</button>
+        <button type="button" id="btVizLimpar" onclick="limparVizinhanca()"
+                style="display:none">Remover</button>
+      </div>
+      <p class="dica" id="vizEstado"></p>
       <label>Descrição</label>
       <textarea id="tDescricao" rows="3" placeholder="2 suítes, 1 vaga, condomínio com lazer"></textarea>
       <label>Preço</label>
@@ -488,6 +495,7 @@ async function carregar(){
   $('tituloImovel').textContent = tour.titulo || 'Tour Virtual';
   $('tEndereco').value  = tour.endereco || '';
   $('tDescricao').value = tour.descricao || '';
+  mostrarVizinhanca(tour.vizinhanca);
   desenharLogo();
   desenharMarca();
   $('tPreco').value     = tour.preco || '';
@@ -1292,6 +1300,77 @@ async function removerLogo(){
   await carregar();
   aviso('Logo removida.', 'ok');
 }
+
+
+// ---------------------------------------------------------------- vizinhanca
+//
+// O anuncio parava na porta: o tour mostrava o interior inteiro e nada do
+// bairro, que e metade da decisao de quem compra.
+//
+// A rede e chamada AQUI, uma vez, e o resultado fica gravado no imovel. A
+// pagina de quem visita nao fala com servico de fora nenhum — foi a licao do
+// three.js que vinha do cdnjs: a hora em que um servico de terceiro cai e
+// sempre a pior hora possivel.
+//
+// Por isso o botao pede para salvar antes: a busca usa o endereco GRAVADO, e
+// buscar o endereco antigo enquanto o novo esta na tela, sem digitar, seria o
+// tipo de surpresa que ninguem liga a causa nenhuma.
+
+function mostrarVizinhanca(viz){
+  const estado = $('vizEstado'), limpar = $('btVizLimpar');
+  if (!viz){
+    estado.textContent = 'Nada buscado ainda. O tour mostra o imóvel por '
+      + 'dentro e nada do bairro; isto acrescenta o que há em volta.';
+    limpar.style.display = 'none';
+    return;
+  }
+  const quantos = (viz.lugares || []).length;
+  if (!quantos){
+    estado.textContent = 'O OpenStreetMap não tem nada mapeado num raio de '
+      + (viz.raio || 900) + ' m deste endereço. A cobertura é boa em capital '
+      + 'e irregular em cidade pequena.';
+  } else {
+    estado.textContent = quantos + ' lugar(es) em volta, do mais perto ao mais '
+      + 'longe: ' + viz.lugares.map(p => p.tipo + ' ' + p.metros + ' m').join(', ')
+      + '. Distâncias em linha reta.';
+  }
+  limpar.style.display = '';
+}
+
+async function buscarVizinhanca(){
+  const botao = $('btViz');
+  const digitado = ($('tEndereco').value || '').trim();
+  if (!digitado){
+    $('vizEstado').textContent = 'Preencha o endereço primeiro.';
+    return;
+  }
+  botao.disabled = true;
+  const antes = botao.textContent;
+  botao.textContent = 'Buscando...';
+  try{
+    // grava o que esta na tela antes de buscar, senao a busca usaria o
+    // endereco antigo e o corretor nao entenderia o resultado
+    await salvarTour();
+    const r = await fetch(API + '/vizinhanca', {method: 'PUT'});
+    const j = await r.json();
+    if (!r.ok){ $('vizEstado').textContent = j.erro || 'Não deu certo.'; return; }
+    tour.vizinhanca = j.vizinhanca;
+    mostrarVizinhanca(j.vizinhanca);
+  }catch(e){
+    $('vizEstado').textContent = 'Não consegui buscar agora. O resto do imóvel '
+      + 'não depende disto.';
+  }finally{
+    botao.disabled = false;
+    botao.textContent = antes;
+  }
+}
+
+async function limparVizinhanca(){
+  await fetch(API + '/vizinhanca', {method: 'DELETE'});
+  tour.vizinhanca = null;
+  mostrarVizinhanca(null);
+}
+
 
 async function salvarTour(){
   await fetch(URL_TOUR, {method: 'PUT', headers: {'Content-Type': 'application/json'},

@@ -14,6 +14,7 @@ import io
 import os
 import subprocess
 import sys
+import time
 
 PY = sys.executable
 
@@ -563,6 +564,95 @@ MUT = [
      "    valor = tour.get(\"frente\")\n    if valor is None:",
      "    valor = tour.get(\"frente\")\n    if not valor:",
      "TestOrientacaoDoImovel.test_a_frente_ao_norte_nao_se_confunde_com_nao_informado"),
+    # --- o que existe em volta do imovel ---
+
+    # tratar latitude e longitude como plano cartesiano erra mais quanto mais
+    # longe do equador, e o Brasil inteiro esta longe do equador
+    ("distancia vira conta de plano", "vizinhanca.py",
+     "    return 2 * raio_terra * math.asin(min(1.0, math.sqrt(a)))",
+     "    return 111195.0 * math.hypot(lat2 - lat1, lon2 - lon1)",
+     "TestVizinhanca.test_a_distancia_e_a_da_esfera_e_nao_a_do_plano"),
+
+    # saber que ha catorze padarias no raio nao ajuda a decidir nada
+    ("a lista repete a mesma categoria", "vizinhanca.py",
+     "        if atual is None or metros < atual[\"metros\"]:",
+     "        if True:",
+     "TestVizinhanca.test_de_cada_categoria_sobra_o_mais_perto"),
+
+    ("a lista sai fora de ordem", "vizinhanca.py",
+     "    return sorted(melhores.values(), key=lambda p: p[\"metros\"])",
+     "    return list(melhores.values())",
+     "TestVizinhanca.test_a_lista_sai_do_mais_perto_ao_mais_longe"),
+
+    # anunciar como "perto" o que esta a 1,4 km e conversa de corretor
+    ("lugar longe entra como se fosse perto", "vizinhanca.py",
+     "        if metros > raio:\n            continue",
+     "        if False:\n            continue",
+     "TestVizinhanca.test_lugar_fora_do_raio_nao_entra"),
+
+    # mercado e escola quase sempre estao mapeados como AREA, e nao como ponto
+    ("mercado mapeado como area e descartado", "vizinhanca.py",
+     "    centro = elemento.get(\"center\") or {}",
+     "    centro = {}",
+     "TestVizinhanca.test_mercado_mapeado_como_area_tambem_conta"),
+
+    # poste, lixeira e banco de praca encheriam o anuncio de coisa inutil
+    ("qualquer ponto do mapa vira lugar do bairro", "vizinhanca.py",
+     "            if tags.get(campo) in valores:",
+     "            if campo in tags:",
+     "TestVizinhanca.test_lugar_que_nao_interessa_nao_entra_na_lista"),
+
+    # categoria esquecida na consulta ficaria para sempre com zero resultados,
+    # sem erro nenhum: o pior tipo de defeito
+    ("a consulta esquece metade das categorias", "vizinhanca.py",
+     "    for _chave, _rotulo, regras in CATEGORIAS:\n        for campo, valores in regras.items():",
+     "    for _chave, _rotulo, regras in CATEGORIAS[:3]:\n        for campo, valores in regras.items():",
+     "TestVizinhanca.test_a_consulta_pede_todas_as_categorias_que_a_lista_declara"),
+
+    # o corretor corrige o endereco e o anuncio passa a mostrar o mercado do
+    # lugar errado, sem avisar ninguem
+    ("vizinhanca do endereco antigo continua no anuncio", "app.py",
+     "    if vizinhanca.esta_velha(tour):",
+     "    if False:",
+     "TestVizinhanca.test_trocar_o_endereco_apaga_a_vizinhanca_do_endereco_antigo"),
+
+    # perder a busca ao corrigir o preco faria o corretor buscar de novo a toa,
+    # gastando o limite de uso de dois servicos de fora
+    ("qualquer gravacao descarta a vizinhanca", "app.py",
+     "    if vizinhanca.esta_velha(tour):",
+     "    if True:",
+     "TestVizinhanca.test_salvar_sem_mexer_no_endereco_preserva_a_busca"),
+
+    # a busca chama servicos de fora com limite de uso: aberta a qualquer um, o
+    # link do imovel viraria um jeito de gastar esse limite
+    ("qualquer um dispara a busca do imovel alheio", "app.py",
+     '"maquete", "api.api_maquete",',
+     '"maquete", "api.api_maquete", "api.api_vizinhanca",',
+     "TestVizinhanca.test_visitante_nao_dispara_busca_em_imovel_alheio"),
+
+    # 300 m que na pratica sao 700 m de volta no quarteirao e a mentira que o
+    # cliente descobre a pe, no dia da visita
+    ("o anuncio esconde que a distancia e em linha reta", "static/viewer.html",
+     "  let rodape = 'Distâncias em linha reta · OpenStreetMap';",
+     "  let rodape = 'OpenStreetMap';",
+     "TestVizinhanca.test_o_anuncio_diz_que_a_distancia_e_em_linha_reta"),
+    # o nome vem do OpenStreetMap, que qualquer pessoa edita: sem escapar, um
+    # nome com marcacao entra direto na pagina de quem abre o anuncio
+    ("nome de lugar entra cru no anuncio", "static/viewer.html",
+     "  return String(texto).replace(/[&<>\"]/g, function(c){",
+     "  return String(texto).replace(/[\u0000]/g, function(c){",
+     "TestVizinhanca.test_nome_de_lugar_nao_pode_injetar_html_no_anuncio"),
+
+    # faixa em branco no anuncio parece defeito
+    ("cartao vazio aparece no anuncio", "static/viewer.html",
+     "  if (!viz || !(viz.lugares || []).length) return;",
+     "  if (!viz) return;",
+     "TestVizinhanca.test_imovel_sem_vizinhanca_nao_ganha_cartao_vazio"),
+
+    ("o cartao esconde a distancia dos lugares", "static/viewer.html",
+     "    return '<b>' + escapar(p.tipo) + '</b> ' + metrosBR(p.metros) + nome;",
+     "    return '<b>' + escapar(p.tipo) + '</b>' + nome;",
+     "TestVizinhanca.test_o_cartao_mostra_tipo_e_distancia_de_cada_lugar"),
 ]
 
 
@@ -592,6 +682,61 @@ def _esquecer_bytecode(arq):
                 pass
 
 
+def _gravar(arq, texto):
+    """
+    Grava o arquivo, com teimosia.
+
+    Aconteceu de verdade: no meio de uma corrida, a gravacao de restauracao
+    levantou OSError 22 e o script MORREU — deixando a trava de tentativas de
+    login desligada no app.py, em silencio. Sabotagem que sobrevive a corrida e
+    pior do que corrida nenhuma: o fonte quebrado segue para o commit.
+
+    A causa provavel e a pasta estar no OneDrive, que segura o arquivo enquanto
+    sincroniza. Uma corrida mexe no mesmo arquivo dezenas de vezes seguidas, e
+    cedo ou tarde cai justamente na janela em que ele esta preso.
+
+    Por isso: grava num arquivo ao lado e TROCA, que e atomico, e tenta de novo
+    algumas vezes antes de desistir.
+    """
+    temporario = arq + ".mutacao-tmp"
+    ultimo = None
+    for tentativa in range(6):
+        try:
+            with io.open(temporario, "w", encoding="utf-8", newline="") as f:
+                f.write(texto)
+            os.replace(temporario, arq)
+            return True
+        except OSError as erro:
+            ultimo = erro
+            time.sleep(0.25 * (tentativa + 1))
+    try:
+        os.remove(temporario)
+    except OSError:
+        pass
+    print("  !! NAO CONSEGUI GRAVAR %s (%s)" % (arq, ultimo))
+    return False
+
+
+def _restaurar(arq, orig, nome):
+    """
+    Desfaz a mutacao e confere que desfez.
+
+    Gritar aqui nao e exagero. Se a restauracao falhar e o script seguir calado,
+    o proximo a rodar os testes vai ver vermelho num codigo que nunca escreveu,
+    ou pior: vai ver verde porque a protecao que o teste cobre foi a que sumiu.
+    """
+    if _gravar(arq, orig):
+        _esquecer_bytecode(arq)
+        return True
+    print("")
+    print("  " + "!" * 74)
+    print("  !! %s FICOU MUTADO PELA MUTACAO %r" % (arq, nome))
+    print("  !! Desfaca antes de qualquer commit:   git checkout -- %s" % arq)
+    print("  " + "!" * 74)
+    print("")
+    return False
+
+
 def roda(alvo):
     r = subprocess.run([PY, "testes.py", alvo], capture_output=True,
                        text=True, errors="ignore")
@@ -603,6 +748,7 @@ def main():
     print("  %-38s %-16s %s" % ("MUTACAO", "TESTE", "RESULTADO"))
     print("  " + "-" * 76)
     bons = ruins = 0
+    feridos = []
     for nome, arq, velho, novo_txt, alvo in MUT:
         orig = io.open(arq, encoding="utf-8").read()
         # Se este script for morto no meio (fechar o terminal, cancelar a tarefa),
@@ -614,18 +760,23 @@ def main():
         # desfaz e diz em voz alta.
         if orig.count(velho) == 0 and orig.count(novo_txt) == 1:
             orig = orig.replace(novo_txt, velho, 1)
-            io.open(arq, "w", encoding="utf-8", newline="").write(orig)
+            _gravar(arq, orig)
             print("  %-38s %-16s FONTE ESTAVA MUTADO — desfeito" % (nome, ""))
         if orig.count(velho) != 1:
             print("  %-38s %-16s ANCORA %d" % (nome, "", orig.count(velho)))
             ruins += 1
             continue
-        io.open(arq, "w", encoding="utf-8", newline="").write(orig.replace(velho, novo_txt, 1))
+        if not _gravar(arq, orig.replace(velho, novo_txt, 1)):
+            print("  %-38s %-16s NAO GRAVOU" % (nome, ""))
+            ruins += 1
+            continue
         try:
             falhou = roda(alvo)
         finally:
-            io.open(arq, "w", encoding="utf-8", newline="").write(orig)
-            _esquecer_bytecode(arq)
+            # a restauracao nao pode morrer: se ela falhar e o script
+            # cair aqui, o arquivo fica sabotado em silencio
+            if not _restaurar(arq, orig, nome):
+                feridos.append(arq)
         curto = alvo.split(".")[-1][:16]
         if falhou:
             print("  %-38s %-16s ACUSOU" % (nome, curto))
@@ -635,6 +786,13 @@ def main():
             ruins += 1
     print()
     print("  %d de %d mutacoes detectadas" % (bons, bons + ruins))
+    if feridos:
+        print("")
+        print("  ARQUIVOS QUE FICARAM MUTADOS: %s"
+              % ", ".join(sorted(set(feridos))))
+        print("  Rode: git checkout -- %s"
+              % " ".join(sorted(set(feridos))))
+        return 2
     return 1 if ruins else 0
 
 

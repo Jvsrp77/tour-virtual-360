@@ -35,6 +35,12 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .cartao .preco{margin-top:9px;font-size:19px;font-weight:700;color:var(--acento)}
   .cartao .area{margin-top:7px;font-size:12.5px;color:#c3c9d1}
   .cartao .area b{color:#eef1f4}
+  .cartao .viz{margin-top:9px;font-size:12.5px;color:#c3c9d1;line-height:1.55}
+  .cartao .viz b{color:#eef1f4;font-weight:600}
+  .cartao .viz .perto{display:block}
+  .cartao .viz .rodape{display:block;margin-top:5px;font-size:11px;color:#8d949e}
+  .cartao .viz a{color:var(--acento);text-decoration:none}
+  .cartao .viz a:hover{text-decoration:underline}
 
   .topo-dir{position:absolute;top:18px;right:18px;z-index:10;display:flex;gap:8px}
   .bt{background:rgba(14,16,20,.86);backdrop-filter:blur(12px);color:#fff;
@@ -134,6 +140,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <div class="end" id="vEndereco"></div>
   <div class="preco" id="vPreco"></div>
   <div class="area" id="vArea" style="display:none"></div>
+  <div class="viz" id="vVizinhanca" style="display:none"></div>
   <div class="desc" id="vDescricao" style="display:none"></div>
 </div>
 
@@ -189,6 +196,7 @@ async function iniciar(){
   $('vEndereco').textContent = tour.endereco || '';
   $('vPreco').textContent    = tour.preco || '';
   desenharArea();
+  desenharVizinhanca(tour.vizinhanca);
   if (tour.logo){
     $('vLogo').src = CENAS + tour.logo;
     $('vLogo').style.display = 'block';
@@ -306,6 +314,64 @@ function desenharArea(){
     + `${medidos.length} de ${tour.cenas.length} ambiente(s)`;
   $('vArea').style.display = 'block';
 }
+
+
+// ------------------------------------------------------------- vizinhanca
+//
+// O anuncio parava na porta: o tour mostrava o interior inteiro e nada do
+// bairro, que e metade da decisao de quem compra. Quem se interessava abria o
+// Maps por fora, e nessa hora saia do nosso link.
+//
+// Os dados vem gravados no imovel, buscados UMA vez quando o corretor salvou o
+// endereco. A pagina de quem visita nao fala com servico de terceiro nenhum: a
+// hora em que um servico de fora cai e sempre a pior hora possivel.
+
+// Quantos cabem no cartao sem virar parede de texto. O resto nao se perde: a
+// lista ja vem ordenada pela distancia, entao o que sobra e o que esta mais
+// longe — justamente o que menos pesa na decisao.
+const VIZ_NO_CARTAO = 5;
+
+function metrosBR(m){
+  return m < 1000 ? m + ' m' : nBR(Math.round(m / 100) / 10) + ' km';
+}
+
+function desenharVizinhanca(viz){
+  const caixa = $('vVizinhanca');
+  if (!viz || !(viz.lugares || []).length) return;
+
+  const perto = viz.lugares.slice(0, VIZ_NO_CARTAO).map(function(p){
+    const nome = p.nome ? ' <span title="' + escapar(p.nome) + '">('
+                        + escapar(encurtar(p.nome)) + ')</span>' : '';
+    return '<b>' + escapar(p.tipo) + '</b> ' + metrosBR(p.metros) + nome;
+  }).join(' · ');
+
+  // "em linha reta" escrito com todas as letras: anunciar 300 m que na pratica
+  // sao 700 m de volta no quarteirao e a mentira que o cliente descobre a pe.
+  let rodape = 'Distâncias em linha reta · OpenStreetMap';
+  if (viz.lat && viz.lon){
+    rodape += ' · <a target="_blank" rel="noopener" href="'
+            + 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint='
+            + viz.lat + ',' + viz.lon + '">Ver a rua</a>';
+  }
+
+  caixa.innerHTML = '<span class="perto">' + perto + '</span>'
+                  + '<span class="rodape">' + rodape + '</span>';
+  caixa.style.display = 'block';
+}
+
+// Nome de estabelecimento no OpenStreetMap as vezes vem enorme ("Escola
+// Estadual Professora Maria ..."). No cartao cabe o comeco; o nome inteiro
+// fica no title, para quem passar o mouse.
+function encurtar(nome){
+  return nome.length > 24 ? nome.slice(0, 23).trim() + '…' : nome;
+}
+
+function escapar(texto){
+  return String(texto).replace(/[&<>"]/g, function(c){
+    return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c];
+  });
+}
+
 
 // A maquete so existe para imovel gerado, que tem paredes e moveis em metros.
 // Imovel fotografado tem panorama e profundidade, que e outra coisa — por isso
