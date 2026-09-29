@@ -418,6 +418,24 @@ def conferir(planta):
     return problemas
 
 
+def _ja_renderizado(saida, i):
+    """
+    O ponto ja esta no disco, com foto E profundidade?
+
+    Custou uma hora para virar codigo: uma mansao de 88 pontos leva mais de
+    sessenta minutos, e qualquer coisa que interrompa — fechar o terminal,
+    reiniciar, a maquina dormir — jogava fora tudo o que ja estava pronto.
+    Retomar e o que torna render longo utilizavel.
+
+    Exige os DOIS arquivos: um ponto que gravou a foto e morreu antes do mapa
+    de profundidade esta pela metade, e metade e pior do que nada, porque
+    parece pronto.
+    """
+    foto = os.path.join(saida, "ponto_%d.jpg" % i)
+    prof = os.path.join(saida, "dist_%d.npy" % i)
+    return os.path.exists(foto) and os.path.exists(prof)
+
+
 def render_planta(planta, largura):
     saida = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "fotos_" + planta["pasta"])
@@ -427,6 +445,9 @@ def render_planta(planta, largura):
           % (planta["nome"], LARG, FUNDO, len(ZONAS), len(PONTOS),
              largura, largura // 2))
     for i, (nome, x, z) in enumerate(PONTOS):
+        if _ja_renderizado(saida, i):
+            print("    %2d  %-36s ja estava pronto" % (i, nome))
+            continue
         img, dist = render(x, z, largura)
         _gravar(img, os.path.join(saida, "ponto_%d.jpg" % i))
         np.save(os.path.join(saida, "dist_%d.npy" % i), disparidade_exata(dist))

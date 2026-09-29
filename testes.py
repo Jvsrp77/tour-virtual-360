@@ -1833,6 +1833,32 @@ class TestPlantasSinteticas(unittest.TestCase):
             problemas = cena_apartamento.conferir(planta)
             self.assertEqual(problemas, [], "%s: %s" % (planta["nome"], problemas))
 
+    def test_render_longo_retoma_de_onde_parou(self):
+        """
+        Custou uma hora perdida para virar codigo: a mansao leva mais de
+        sessenta minutos em 88 pontos, e qualquer interrupcao jogava fora tudo
+        o que ja estava pronto.
+
+        Exige os DOIS arquivos. Um ponto que gravou a foto e morreu antes do
+        mapa de profundidade esta pela metade — e metade e pior do que nada,
+        porque parece pronto e o tour abre sem caminhada naquele ponto.
+        """
+        pasta = os.path.join(_TEMP, "retomada")
+        os.makedirs(pasta, exist_ok=True)
+        self.assertFalse(cena_apartamento._ja_renderizado(pasta, 0),
+                         "achou pronto o que nem existe")
+
+        io.open(os.path.join(pasta, "ponto_0.jpg"), "w").close()
+        self.assertFalse(cena_apartamento._ja_renderizado(pasta, 0),
+                         "deu por pronto um ponto sem profundidade")
+
+        io.open(os.path.join(pasta, "dist_0.npy"), "w").close()
+        self.assertTrue(cena_apartamento._ja_renderizado(pasta, 0))
+
+        io.open(os.path.join(pasta, "dist_1.npy"), "w").close()
+        self.assertFalse(cena_apartamento._ja_renderizado(pasta, 1),
+                         "deu por pronto um ponto sem foto")
+
     def test_a_conferencia_acusa_camera_dentro_de_movel(self):
         """Conferência que nunca reprova nada não é conferência."""
         planta = plantas.compacto()

@@ -893,6 +893,11 @@ MUT = [
      '    return `<a class="selo alerta" href="/capturar/${i.id}"',
      '    return `<a class="selo alerta" href="#"',
      "TestBotoesDoCartao.test_imovel_que_nao_anda_aparece_na_lista"),
+    # metade e pior do que nada: parece pronto e o tour abre sem caminhada ali
+    ("meio ponto passa por pronto ao retomar", "cena_apartamento.py",
+     "    return os.path.exists(foto) and os.path.exists(prof)",
+     "    return os.path.exists(foto)",
+     "TestPlantasSinteticas.test_render_longo_retoma_de_onde_parou"),
 ]
 
 
