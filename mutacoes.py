@@ -853,6 +853,46 @@ MUT = [
      '"maquete", "api.api_maquete",',
      '"maquete", "api.api_maquete", "api.api_preparar",',
      "TestPrepararOImovel.test_visitante_nao_dispara_processamento_alheio"),
+    # --- o diagnostico de captura na lista de imoveis ---
+
+    # numa imobiliaria com quarenta anuncios, saber que um nao anda so ao
+    # abri-lo significa nunca saber
+    ("a lista esconde o imovel que nao anda", "app.py",
+     '            "captura": _saude_da_captura(tour),',
+     '            "captura": {"impedem": 0, "atrapalham": 0},',
+     "TestGuiaDeCaptura.test_a_lista_de_imoveis_ja_traz_o_diagnostico"),
+
+    # dois diagnosticos do mesmo imovel com numeros diferentes fariam o
+    # corretor perder a confianca nos dois
+    ("a lista e o guia discordam", "app.py",
+     '        return {"impedem": resumo["impedem"], "atrapalham": resumo["atrapalham"]}',
+     '        return {"impedem": resumo["atrapalham"], "atrapalham": resumo["impedem"]}',
+     "TestGuiaDeCaptura.test_a_lista_e_o_guia_nunca_discordam"),
+
+    # a lista e a porta de entrada: o selo e auxilio, nao requisito
+    ("diagnostico que falha derruba a lista", "app.py",
+     "        resumo, _achados = captura.diagnosticar(tour)\n        return {\"impedem\": resumo[\"impedem\"], \"atrapalham\": resumo[\"atrapalham\"]}\n    except Exception:",
+     "        resumo, _achados = captura.diagnosticar(tour)\n        return {\"impedem\": resumo[\"impedem\"], \"atrapalham\": resumo[\"atrapalham\"]}\n    except ZeroDivisionError:",
+     "TestGuiaDeCaptura.test_diagnostico_que_falha_nao_derruba_a_lista"),
+
+    # selo em imovel sem problema ensina a ignorar selo, e ai o do imovel
+    # quebrado passa batido junto
+    ("selo aparece em imovel sem problema", "static/imoveis.html",
+     "  if (c.impedem > 0){",
+     "  if (c.impedem >= 0){",
+     "TestBotoesDoCartao.test_captura_boa_nao_ganha_selo_nenhum"),
+
+    # dois selos no mesmo cartao competem entre si
+    ("o que atrapalha esconde o que impede", "static/imoveis.html",
+     "  if (c.impedem > 0){",
+     "  if (false){",
+     "TestBotoesDoCartao.test_o_grave_esconde_o_leve"),
+
+    # o selo diz que ha algo errado; o guia diz o que fazer
+    ("o selo nao leva ao guia daquele imovel", "static/imoveis.html",
+     '    return `<a class="selo alerta" href="/capturar/${i.id}"',
+     '    return `<a class="selo alerta" href="#"',
+     "TestBotoesDoCartao.test_imovel_que_nao_anda_aparece_na_lista"),
 ]
 
 

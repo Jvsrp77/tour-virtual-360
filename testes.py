@@ -844,15 +844,32 @@ class TestBotoesDoCartao(unittest.TestCase):
         cls.molde = html[html.index(marca) + len(marca):]
         cls.molde = cls.molde[:cls.molde.index("`).join('');")]
 
-    def _onclicks(self, titulo, ambientes):
+    def _selo(self):
+        """
+        Recorta da pagina a funcao do selo de captura.
+
+        Extraida, e nao dublada: o molde do cartao a chama, entao o teste dos
+        botoes passa a exercitar tambem o selo — e um selo que gerasse
+        marcacao quebrada apareceria aqui, e nao no navegador de quem abre.
+        """
+        pagina = io.open(os.path.join("static", "imoveis.html"),
+                         encoding="utf-8").read()
+        abre = "function seloDaCaptura("
+        self.assertIn(abre, pagina, "a pagina nao tem mais seloDaCaptura")
+        corpo = pagina[pagina.index(abre):]
+        return corpo[:corpo.index(chr(10) + "}") + 2]
+
+    def _onclicks(self, titulo, ambientes, captura=None):
         """Renderiza o cartao e devolve o codigo de cada onclick."""
         programa = (
             'const escapar = t => String(t).replace(/[&<>"]/g, c => '
             '({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c]));\n'
             "const nBR = n => String(n);\n"
+            + self._selo() + "\n"
             "const i = {id:'bc7136253c', titulo:" + json.dumps(titulo) + ", "
             "ambientes:" + str(ambientes) + ", capa:null, area_total:0, "
-            "ambientes_medidos:0, com_profundidade:0, leads:0};\n"
+            "ambientes_medidos:0, com_profundidade:0, leads:0, captura:"
+            + json.dumps(captura or {"impedem": 0, "atrapalham": 0}) + "};\n"
             "const html = `" + self.molde + "`;\n"
             'for (const m of html.matchAll(/onclick="([^"]*)"/g)) '
             "console.log(m[1]);\n")
@@ -877,6 +894,68 @@ class TestBotoesDoCartao(unittest.TestCase):
                 self.assertEqual(r.returncode, 0,
                                  "título %r gerou onclick inválido: %s\n%s"
                                  % (titulo, codigo, r.stderr[:300]))
+
+    def _html(self, captura):
+        """O cartao inteiro, para olhar o selo e nao so os onclicks."""
+        programa = (
+            'const escapar = t => String(t).replace(/[&<>"]/g, c => '
+            '({"&":"&amp;","<":"&lt;",">":"&gt;",\'"\':"&quot;"}[c]));\n'
+            "const nBR = n => String(n);\n"
+            + self._selo() + "\n"
+            "const i = {id:'bc7136253c', titulo:'Casa', ambientes:3, capa:null,"
+            " area_total:0, ambientes_medidos:0, com_profundidade:3, leads:0,"
+            " captura:" + json.dumps(captura) + "};\n"
+            "console.log(`" + self.molde + "`);\n")
+        caminho = os.path.join(_TEMP, "cartao-selo.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:500])
+        return r.stdout
+
+    def test_captura_boa_nao_ganha_selo_nenhum(self):
+        """
+        Silêncio quando está bom. Selo em imóvel sem problema ensina a ignorar
+        selo, e aí o do imóvel quebrado passa batido junto.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        html = self._html({"impedem": 0, "atrapalham": 0})
+        self.assertNotIn("selo alerta", html)
+        self.assertNotIn("selo atencao", html)
+
+    def test_imovel_que_nao_anda_aparece_na_lista(self):
+        """
+        Numa imobiliária com quarenta anúncios, saber que um deles não anda só
+        ao abri-lo significa nunca saber.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        html = self._html({"impedem": 2, "atrapalham": 5})
+        self.assertIn("selo alerta", html)
+        self.assertIn("2 impede", html)
+        self.assertIn("/capturar/bc7136253c", html,
+                      "o selo nao leva ao guia daquele imovel")
+
+    def test_o_grave_esconde_o_leve(self):
+        """
+        Dois selos no mesmo cartão competem entre si. O que impede caminhar
+        manda; o resto espera.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        html = self._html({"impedem": 1, "atrapalham": 9})
+        self.assertIn("selo alerta", html)
+        self.assertNotIn("selo atencao", html)
+
+    def test_so_o_que_atrapalha_usa_o_tom_mais_leve(self):
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        html = self._html({"impedem": 0, "atrapalham": 3})
+        self.assertIn("selo atencao", html)
+        self.assertIn("3 a melhorar", html)
+        self.assertNotIn("selo alerta", html)
 
     def test_o_cartao_tem_os_tres_botoes(self):
         if not self.node:
@@ -4388,6 +4467,53 @@ class TestGuiaDeCaptura(Base):
         r = self.dona.get("/capturar/naoexiste9")
         self.assertEqual(r.status_code, 302)
         self.assertIn("/imoveis", r.headers["Location"])
+
+    def test_a_lista_de_imoveis_ja_traz_o_diagnostico(self):
+        """
+        Numa imobiliária com quarenta anúncios, saber que um deles não anda só
+        ao abri-lo significa nunca saber. O tour já é lido ali para montar o
+        cartão, então a conta sai de graça.
+        """
+        self._gravar([self._cena("Sala - A", 0, 0), self._cena("Sala - B", 6.0, 0)])
+        itens = self.dona.get("/api/imoveis").get_json()["imoveis"]
+        meu = next(i for i in itens if i["id"] == self.iid)
+        self.assertGreater(meu["captura"]["impedem"], 0,
+                           "vão de 6 m passou como imóvel saudável na lista")
+
+    def test_a_lista_e_o_guia_nunca_discordam(self):
+        """
+        Dois diagnósticos do mesmo imóvel dando números diferentes fariam o
+        corretor perder a confiança nos dois. Sai do mesmo lugar, de propósito.
+        """
+        self._gravar([self._cena("Sala - A", 0, 0), self._cena("Sala - B", 2.2, 0),
+                      self._cena("Cozinha - A", 9.0, 9.0)])
+        guia = self.dona.get("/api/imoveis/%s/captura" % self.iid).get_json()["resumo"]
+        itens = self.dona.get("/api/imoveis").get_json()["imoveis"]
+        meu = next(i for i in itens if i["id"] == self.iid)
+        self.assertEqual(meu["captura"]["impedem"], guia["impedem"])
+        self.assertEqual(meu["captura"]["atrapalham"], guia["atrapalham"])
+
+    def test_diagnostico_que_falha_nao_derruba_a_lista(self):
+        """
+        A lista é a porta de entrada do sistema. Um diagnóstico que tropece
+        num imóvel não vale esconder os outros trinta e nove — o selo é um
+        auxílio, não um requisito para a página existir.
+        """
+        self._gravar([self._cena("Sala - A", 0, 0)])
+        original = aplicacao.captura.diagnosticar
+
+        def explodir(_tour):
+            raise RuntimeError("diagnóstico quebrou")
+
+        aplicacao.captura.diagnosticar = explodir
+        try:
+            r = self.dona.get("/api/imoveis")
+        finally:
+            aplicacao.captura.diagnosticar = original
+        self.assertEqual(r.status_code, 200)
+        meu = next(i for i in r.get_json()["imoveis"] if i["id"] == self.iid)
+        self.assertEqual(meu["captura"], {"impedem": 0, "atrapalham": 0},
+                         "sem diagnóstico o cartão tem de ficar sem selo")
 
     def test_a_pagina_nao_busca_nada_na_internet(self):
         """Guia de captura se abre DENTRO do imóvel, onde o sinal é ruim."""

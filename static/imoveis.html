@@ -48,6 +48,10 @@
   .selo{font-size:11px;color:var(--suave);border:1px solid var(--borda);
         border-radius:5px;padding:2px 7px}
   .selo.destaque{color:var(--acento);border-color:var(--acento)}
+  .selo.alerta{color:var(--erro);border-color:var(--erro)}
+  .selo.atencao{color:#d9a441;border-color:#d9a441}
+  a.selo{text-decoration:none;cursor:pointer}
+  a.selo:hover{filter:brightness(1.25)}
   .acoes{display:flex;gap:7px;padding:0 15px 14px}
   .acoes button{flex:1;padding:7px 9px;font-size:12.5px}
 
@@ -146,6 +150,7 @@ async function carregar(){
           ${i.area_total ? `<span class="selo destaque">${nBR(i.area_total)} m²${
               i.ambientes_medidos < i.ambientes ? ' em ' + i.ambientes_medidos : ''}</span>` : ''}
           ${i.com_profundidade ? `<span class="selo destaque">${i.com_profundidade} com caminhada</span>` : ''}
+          ${seloDaCaptura(i)}
           ${i.leads ? `<span class="selo">${i.leads} lead(s)</span>` : ''}
         </div>
       </div>
@@ -156,6 +161,24 @@ async function carregar(){
         <button class="perigo" onclick="remover('${i.id}')">Excluir</button>
       </div>
     </div>`).join('');
+}
+
+// Silencio quando esta bom.
+//
+// Selo em imovel sem problema ensina a ignorar selo, e ai o do imovel quebrado
+// passa batido junto. So aparece o que exige acao, e clicar leva direto ao guia
+// daquele imovel: o selo diz que ha algo errado, o guia diz o que fazer.
+function seloDaCaptura(i){
+  const c = i.captura || {};
+  if (c.impedem > 0){
+    return `<a class="selo alerta" href="/capturar/${i.id}"
+             title="Ver o que falta capturar neste imóvel">${c.impedem} impede(m) a caminhada</a>`;
+  }
+  if (c.atrapalham > 0){
+    return `<a class="selo atencao" href="/capturar/${i.id}"
+             title="Ver o que dá para melhorar na captura">${c.atrapalham} a melhorar</a>`;
+  }
+  return '';
 }
 
 const escapar = t => String(t).replace(/[&<>"]/g,

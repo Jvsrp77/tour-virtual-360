@@ -121,11 +121,32 @@ def listar_imoveis(conta_id=None):
                                     if c.get("area")), 1),
             "ambientes_medidos": sum(1 for c in tour["cenas"] if c.get("area")),
             "leads": len(tour.get("leads_capturados", [])),
+            # O diagnostico de captura na LISTA, e nao so dentro do imovel: numa
+            # imobiliaria com quarenta anuncios, saber que um deles nao anda so
+            # ao abri-lo significa nunca saber. O tour ja esta carregado aqui,
+            # entao a conta sai de graca.
+            "captura": _saude_da_captura(tour),
             "capa": capa,
             "criado_em": tour.get("criado_em", ""),
         })
     itens.sort(key=lambda i: i["criado_em"], reverse=True)
     return itens
+
+
+def _saude_da_captura(tour):
+    """
+    Quantos problemas de captura este imovel tem.
+
+    Sai do mesmo diagnostico do guia, para que a lista e o guia nunca digam
+    coisas diferentes sobre o mesmo imovel. Falhar aqui nao pode derrubar a
+    lista inteira: um imovel com dado estranho nao vale esconder os outros
+    trinta e nove.
+    """
+    try:
+        resumo, _achados = captura.diagnosticar(tour)
+        return {"impedem": resumo["impedem"], "atrapalham": resumo["atrapalham"]}
+    except Exception:
+        return {"impedem": 0, "atrapalham": 0}
 
 
 def adotar_imoveis_sem_dono():
