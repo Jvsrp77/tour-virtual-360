@@ -804,6 +804,55 @@ MUT = [
      '"maquete", "api.api_maquete",',
      '"maquete", "api.api_maquete", "api.api_captura",',
      "TestGuiaDeCaptura.test_o_que_falta_capturar_nao_e_publico"),
+    # --- preparar o imovel inteiro para caminhar ---
+
+    ("prepara sem conferir se a IA esta instalada", "app.py",
+     "    tour = carregar_tour()\n    if not profundidade.modelo_disponivel():",
+     "    tour = carregar_tour()\n    if False:",
+     "TestPrepararOImovel.test_sem_o_modelo_de_profundidade_recusa_dizendo_o_comando"),
+
+    # faltar a segunda IA nao pode impedir a primeira: profundidade sozinha ja
+    # libera a caminhada
+    ("faltar a segunda IA trava a primeira", "app.py",
+     "        if com_fundo and not cena.get(\"fundo\"):",
+     "        if not cena.get(\"fundo\"):",
+     "TestPrepararOImovel.test_sem_o_modelo_de_fundo_faz_o_que_da_e_avisa"),
+
+    # refazer joga fora meia hora de processamento por engano
+    ("refaz a profundidade que ja existe", "app.py",
+     "        if not cena.get(\"profundidade\"):\n            passos.append((cena[\"id\"], \"profundidade\"))",
+     "        if True:\n            passos.append((cena[\"id\"], \"profundidade\"))",
+     "TestPrepararOImovel.test_nao_refaz_o_que_ja_esta_pronto"),
+
+    # sem fatiar, a barra volta a zero a cada cena e quem olha acha que travou
+    ("a barra de andamento volta a zero a cada cena", "app.py",
+     "    inicio = largura * feito",
+     "    inicio = 0",
+     "TestPrepararOImovel.test_a_barra_nao_volta_a_zero_a_cada_cena"),
+
+    # so da para andar em 360 completo
+    ("cena parcial entra no lote", "app.py",
+     '    cenas = [c for c in tour.get("cenas", []) if c.get("panorama_completo")]',
+     '    cenas = list(tour.get("cenas", []))',
+     "TestPrepararOImovel.test_panorama_parcial_fica_de_fora"),
+
+    # o corretor prefere doze prontas e um recado a um lote inteiro perdido
+    ("uma cena ruim derruba as outras treze", "app.py",
+     "            except Exception as erro:",
+     "            except ZeroDivisionError as erro:",
+     "TestPrepararOImovel.test_uma_cena_ruim_nao_derruba_as_outras"),
+
+    # "processando" nao diz nada a quem espera meia hora
+    ("o andamento nao diz em que cena esta", "app.py",
+     '            rotulo = "%d de %d \u00b7 %s" % (i + 1, total, cena.get("nome", ""))',
+     '            rotulo = "processando"',
+     "TestPrepararOImovel.test_o_andamento_diz_em_que_cena_esta"),
+
+    # meia hora de CPU por clique, aberta a qualquer um, derruba o servidor
+    ("qualquer um dispara o processamento alheio", "app.py",
+     '"maquete", "api.api_maquete",',
+     '"maquete", "api.api_maquete", "api.api_preparar",',
+     "TestPrepararOImovel.test_visitante_nao_dispara_processamento_alheio"),
 ]
 
 

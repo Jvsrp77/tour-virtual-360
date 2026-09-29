@@ -1803,6 +1803,176 @@ def api_publicar_area(cena_id):
     return jsonify({"ok": True, "area": registro})
 
 
+def _fatia(relatar, feito, total, rotulo):
+    """
+    Transforma o andamento de UMA cena no andamento do lote.
+
+    Sem isto a barra voltaria a zero a cada cena, e quem esta olhando
+    concluiria que travou e recarregaria a pagina no meio do trabalho.
+    """
+    largura = 100.0 / max(1, total)
+    inicio = largura * feito
+
+    def relatar_fatia(pct, mensagem=""):
+        relatar(inicio + largura * (pct / 100.0),
+                "%s — %s" % (rotulo, mensagem) if mensagem else rotulo)
+    return relatar_fatia
+
+
+def _fazer_profundidade(imovel, destino, cena_id, cena, relatar):
+    """
+    Calcula e grava a profundidade de uma cena. Devolve a cena atualizada.
+
+    Vive fora da rota porque o lote precisa exatamente disto, e duplicar faria
+    um defeito precisar de dois consertos — com a copia errada escolhida no
+    dia em que ninguem lembra que ha duas.
+    """
+    panorama = os.path.join(destino, cena["arquivo"])
+    disp, previa = profundidade.gerar(panorama, relatar=relatar)
+    nome = "prof_%s.png" % cena_id
+    profundidade.salvar(disp, os.path.join(destino, nome))
+
+    nome_previa = "prev_%s.jpg" % cena_id
+    ok, buf = cv2.imencode(".jpg", previa, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if ok:
+        buf.tofile(os.path.join(destino, nome_previa))
+
+    # Previsao de escorrido: o corretor precisa saber se a captura presta ANTES
+    # de publicar, e nao descobrir pelo cliente. Sai de graca aqui, porque o
+    # panorama e a profundidade ja estao na mao.
+    try:
+        escorrido = profundidade.medir_escorrido(
+            stitcher._ler_imagem(panorama), disp)
+    except Exception:
+        escorrido = None          # medida e informacao, nao pode derrubar a tarefa
+
+    with trava_do_imovel(imovel):
+        tour = carregar_tour(imovel)     # relê: pode ter mudado durante o calculo
+        atual = achar_cena(tour, cena_id)
+        if not atual:
+            raise RuntimeError("A cena foi removida durante o cálculo.")
+        atual["profundidade"] = nome
+        atual["previa_profundidade"] = nome_previa
+        if escorrido:
+            atual["escorrido"] = escorrido
+        salvar_tour(tour, imovel)
+    return atual
+
+
+def _fazer_fundo(imovel, destino, cena_id, cena, relatar):
+    """Reconstroi e grava a camada de fundo. Devolve (cena, info)."""
+    relatar(5, "procurando o que está na frente")
+    panorama = os.path.join(destino, cena["arquivo"])
+    profundo = os.path.join(destino, cena["profundidade"])
+    textura, disp, info = fundo.gerar(panorama, profundo, relatar=relatar)
+
+    relatar(96, "gravando a camada")
+    nome_tex = "fundotex_%s.jpg" % cena_id
+    ok, buf = cv2.imencode(".jpg", textura, [cv2.IMWRITE_JPEG_QUALITY, 86])
+    if not ok:
+        raise RuntimeError("falha ao gravar a textura de fundo")
+    buf.tofile(os.path.join(destino, nome_tex))
+
+    nome_prof = "fundoprof_%s.png" % cena_id
+    profundidade.salvar(disp, os.path.join(destino, nome_prof))
+
+    with trava_do_imovel(imovel):
+        tour = carregar_tour(imovel)
+        atual = achar_cena(tour, cena_id)
+        if not atual:
+            raise RuntimeError("A cena foi removida durante a reconstrução.")
+        atual["fundo"] = {"textura": nome_tex, "profundidade": nome_prof,
+                          "reconstruido": info["reconstruido"], "gerado_por_ia": True}
+        salvar_tour(tour, imovel)
+    return atual, info
+
+
+@api.route("/preparar", methods=["POST"])
+def api_preparar():
+    """
+    Deixa o imovel INTEIRO pronto para caminhar, numa tarefa so.
+
+    Ate aqui era cena por cena: num imovel de catorze pontos, o corretor
+    clicava vinte e oito vezes e ficava olhando. Ninguem faz isso duas vezes —
+    na pratica o passo era pulado, e o imovel ia para o ar sem profundidade ou
+    sem camada de fundo, que sao justamente as duas coisas que fazem a
+    caminhada valer.
+
+    O que ele faz, por cena que ainda nao tem: gera a profundidade e, se o
+    modelo de reconstrucao estiver instalado, a camada de fundo.
+
+    Nao refaz o que ja existe. Refazer seria jogar fora meia hora de
+    processamento por engano, e um clique a mais nao pode custar isso.
+    """
+    tour = carregar_tour()
+    if not profundidade.modelo_disponivel():
+        return jsonify({"ok": False, "erro":
+                        "O modelo de profundidade não está instalado. Rode "
+                        "'python baixar_modelo.py' uma vez (94 MB)."}), 422
+
+    com_fundo = fundo.modelo_disponivel()
+    cenas = [c for c in tour.get("cenas", []) if c.get("panorama_completo")]
+    parciais = len(tour.get("cenas", [])) - len(cenas)
+
+    # O que realmente ha para fazer. Contado ANTES de comecar, porque a barra
+    # de andamento precisa saber o tamanho do trabalho para nao mentir.
+    passos = []
+    for cena in cenas:
+        if not cena.get("profundidade"):
+            passos.append((cena["id"], "profundidade"))
+        if com_fundo and not cena.get("fundo"):
+            passos.append((cena["id"], "fundo"))
+
+    if not passos:
+        return jsonify({"ok": True, "tarefa": None, "passos": 0,
+                        "recado": "Tudo o que dava para preparar já está pronto."
+                                  + ("" if com_fundo else
+                                     " A camada de fundo exige o modelo de "
+                                     "reconstrução: rode 'python baixar_modelo.py "
+                                     "--fundo' uma vez (208 MB).")})
+
+    imovel = g.imovel
+    destino = pasta_cenas()
+    total = len(passos)
+
+    def trabalho(relatar):
+        feitos = {"profundidade": 0, "fundo": 0}
+        problemas = []
+        for i, (cena_id, etapa) in enumerate(passos):
+            atual = carregar_tour(imovel)
+            cena = achar_cena(atual, cena_id)
+            if not cena:
+                continue                  # apagada no meio do lote: segue a vida
+            rotulo = "%d de %d · %s" % (i + 1, total, cena.get("nome", ""))
+            passo = _fatia(relatar, i, total, rotulo)
+            try:
+                if etapa == "profundidade":
+                    if not cena.get("profundidade"):
+                        _fazer_profundidade(imovel, destino, cena_id, cena, passo)
+                        feitos["profundidade"] += 1
+                else:
+                    cena = achar_cena(carregar_tour(imovel), cena_id)
+                    if cena and cena.get("profundidade") and not cena.get("fundo"):
+                        _fazer_fundo(imovel, destino, cena_id, cena, passo)
+                        feitos["fundo"] += 1
+            except tarefas.Cancelada:
+                raise
+            except Exception as erro:
+                # Uma cena ruim nao pode derrubar as outras treze. O corretor
+                # prefere doze prontas e um recado a um lote inteiro perdido.
+                problemas.append({"cena": cena.get("nome", "") if cena else cena_id,
+                                  "etapa": etapa, "erro": str(erro)[:200]})
+        relatar(100, "pronto")
+        return {"feitos": feitos, "problemas": problemas,
+                "com_fundo": com_fundo, "parciais": parciais}
+
+    tid = tarefas.criar(imovel, "preparar",
+                        "Preparar %d etapa(s) para caminhar" % total)
+    tarefas.enfileirar(tid, trabalho)
+    return jsonify({"ok": True, "tarefa": tid, "passos": total,
+                    "com_fundo": com_fundo}), 202
+
+
 @api.route("/cenas/<cena_id>/profundidade", methods=["POST"])
 def api_gerar_profundidade(cena_id):
     """Calcula o mapa de profundidade que permite andar dentro da cena."""
@@ -1821,38 +1991,10 @@ def api_gerar_profundidade(cena_id):
 
     imovel = g.imovel
     destino = pasta_cenas()
-    panorama = os.path.join(destino, cena["arquivo"])
 
     def trabalho(relatar):
-        disp, previa = profundidade.gerar(panorama, relatar=relatar)
-        nome = "prof_%s.png" % cena_id
-        profundidade.salvar(disp, os.path.join(destino, nome))
-
-        nome_previa = "prev_%s.jpg" % cena_id
-        ok, buf = cv2.imencode(".jpg", previa, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        if ok:
-            buf.tofile(os.path.join(destino, nome_previa))
-
-        # Previsao de escorrido: o corretor precisa saber se a captura presta
-        # ANTES de publicar, e nao descobrir pelo cliente. Sai de graca aqui,
-        # porque o panorama e a profundidade ja estao na mao.
-        try:
-            escorrido = profundidade.medir_escorrido(
-                stitcher._ler_imagem(panorama), disp)
-        except Exception:
-            escorrido = None          # medida e informacao, nao pode derrubar a tarefa
-
-        with trava_do_imovel(imovel):
-            tour = carregar_tour(imovel)     # relê: pode ter mudado durante o calculo
-            atual = achar_cena(tour, cena_id)
-            if not atual:
-                raise RuntimeError("A cena foi removida durante o cálculo.")
-            atual["profundidade"] = nome
-            atual["previa_profundidade"] = nome_previa
-            if escorrido:
-                atual["escorrido"] = escorrido
-            salvar_tour(tour, imovel)
-        return {"cena": atual}
+        return {"cena": _fazer_profundidade(imovel, destino, cena_id, cena,
+                                            relatar)}
 
     tid = tarefas.criar(imovel, "profundidade", "Profundidade de %s" % cena["nome"])
     tarefas.enfileirar(tid, trabalho)
@@ -1966,31 +2108,9 @@ def api_fundo(cena_id):
 
     imovel = g.imovel
     destino = pasta_cenas()
-    panorama = os.path.join(destino, cena["arquivo"])
-    profundo = os.path.join(destino, cena["profundidade"])
 
     def trabalho(relatar):
-        relatar(5, "procurando o que está na frente")
-        textura, disp, info = fundo.gerar(panorama, profundo, relatar=relatar)
-
-        relatar(96, "gravando a camada")
-        nome_tex = "fundotex_%s.jpg" % cena_id
-        ok, buf = cv2.imencode(".jpg", textura, [cv2.IMWRITE_JPEG_QUALITY, 86])
-        if not ok:
-            raise RuntimeError("falha ao gravar a textura de fundo")
-        buf.tofile(os.path.join(destino, nome_tex))
-
-        nome_prof = "fundoprof_%s.png" % cena_id
-        profundidade.salvar(disp, os.path.join(destino, nome_prof))
-
-        with trava_do_imovel(imovel):
-            tour = carregar_tour(imovel)
-            atual = achar_cena(tour, cena_id)
-            if not atual:
-                raise RuntimeError("A cena foi removida durante a reconstrução.")
-            atual["fundo"] = {"textura": nome_tex, "profundidade": nome_prof,
-                              "reconstruido": info["reconstruido"], "gerado_por_ia": True}
-            salvar_tour(tour, imovel)
+        atual, info = _fazer_fundo(imovel, destino, cena_id, cena, relatar)
         return {"cena": atual, "info": info}
 
     tid = tarefas.criar(imovel, "fundo", "Camada de fundo de %s" % cena["nome"])

@@ -147,6 +147,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   <div class="crescer"></div>
   <button onclick="sairDoPainel()">Sair</button>
   <button onclick="abrirGuia()">Guia de captura</button>
+  <button id="btPreparar" onclick="prepararImovel()"
+          title="Gera a profundidade e a camada de fundo de todas as cenas que ainda não têm">Preparar para caminhar</button>
   <button onclick="window.open('/capturar/' + IMOVEL, '_blank')"
           title="O que já foi capturado e o que falta — abra no celular, dentro do imóvel">O que falta capturar</button>
   <button onclick="verMetricas()">Métricas</button>
@@ -949,6 +951,54 @@ function desenharProfundidade(c){
   } else {
     alvo.innerHTML = `<button class="primario" style="width:100%"
                         onclick="gerarProfundidade()">Gerar profundidade</button>`;
+  }
+}
+
+// ------------------------------------------- preparar o imovel para caminhar
+//
+// Era cena por cena: num imovel de catorze pontos, o corretor clicava vinte e
+// oito vezes e ficava olhando. Ninguem faz isso duas vezes — na pratica o passo
+// era pulado, e o imovel ia para o ar sem profundidade ou sem camada de fundo,
+// que sao justamente as duas coisas que fazem a caminhada valer.
+
+function seguro(t){
+  return String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+async function prepararImovel(){
+  const bt = $('btPreparar');
+  bt.disabled = true;
+  aviso('Vendo o que falta preparar...', 'mira');
+  try{
+    const j = await (await fetch(API + '/preparar', {method: 'POST'})).json();
+    if (!j.ok){ aviso(seguro(j.erro), 'erro'); return; }
+
+    // nada a fazer nao e erro: e a melhor resposta possivel
+    if (!j.tarefa){ aviso(seguro(j.recado), 'ok'); return; }
+
+    aviso(j.passos + ' etapa(s) pela frente. Pode deixar esta aba aberta — '
+          + 'leva alguns minutos por cena.', 'mira');
+    await acompanhar(j.tarefa, async (r) => {
+      await carregar();
+      const f = r.feitos || {};
+      const ruins = r.problemas || [];
+      let recado = 'Pronto: <b>' + (f.profundidade || 0) + '</b> profundidade(s) e <b>'
+                 + (f.fundo || 0) + '</b> camada(s) de fundo.';
+      if (!r.com_fundo){
+        recado += ' A camada de fundo exige a segunda IA: rode <b>python '
+                + 'baixar_modelo.py --fundo</b> uma vez (208 MB).';
+      }
+      if (ruins.length){
+        recado += ' <b>' + ruins.length + '</b> cena(s) não deram certo: '
+                + ruins.map(p => seguro(p.cena)).join(', ') + '.';
+      }
+      aviso(recado, ruins.length ? 'erro' : 'ok');
+    });
+  }catch(e){
+    progresso(0);
+    aviso('Falha ao preparar: ' + seguro(e), 'erro');
+  }finally{
+    bt.disabled = false;
   }
 }
 

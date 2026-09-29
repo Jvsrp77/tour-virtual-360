@@ -4397,6 +4397,216 @@ class TestGuiaDeCaptura(Base):
             self.fail("o guia busca recurso de fora: %s" % achado)
 
 
+class TestPrepararOImovel(Base):
+    """
+    Deixar o imovel INTEIRO pronto para caminhar, numa tarefa so.
+
+    Ate aqui era cena por cena: num imovel de catorze pontos, o corretor
+    clicava vinte e oito vezes e ficava olhando. Ninguem faz isso duas vezes —
+    na pratica o passo era pulado, e o imovel ia para o ar sem profundidade ou
+    sem camada de fundo, que sao as duas coisas que fazem a caminhada valer.
+
+    Nenhum teste aqui carrega modelo de IA: o que se exercita e a LOGICA do
+    lote — o que fazer, em que ordem, o que pular, e o que acontece quando uma
+    cena da errado no meio.
+    """
+
+    def setUp(self):
+        self.dona = self.conta("dona-preparar")
+        self.iid = self.imovel(self.dona, "Imóvel a preparar")
+
+    def _cena(self, nome, prof=None, fundo=None, completo=True):
+        c = {"id": nome, "nome": nome, "arquivo": nome + ".jpg",
+             "panorama_completo": completo, "hotspots": []}
+        if prof:
+            c["profundidade"] = prof
+        if fundo:
+            c["fundo"] = fundo
+        return c
+
+    def _gravar(self, cenas):
+        tour = aplicacao.carregar_tour(self.iid)
+        tour["cenas"] = cenas
+        aplicacao.salvar_tour(tour, self.iid)
+
+    def _preparar(self, tem_profundidade=True, tem_fundo=False, quebrar=None):
+        """
+        Chama a rota com os modelos e o trabalho pesado trocados por dublês.
+
+        O que interessa aqui e a decisao do lote, nao a inferencia: carregar
+        modelo de verdade faria o teste depender de 300 MB baixados e de uma
+        GPU, e reprovaria numa maquina limpa.
+        """
+        feito = {"profundidade": [], "fundo": [], "relatos": []}
+        guardados = (aplicacao.profundidade.modelo_disponivel,
+                     aplicacao.fundo.modelo_disponivel,
+                     aplicacao._fazer_profundidade,
+                     aplicacao._fazer_fundo,
+                     aplicacao.tarefas.enfileirar)
+
+        def fazer_prof(imovel, destino, cena_id, cena, relatar):
+            relatar(50, "meio")
+            if quebrar == cena_id:
+                raise RuntimeError("panorama corrompido")
+            feito["profundidade"].append(cena_id)
+            tour = aplicacao.carregar_tour(imovel)
+            alvo = aplicacao.achar_cena(tour, cena_id)
+            alvo["profundidade"] = "prof.png"
+            aplicacao.salvar_tour(tour, imovel)
+            return alvo
+
+        def fazer_fundo(imovel, destino, cena_id, cena, relatar):
+            feito["fundo"].append(cena_id)
+            tour = aplicacao.carregar_tour(imovel)
+            alvo = aplicacao.achar_cena(tour, cena_id)
+            alvo["fundo"] = {"textura": "t.jpg", "reconstruido": 4}
+            aplicacao.salvar_tour(tour, imovel)
+            return alvo, {"reconstruido": 4}
+
+        def na_hora(tid, trabalho):
+            feito["resultado"] = trabalho(
+                lambda pct, msg="": feito["relatos"].append((pct, msg)))
+
+        aplicacao.profundidade.modelo_disponivel = lambda: tem_profundidade
+        aplicacao.fundo.modelo_disponivel = lambda: tem_fundo
+        aplicacao._fazer_profundidade = fazer_prof
+        aplicacao._fazer_fundo = fazer_fundo
+        aplicacao.tarefas.enfileirar = na_hora
+        try:
+            resposta = self.dona.post("/api/imoveis/%s/preparar" % self.iid)
+        finally:
+            (aplicacao.profundidade.modelo_disponivel,
+             aplicacao.fundo.modelo_disponivel,
+             aplicacao._fazer_profundidade,
+             aplicacao._fazer_fundo,
+             aplicacao.tarefas.enfileirar) = guardados
+        return resposta, feito
+
+    # --------------------------------------------------------- sem os modelos
+
+    def test_sem_o_modelo_de_profundidade_recusa_dizendo_o_comando(self):
+        """
+        Recusa sem saída é só um muro. O recado traz o comando exato, porque
+        quem está no painel não vai procurar isso em documentação nenhuma.
+        """
+        self._gravar([self._cena("sala")])
+        r, _ = self._preparar(tem_profundidade=False)
+        self.assertEqual(r.status_code, 422)
+        self.assertIn("baixar_modelo.py", r.get_json()["erro"])
+
+    def test_sem_o_modelo_de_fundo_faz_o_que_da_e_avisa(self):
+        """
+        Faltar a segunda IA não pode impedir a primeira: profundidade sozinha
+        já libera a caminhada. Travar tudo seria transformar uma melhoria que
+        falta numa parede.
+        """
+        self._gravar([self._cena("sala"), self._cena("cozinha")])
+        r, feito = self._preparar(tem_fundo=False)
+        self.assertEqual(r.status_code, 202)
+        self.assertEqual(r.get_json()["passos"], 2)
+        self.assertFalse(r.get_json()["com_fundo"])
+        self.assertEqual(feito["profundidade"], ["sala", "cozinha"])
+        self.assertEqual(feito["fundo"], [])
+
+    # ------------------------------------------------------- o que ha a fazer
+
+    def test_as_duas_etapas_entram_quando_as_duas_ias_existem(self):
+        self._gravar([self._cena("sala")])
+        r, feito = self._preparar(tem_fundo=True)
+        self.assertEqual(r.get_json()["passos"], 2)
+        self.assertEqual(feito["profundidade"], ["sala"])
+        self.assertEqual(feito["fundo"], ["sala"])
+
+    def test_nao_refaz_o_que_ja_esta_pronto(self):
+        """
+        Refazer seria jogar fora meia hora de processamento por engano. Um
+        clique a mais não pode custar isso.
+        """
+        self._gravar([self._cena("sala", prof="p.png",
+                                 fundo={"textura": "t.jpg"})])
+        r, feito = self._preparar(tem_fundo=True)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["passos"], 0)
+        self.assertIn("pronto", r.get_json()["recado"])
+        self.assertEqual(feito["profundidade"], [])
+
+    def test_cena_com_profundidade_so_ganha_o_fundo_que_falta(self):
+        self._gravar([self._cena("sala", prof="p.png"), self._cena("cozinha")])
+        r, feito = self._preparar(tem_fundo=True)
+        self.assertEqual(r.get_json()["passos"], 3)   # fundo da sala + as duas da cozinha
+        self.assertEqual(feito["profundidade"], ["cozinha"])
+        self.assertEqual(sorted(feito["fundo"]), ["cozinha", "sala"])
+
+    def test_panorama_parcial_fica_de_fora(self):
+        """Só dá para andar em 360 completo; cena parcial não tem o que preparar."""
+        self._gravar([self._cena("sala"), self._cena("recorte", completo=False)])
+        r, feito = self._preparar()
+        self.assertEqual(r.get_json()["passos"], 1)
+        self.assertEqual(feito["profundidade"], ["sala"])
+
+    # ----------------------------------------------------------- o andamento
+
+    def test_a_barra_nao_volta_a_zero_a_cada_cena(self):
+        """
+        Medido no desenho: sem fatiar, cada cena relataria 0 a 100 de novo.
+        Quem está olhando conclui que travou e recarrega a página no meio de
+        meia hora de processamento.
+        """
+        self._gravar([self._cena("sala"), self._cena("cozinha"),
+                      self._cena("quarto")])
+        _r, feito = self._preparar()
+        pcts = [p for p, _m in feito["relatos"]]
+        self.assertEqual(pcts, sorted(pcts), "o andamento voltou para trás")
+        self.assertLessEqual(max(pcts), 100.0001)
+        self.assertGreaterEqual(min(pcts), 0)
+        self.assertEqual(pcts[-1], 100, "não terminou em 100")
+        # o meio da segunda cena tem de cair perto do meio do lote
+        self.assertAlmostEqual(pcts[1], 50, delta=1)
+
+    def test_o_andamento_diz_em_que_cena_esta(self):
+        """"Processando" não diz nada a quem espera meia hora."""
+        self._gravar([self._cena("sala"), self._cena("cozinha")])
+        _r, feito = self._preparar()
+        juntos = " | ".join(m for _p, m in feito["relatos"])
+        self.assertIn("1 de 2", juntos)
+        self.assertIn("cozinha", juntos)
+
+    # ------------------------------------------------------- quando da errado
+
+    def test_uma_cena_ruim_nao_derruba_as_outras(self):
+        """
+        O corretor prefere doze prontas e um recado a um lote inteiro perdido
+        depois de vinte minutos.
+        """
+        self._gravar([self._cena("sala"), self._cena("cozinha"),
+                      self._cena("quarto")])
+        _r, feito = self._preparar(quebrar="cozinha")
+        self.assertEqual(feito["profundidade"], ["sala", "quarto"])
+        problemas = feito["resultado"]["problemas"]
+        self.assertEqual(len(problemas), 1)
+        self.assertEqual(problemas[0]["cena"], "cozinha")
+        self.assertIn("corrompido", problemas[0]["erro"])
+
+    def test_o_resultado_conta_o_que_foi_feito(self):
+        self._gravar([self._cena("sala"), self._cena("cozinha")])
+        _r, feito = self._preparar(tem_fundo=True)
+        self.assertEqual(feito["resultado"]["feitos"],
+                         {"profundidade": 2, "fundo": 2})
+        self.assertEqual(feito["resultado"]["problemas"], [])
+
+    # ------------------------------------------------------------- quem pode
+
+    def test_visitante_nao_dispara_processamento_alheio(self):
+        """
+        Meia hora de CPU por clique, aberta a qualquer um com o link, seria um
+        jeito de derrubar o servidor de graça.
+        """
+        self._gravar([self._cena("sala")])
+        visitante = aplicacao.app.test_client()
+        r = visitante.post("/api/imoveis/%s/preparar" % self.iid)
+        self.assertIn(r.status_code, (401, 403, 404))
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
