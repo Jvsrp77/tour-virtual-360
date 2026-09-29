@@ -12,6 +12,11 @@ origem no canto. Caixa e (x0, y0, z0, x1, y1, z1, material).
 """
 
 PE_DIREITO = 2.70
+
+# Ate que distancia de um ponto de captura a imagem ainda se sustenta. Metade
+# do alcance do passeio (PASSEIO_CHEIO = 2,50 m no andar.html), porque o pior
+# lugar do passeio e sempre o meio do caminho entre dois pontos.
+RAIO_DE_COBERTURA = 1.25
 PAREDE = 0.12
 
 
@@ -22,6 +27,88 @@ def _px(x, trechos):
 
 def _pz(z, trechos):
     return [(a, 0.0, z, b, PE_DIREITO, z + PAREDE, "parede") for a, b in trechos]
+
+
+# A mesma altura de olho do tracador e do andar.html. Repetida aqui de
+# proposito: quem edita esta planta nao deveria precisar abrir o tracador para
+# entender por que um movel baixo nao bloqueia um ponto de captura.
+OLHO = 1.55
+
+
+def _cabe_camera(x, z, caixas, larg, fundo, folga):
+    """
+    Espelha o criterio de cena_apartamento.conferir().
+
+    Movel de menos de 60 cm nao atrapalha a vista de quem esta em pe, e o que
+    comeca acima da altura dos olhos tambem nao. O resto precisa de folga.
+    """
+    if min(x, larg - x, z, fundo - z) < folga:
+        return False
+    for c in caixas:
+        if c[1] > OLHO or c[4] < 0.60:
+            continue
+        dx = max(c[0] - x, 0.0, x - c[3])
+        dz = max(c[2] - z, 0.0, z - c[5])
+        if (dx * dx + dz * dz) ** 0.5 < folga:
+            return False
+    return True
+
+
+def _eixo(a, b, passo):
+    """As posicoes ao longo de um lado, com espacamento nunca maior que `passo`."""
+    import math
+    if b - a <= passo:
+        return [(a + b) / 2.0]
+    n = int(math.ceil((b - a) / passo))
+    return [a + (b - a) * k / n for k in range(n + 1)]
+
+
+def _pontos_por_cobertura(zonas, caixas, larg, fundo, raio, folga=0.45):
+    """
+    Escolhe pontos de captura ate que todo lugar onde se pode andar esteja a
+    menos de `raio` de algum deles.
+
+    POR QUE NAO GRADE. Tentei grade primeiro e ela erra de um jeito que nao se
+    ve no codigo: o filtro de folga REMOVE candidatos perto de movel e nunca os
+    repoe. Medido nesta mansao: o hall vazio ficou com nove pontos e a suite
+    mobiliada com dois — exatamente ao contrario do necessario, porque comodo
+    cheio e onde a foto mais esconde coisa atras dos moveis.
+
+    Aqui o criterio e o que importa de verdade: nenhum lugar caminhavel pode
+    ficar longe de um ponto. Escolhe-se sempre o candidato MAIS DISTANTE do que
+    ja foi escolhido, ate que o pior caso caiba no raio. Comodo cheio recebe
+    mais pontos por consequencia, e nao por regra especial.
+    """
+    pontos = []
+    for nome, x0, x1, z0, z1, _parede, _piso in zonas:
+        candidatos = []
+        for x in _eixo(x0 + folga, x1 - folga, 0.35):
+            for z in _eixo(z0 + folga, z1 - folga, 0.35):
+                if _cabe_camera(x, z, caixas, larg, fundo, folga):
+                    candidatos.append((x, z))
+        if not candidatos:
+            continue
+
+        # comeca pelo mais central: e o ponto que um fotografo escolheria
+        cx, cz = (x0 + x1) / 2.0, (z0 + z1) / 2.0
+        escolhidos = [min(candidatos,
+                          key=lambda p: (p[0] - cx) ** 2 + (p[1] - cz) ** 2)]
+        longe = [((c[0] - escolhidos[0][0]) ** 2
+                  + (c[1] - escolhidos[0][1]) ** 2) ** 0.5 for c in candidatos]
+        while True:
+            k = max(range(len(candidatos)), key=lambda i: longe[i])
+            if longe[k] <= raio:
+                break
+            novo = candidatos[k]
+            escolhidos.append(novo)
+            for i, c in enumerate(candidatos):
+                d = ((c[0] - novo[0]) ** 2 + (c[1] - novo[1]) ** 2) ** 0.5
+                if d < longe[i]:
+                    longe[i] = d
+
+        for k, (x, z) in enumerate(escolhidos, 1):
+            pontos.append(("%s - %d" % (nome, k), round(x, 2), round(z, 2)))
+    return pontos
 
 
 # ------------------------------------------------------ 1. apartamento padrao
@@ -365,4 +452,183 @@ def cobertura():
                           "banheira. Doze pontos de captura.")
 
 
-TODAS = [apartamento, compacto, cobertura]
+# ------------------------------------------------------------- 4. mansao
+
+def mansao():
+    """
+    Uma casa grande, com circulacao longa ligando as duas alas.
+
+    Por que ela existe: as tres primeiras plantas sao apartamentos, e nelas
+    tudo esta perto de tudo. Imovel grande muda o problema de lugar — entre a
+    sala e a suite ha vinte metros de corredor, e e ali que a captura decide
+    se o passeio funciona ou nao. Um apartamento perdoa captura esparsa; uma
+    mansao nao.
+
+    E ela custa o que custa: trinta e tres pontos de captura contra os catorze
+    do apartamento. Esse numero e a informacao mais util desta planta.
+    """
+    larg, fundo = 22.0, 15.0
+    wz1, wz2 = 6.50, 8.30            # corredor entre as duas alas
+    # ala da frente
+    ax1, ax2, ax3 = 4.20, 12.00, 17.50
+    # ala dos fundos
+    bx1, bx2, bx3, bx4 = 6.00, 9.00, 15.50, 18.50
+
+    zonas = [
+        ("Hall de entrada", 0.00, ax1,  0.00, wz1,   "parede",    "porcelanato"),
+        ("Sala de estar",   ax1,  ax2,  0.00, wz1,   "parede",    "piso"),
+        ("Sala de jantar",  ax2,  ax3,  0.00, wz1,   "jantar",    "piso"),
+        ("Escritório",      ax3,  larg, 0.00, wz1,   "parede_q2", "piso"),
+        ("Circulação",      0.00, larg, wz1,  wz2,   "parede",    "porcelanato"),
+        ("Cozinha",         0.00, bx1,  wz2,  fundo, "cozinha",   "porcelanato"),
+        ("Área de serviço", bx1,  bx2,  wz2,  fundo, "servico",   "porcelanato"),
+        ("Suíte master",    bx2,  bx3,  wz2,  fundo, "parede_q1", "piso"),
+        ("Banheiro",        bx3,  bx4,  wz2,  fundo, "banheiro",  "porcelanato"),
+        ("Quarto 2",        bx4,  larg, wz2,  fundo, "parede_q2", "piso"),
+    ]
+
+    caixas = []
+    # paredes da ala da frente (o vao entre trechos e a porta)
+    caixas += _px(ax1, [(0.00, 2.30), (3.30, wz1 + PAREDE)])
+    caixas += _px(ax2, [(0.00, 1.90), (2.90, wz1 + PAREDE)])
+    caixas += _px(ax3, [(0.00, 3.10), (4.10, wz1 + PAREDE)])
+    # parede entre a ala da frente e o corredor
+    caixas += _pz(wz1, [(0.00, 1.40), (2.40, 6.10), (7.10, 13.90),
+                        (14.90, 19.30), (20.30, larg)])
+    # parede entre o corredor e a ala dos fundos
+    caixas += _pz(wz2, [(0.00, 2.60), (3.60, 7.10), (8.10, 11.30),
+                        (12.30, 16.60), (17.60, 19.80), (20.80, larg)])
+    # paredes da ala dos fundos
+    caixas += _px(bx1, [(wz2, 10.60), (11.60, fundo)])
+    caixas += _px(bx2, [(wz2, fundo)])
+    caixas += _px(bx3, [(wz2, 10.20), (11.20, fundo)])
+    caixas += _px(bx4, [(wz2, fundo)])
+
+    caixas += [
+        # --- sala de estar: dois sofas e mesa de centro, longe dos pontos
+        (5.00, 0.00, 0.30, 5.90, 0.40, 3.60, "estofado"),
+        (5.00, 0.40, 0.30, 5.28, 0.95, 3.60, "estofado_b"),
+        (9.90, 0.00, 0.30, 10.80, 0.40, 3.60, "estofado"),
+        (10.52, 0.40, 0.30, 10.80, 0.95, 3.60, "estofado_b"),
+        (6.60, 0.00, 1.20, 9.20, 0.012, 2.80, "tapete"),
+        (7.20, 0.012, 1.60, 8.60, 0.40, 2.40, "madeira"),
+        (6.40, 0.00, 5.70, 9.60, 0.55, 6.25, "madeira_esc"),
+        (6.90, 0.55, 5.85, 9.10, 0.62, 6.10, "vidro"),
+        (4.45, 0.00, 5.40, 4.95, 0.95, 6.30, "planta"),
+
+        # --- hall: aparador e espelho
+        (0.30, 0.00, 2.60, 0.72, 0.85, 4.20, "madeira_esc"),
+        (0.30, 0.85, 2.70, 0.40, 2.00, 4.10, "vidro"),
+        (3.30, 0.00, 5.60, 3.95, 1.05, 6.25, "planta"),
+
+        # --- sala de jantar: mesa grande de oito lugares
+        (13.90, 0.00, 1.50, 16.30, 0.74, 3.50, "madeira"),
+        (13.90, 0.74, 1.50, 16.30, 0.80, 3.50, "vidro"),
+        (12.60, 0.00, 1.70, 13.05, 0.46, 2.15, "estofado"),
+        (12.60, 0.46, 1.70, 13.05, 1.02, 1.80, "estofado_b"),
+        (12.60, 0.00, 2.85, 13.05, 0.46, 3.30, "estofado"),
+        (12.60, 0.46, 2.85, 13.05, 1.02, 2.95, "estofado_b"),
+        (17.05, 0.00, 1.70, 17.40, 0.46, 2.15, "estofado"),
+        (17.05, 0.00, 2.85, 17.40, 0.46, 3.30, "estofado"),
+        (12.20, 0.00, 5.30, 16.90, 0.50, 5.95, "madeira_esc"),
+        (12.40, 0.50, 5.45, 16.70, 1.35, 5.80, "louca"),
+
+        # --- escritorio: mesa em L e estante
+        (18.10, 0.00, 1.10, 21.40, 0.74, 1.80, "madeira"),
+        (20.60, 0.00, 1.80, 21.40, 0.74, 3.60, "madeira"),
+        (18.30, 0.74, 1.25, 19.60, 0.80, 1.65, "vidro"),
+        (17.80, 0.00, 4.90, 21.60, 2.10, 5.50, "madeira_esc"),
+        (17.95, 0.00, 5.00, 21.45, 0.32, 5.40, "livro_a"),
+        (17.95, 0.66, 5.00, 21.45, 0.98, 5.40, "livro_a"),
+        (17.95, 1.32, 5.00, 21.45, 1.64, 5.40, "livro_a"),
+
+        # --- circulacao: aparador comprido e plantas, rente as paredes
+        (2.90, 0.00, 6.75, 5.40, 0.82, 7.05, "madeira_esc"),
+        (11.60, 0.00, 7.80, 13.40, 0.82, 8.10, "madeira_esc"),
+        (0.25, 0.00, 6.80, 0.85, 1.10, 7.40, "planta"),
+        (21.20, 0.00, 7.60, 21.80, 1.10, 8.20, "planta"),
+
+        # --- cozinha: ilha central e bancadas
+        (0.30, 0.00, 8.70, 1.00, 0.90, 13.60, "cozinha"),
+        (0.30, 0.90, 8.70, 1.00, 0.96, 13.60, "pedra"),
+        (0.30, 1.60, 8.70, 0.95, 2.30, 11.40, "madeira"),
+        (2.90, 0.00, 11.60, 5.30, 0.92, 13.10, "madeira_esc"),
+        (2.90, 0.92, 11.60, 5.30, 0.98, 13.10, "pedra"),
+        (5.20, 0.00, 8.70, 5.85, 1.95, 10.60, "metal"),
+        (1.60, 0.00, 14.10, 4.40, 0.78, 14.70, "madeira"),
+
+        # --- area de servico: tanque e maquinas
+        (6.30, 0.00, 14.00, 8.70, 0.88, 14.70, "servico"),
+        (6.30, 0.88, 14.00, 8.70, 0.94, 14.70, "pedra"),
+        (6.30, 0.00, 8.60, 7.20, 0.85, 9.50, "metal"),
+        (7.40, 0.00, 8.60, 8.30, 0.85, 9.50, "metal"),
+
+        # --- suite master: cama de casal e armario
+        (11.30, 0.00, 12.40, 13.30, 0.52, 14.50, "madeira_esc"),
+        (11.30, 0.52, 12.40, 13.30, 0.74, 14.50, "roupa_cama"),
+        (11.45, 0.74, 13.90, 12.15, 0.86, 14.35, "roupa_cama"),
+        (12.45, 0.74, 13.90, 13.15, 0.86, 14.35, "roupa_cama"),
+        (9.20, 0.00, 12.20, 9.85, 2.30, 14.70, "madeira_esc"),
+        (14.60, 0.00, 8.60, 15.35, 2.30, 11.40, "madeira_esc"),
+        (9.30, 0.00, 8.60, 10.90, 0.012, 11.30, "tapete"),
+
+        # --- banheiro: banheira, pia e box
+        (15.70, 0.00, 13.30, 18.30, 0.62, 14.80, "louca"),
+        (15.70, 0.00, 8.55, 18.30, 0.86, 9.25, "madeira_esc"),
+        (15.70, 0.86, 8.55, 18.30, 0.92, 9.25, "pedra"),
+        (16.00, 0.92, 8.70, 17.10, 1.06, 9.10, "louca"),
+        (15.70, 0.00, 10.20, 17.10, 2.10, 11.60, "vidro"),
+
+        # --- quarto 2: cama de solteiro e escrivaninha
+        (18.80, 0.00, 12.90, 20.20, 0.50, 14.70, "madeira_esc"),
+        (18.80, 0.50, 12.90, 20.20, 0.70, 14.70, "roupa_cama"),
+        (18.95, 0.70, 14.20, 19.60, 0.82, 14.60, "roupa_cama"),
+        (20.90, 0.00, 8.60, 21.70, 0.74, 10.40, "madeira"),
+        (18.70, 0.00, 8.60, 19.35, 2.20, 10.60, "madeira_esc"),
+    ]
+
+    janelas = [
+        (0.60, 2.40, 0.00, 0.00, 1.00, 2.10),
+        (5.20, 7.40, 0.00, 0.00, 0.85, 2.30),
+        (8.80, 11.00, 0.00, 0.00, 0.85, 2.30),
+        (13.40, 16.20, 0.00, 0.00, 1.00, 2.20),
+        (18.40, 21.00, 0.00, 0.00, 1.00, 2.20),
+        (0.00, 0.00, 1.60, 4.40, 1.05, 2.15),
+        (0.00, 0.00, 9.40, 12.60, 1.10, 2.10),
+        (larg, larg, 1.70, 4.60, 1.05, 2.15),
+        (larg, larg, 9.60, 12.40, 1.10, 2.10),
+        (1.40, 4.60, fundo, fundo, 1.10, 2.10),
+        (10.00, 12.80, fundo, fundo, 1.00, 2.20),
+        (16.10, 17.90, fundo, fundo, 1.45, 2.20),
+        (19.60, 21.40, fundo, fundo, 1.10, 2.10),
+    ]
+
+    luzes = [
+        (2.10, 2.55, 3.20, 0.95), (6.60, 2.55, 2.00, 1.00),
+        (9.80, 2.55, 2.00, 1.00), (8.10, 2.55, 5.00, 0.90),
+        (14.70, 2.55, 2.50, 1.00), (15.20, 2.55, 5.20, 0.85),
+        (19.70, 2.55, 2.20, 0.95), (19.70, 2.55, 5.00, 0.85),
+        (3.60, 2.55, 7.40, 0.80), (11.00, 2.55, 7.40, 0.80),
+        (18.40, 2.55, 7.40, 0.80),
+        (3.00, 2.55, 10.60, 0.95), (3.00, 2.55, 13.40, 0.90),
+        (7.50, 2.55, 11.60, 0.85),
+        (11.20, 2.55, 10.40, 0.95), (13.60, 2.55, 13.00, 0.88),
+        (17.00, 2.55, 11.60, 0.90),
+        (20.20, 2.55, 11.60, 0.92),
+        (7.00, 1.35, 1.95, 0.55), (15.10, 1.30, 2.50, 0.55),
+        (12.30, 1.05, 13.20, 0.50),
+    ]
+
+    pontos = _pontos_por_cobertura(zonas, caixas, larg, fundo,
+                                   raio=RAIO_DE_COBERTURA)
+
+    return dict(nome="Mansão com 330 m²", pasta="mansao",
+                larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
+                janelas=janelas, luzes=luzes, pontos=pontos,
+                descricao="Hall, sala de estar, sala de jantar, escritório, "
+                          "cozinha, área de serviço, suíte master, banheiro e "
+                          "quarto, ligados por uma circulação de 22 metros. "
+                          "Trinta e três pontos de captura.")
+
+
+TODAS = [apartamento, compacto, cobertura, mansao]
