@@ -921,6 +921,30 @@ MUT = [
      '    ceu = horizonte * (1.0 - acima ** 0.55) + zenite * (acima ** 0.55)',
      '    ceu = np.repeat(zenite[None, :], acima.shape[0], axis=0)',
      'TestPlantasSinteticas.test_o_horizonte_e_mais_lavado_que_o_zenite'),
+    ('escaneamento volta a entrar em cinza', 'static/maquete.html',
+     '        vestirComTextura(material, base + "/modelo/textura/"',
+     '        if (false) vestirComTextura(material, base + "/modelo/textura/"',
+     'TestTexturaDoEscaneamento.test_a_malha_ganha_as_coordenadas_de_textura'),
+
+    ('uv pela metade entra e embaralha a foto', 'static/maquete.html',
+     '      const completa = g.uv.length === (g.pos.length / 3) * 2;',
+     '      const completa = g.uv.length > 0;',
+     'TestTexturaDoEscaneamento.test_uv_pela_metade_nao_entra'),
+
+    ('o nome da textura sai antes das opcoes do map_Kd', 'static/maquete.html',
+     '        const arquivo = partes[partes.length - 1];',
+     '        const arquivo = partes[1];',
+     'TestTexturaDoEscaneamento.test_o_nome_sai_depois_das_opcoes_do_map_kd'),
+
+    ('textura escapa da pasta do imovel', 'modelo3d.py',
+     '    if not base or ext.lower() not in (".jpg", ".jpeg", ".png", ".webp"):',
+     '    if False:',
+     'TestTexturaDoEscaneamento.test_nome_de_textura_nao_escapa_da_pasta'),
+
+    ('a foto sai encardida por baixo da cor', 'static/maquete.html',
+     '      material.color.setScalar(1);',
+     '      material.color.setScalar(0.4);',
+     'TestTexturaDoEscaneamento.test_a_malha_ganha_as_coordenadas_de_textura'),
 ]
 
 

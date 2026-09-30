@@ -1396,7 +1396,10 @@ class TestImportarModelo(Base):
         # a assinatura inteira, e a CHAMADA. Conferir só "function lerObj"
         # passava com "function lerObjDesativado" — o nome trocado contém o
         # nome certo como pedaço, e a mutação passou batida por isso.
-        self.assertIn("function lerObj(texto, cores){", html)
+        # a assinatura e detalhe de implementacao: o que importa e
+        # a pagina trazer o proprio leitor, porque o three.js
+        # embarcado nao tem um
+        self.assertIn("function lerObj(", html)
         self.assertIn("function lerMtl(texto){", html)
         self.assertIn("= lerObj(texto", html, "define o leitor mas não usa")
         self.assertIn("lerMtl(await", html, "define o leitor de materiais mas não usa")
@@ -4810,6 +4813,148 @@ class TestPrepararOImovel(Base):
         visitante = aplicacao.app.test_client()
         r = visitante.post("/api/imoveis/%s/preparar" % self.iid)
         self.assertIn(r.status_code, (401, 403, 404))
+
+
+class TestTexturaDoEscaneamento(PaginaNoNode, unittest.TestCase):
+    """
+    O escaneamento de celular vestindo a propria foto.
+
+    Ate aqui a pagina lia do .mtl so a COR de cada material, e um scan do
+    Polycam entrava como massa cinza — mais fiel em medida e muito pior de
+    olhar do que no aplicativo que o gerou. A foto colada na malha e o que faz
+    o comodo parecer o comodo; sem ela o escaneamento nao convence ninguem.
+    """
+
+    def _rodar_js(self, corpo, arquivo):
+        """As funcoes da pagina, com um three.js de mentira em volta."""
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        stubs = (
+            "const pedidas = [];" + '\n'
+            + "const THREE = {" + '\n'
+            + "  Group: class { constructor(){ this.filhos = []; }" + '\n'
+            + "           add(x){ this.filhos.push(x); } }," + '\n'
+            + "  Mesh: class { constructor(g, m){ this.geometry = g; this.material = m; } }," + '\n'
+            + "  BufferGeometry: class { constructor(){ this.attrs = {}; }" + '\n'
+            + "    setAttribute(n, a){ this.attrs[n] = a; }" + '\n'
+            + "    computeVertexNormals(){ this.calculou = true; } }," + '\n'
+            + "  BufferAttribute: class { constructor(a, n){ this.array = a; this.itemSize = n; } }," + '\n'
+            + "  Color: class { constructor(c){ this.c = c; } setScalar(v){ this.v = v; } }," + '\n'
+            + "  MeshLambertMaterial: class { constructor(o){ Object.assign(this, o); } }," + '\n'
+            # o dube CHAMA o callback: sem isso o corpo que aplica a foto
+            # nunca roda, e o teste fica cego para tudo o que vem depois
+            + "  TextureLoader: class { load(url, aoCarregar){ pedidas.push(url);" + '\n'
+            + "    if (aoCarregar) aoCarregar({colorSpace: null}); } }," + '\n'
+            + "  DoubleSide: 2, SRGBColorSpace: 'srgb'};" + '\n')
+        for nome in ("lerMtl", "vestirComTextura", "lerObj"):
+            stubs += self._funcao(nome) + '\n'
+        return self._rodar(stubs + corpo, arquivo)
+
+    # ------------------------------------------------------------- o .mtl
+
+    def test_o_mtl_entrega_o_arquivo_de_textura(self):
+        mtl = ("newmtl quarto" + chr(10) + "Kd 0.80 0.75 0.70" + chr(10)
+               + "map_Kd textura_0.jpg" + chr(10))
+        saida = self._rodar_js(
+            "console.log(JSON.stringify(lerMtl(" + json.dumps(mtl) + ")));" + '\n',
+            "mtl.mjs")
+        self.assertEqual(saida["texturas"]["quarto"], "textura_0.jpg")
+        self.assertEqual(saida["cores"]["quarto"], "#ccbfb3")
+
+    def test_o_nome_sai_depois_das_opcoes_do_map_kd(self):
+        """
+        map_Kd aceita opcoes antes do arquivo (-s, -o, -bm). Pegar o segundo
+        campo devolveria "-s" como nome de imagem, e a textura nunca chegaria.
+        """
+        mtl = ("newmtl m" + chr(10) + "map_Kd -s 1 1 1 -o 0 0 0 foto.png" + chr(10))
+        saida = self._rodar_js(
+            "console.log(JSON.stringify(lerMtl(" + json.dumps(mtl) + ").texturas));" + '\n',
+            "mtl-opcoes.mjs")
+        self.assertEqual(saida["m"], "foto.png")
+
+    # -------------------------------------------------------- as coordenadas
+
+    def _obj(self, com_vt=True, vt_parcial=False):
+        linhas = ["mtllib q.mtl", "usemtl quarto",
+                  "v 0 0 0", "v 1 0 0", "v 1 1 0", "v 0 1 0"]
+        if com_vt:
+            linhas += ["vt 0 0", "vt 1 0", "vt 1 1", "vt 0 1"]
+            if vt_parcial:
+                linhas += ["f 1/1 2/2 3/3", "f 1 3 4"]      # a segunda sem vt
+            else:
+                linhas += ["f 1/1 2/2 3/3", "f 1/1 3/3 4/4"]
+        else:
+            linhas += ["f 1 2 3", "f 1 3 4"]
+        return chr(10).join(linhas) + chr(10)
+
+    def test_a_malha_ganha_as_coordenadas_de_textura(self):
+        """Sem uv a foto nao tem onde se apoiar: a malha sai cinza."""
+        corpo = ("const mtl = {cores: {}, texturas: {quarto: 'foto.jpg'}};" + '\n'
+                 + "const r = lerObj(" + json.dumps(self._obj()) + ", mtl, '/base');" + '\n'
+                 + "const g = r.conjunto.filhos[0].geometry;" + '\n'
+                 + "const m = r.conjunto.filhos[0].material;" + '\n'
+                 + "console.log(JSON.stringify({temUv: !!g.attrs.uv," + '\n'
+                 + "  paresUv: g.attrs.uv ? g.attrs.uv.array.length / 2 : 0," + '\n'
+                 + "  vertices: g.attrs.position.array.length / 3," + '\n'
+                 + "  temMapa: !!m.map, brilho: m.color.v," + '\n'
+                 + "  vestidos: r.vestidos, pedidas: pedidas}));" + '\n')
+        saida = self._rodar_js(corpo, "obj-uv.mjs")
+        self.assertTrue(saida["temUv"], "a malha entrou sem coordenadas de textura")
+        self.assertEqual(saida["paresUv"], saida["vertices"],
+                         "falta uv para parte dos vertices")
+        self.assertEqual(saida["vestidos"], 1)
+        self.assertEqual(saida["pedidas"], ["/base/modelo/textura/foto.jpg"])
+        self.assertTrue(saida["temMapa"], "baixou a foto e nao aplicou na malha")
+        self.assertEqual(saida["brilho"], 1,
+                         "a cor multiplica a textura: sem branco a foto sai encardida")
+
+    def test_uv_pela_metade_nao_entra(self):
+        """
+        Meia coordenada desenha a foto EMBARALHADA sobre a malha, que e pior do
+        que desenhar sem ela. Melhor cinza honesto que foto no lugar errado.
+        """
+        corpo = ("const mtl = {cores: {}, texturas: {quarto: 'foto.jpg'}};" + '\n'
+                 + "const r = lerObj(" + json.dumps(self._obj(vt_parcial=True))
+                 + ", mtl, '/base');" + '\n'
+                 + "const g = r.conjunto.filhos[0].geometry;" + '\n'
+                 + "console.log(JSON.stringify({temUv: !!g.attrs.uv," + '\n'
+                 + "  vestidos: r.vestidos, pedidas: pedidas}));" + '\n')
+        saida = self._rodar_js(corpo, "obj-uv-parcial.mjs")
+        self.assertFalse(saida["temUv"])
+        self.assertEqual(saida["vestidos"], 0)
+        self.assertEqual(saida["pedidas"], [],
+                         "baixou a imagem para nao usar: gasta a internet de quem ve")
+
+    def test_sem_mtl_a_malha_ainda_abre(self):
+        """
+        Escaneamento exportado sem material continua tendo de abrir. Cinza e
+        pouco, mas tela vazia e nada.
+        """
+        corpo = ("const r = lerObj(" + json.dumps(self._obj(com_vt=False))
+                 + ", null, '/base');" + '\n'
+                 + "console.log(JSON.stringify({triangulos: r.triangulos," + '\n'
+                 + "  vestidos: r.vestidos, pedidas: pedidas}));" + '\n')
+        saida = self._rodar_js(corpo, "obj-sem-mtl.mjs")
+        self.assertEqual(saida["triangulos"], 2)
+        self.assertEqual(saida["vestidos"], 0)
+
+    # --------------------------------------------------------- o servidor
+
+    def test_o_mtl_diz_quais_imagens_pede(self):
+        mtl = ("newmtl a" + chr(10) + "map_Kd t0.jpg" + chr(10)
+               + "newmtl b" + chr(10) + "map_Ka -s 1 1 1 t1.PNG" + chr(10))
+        self.assertEqual(modelo3d.texturas_do_mtl(mtl), ["t0.jpg", "t1.PNG"])
+
+    def test_nome_de_textura_nao_escapa_da_pasta(self):
+        """
+        O .mtl vem de fora. Nada impede que ele peca "../../data/usuarios.json"
+        — e servir isso seria entregar o arquivo de contas a quem abrir o link.
+        """
+        for ruim in ("../../data/usuarios.json", "C:/Windows/notas.txt",
+                     "sem_extensao", "../segredo.txt", ""):
+            self.assertIsNone(modelo3d.nome_de_textura_seguro(ruim), ruim)
+        self.assertEqual(modelo3d.nome_de_textura_seguro("pasta/sub/tex.PNG"),
+                         "tex.png")
 
 
 def limpar():

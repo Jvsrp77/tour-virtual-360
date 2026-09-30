@@ -128,6 +128,42 @@ def conferir(texto, tamanho_bytes):
     return medidas, avisos
 
 
+def texturas_do_mtl(texto):
+    """
+    Os arquivos de imagem que o .mtl pede.
+
+    Escaneamento de celular so parece o comodo por causa da FOTO colada na
+    malha. Sem ela sobra geometria cinza — mais fiel em medida e muito pior de
+    olhar do que o proprio aplicativo mostrava. Por isso a textura deixou de
+    ser opcional e passou a ser parte do envio.
+    """
+    nomes = []
+    for linha in texto.splitlines():
+        partes = linha.strip().split()
+        # map_Kd aceita opcoes antes do arquivo (-s, -o, -bm): o nome e o ultimo
+        if len(partes) >= 2 and partes[0].lower() in ("map_kd", "map_ka"):
+            nome = partes[-1].strip()
+            if nome and nome not in nomes:
+                nomes.append(nome)
+    return nomes
+
+
+def nome_de_textura_seguro(nome):
+    """
+    So o nome do arquivo, limpo, ou None.
+
+    O .mtl vem de fora e nada impede que ele peca "../../data/usuarios.json".
+    Aqui sobra apenas o nome final, sem caminho, com extensao de imagem
+    conhecida. Recusar e mais barato do que confiar.
+    """
+    nome = os.path.basename((nome or "").replace(chr(92), "/").strip())
+    base, ext = os.path.splitext(nome)
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base)[:60]
+    if not base or ext.lower() not in (".jpg", ".jpeg", ".png", ".webp"):
+        return None
+    return base + ext.lower()
+
+
 def nome_do_mtl(texto):
     """O .mtl que o OBJ pede, se pedir algum."""
     achado = re.search(r"^mtllib\s+(.+)$", texto, re.M)

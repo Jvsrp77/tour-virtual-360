@@ -464,13 +464,14 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     limparTrena();
 
     const base = "/api/imoveis/" + IMOVEL;
-    let cores = null;
+    let mtl = null;
     if (imovel.tem_mtl){
-      try { cores = lerMtl(await (await fetch(base + "/modelo.mtl")).text()); }
-      catch (e) { cores = null; }
+      try { mtl = lerMtl(await (await fetch(base + "/modelo.mtl")).text()); }
+      catch (e) { mtl = null; }
     }
     const texto = await (await fetch(base + "/modelo.obj")).text();
-    const lido = lerObj(texto, cores);
+    const lido = lerObj(texto, mtl, base);
+    imovel.vestidos = lido.vestidos;
 
     // centraliza pelo chao, como a maquete gerada faz
     const caixa = new THREE.Box3().setFromObject(lido.conjunto);
@@ -1076,8 +1077,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // vive aqui: OBJ e texto simples, e o que um escaneamento usa e um punhado de
   // comandos — v, vn, f, usemtl, mtllib. Escrito assim, tambem da para testar.
 
+  // O .mtl traz duas coisas que importam: a cor de cada material e o ARQUIVO de
+  // textura. Ate aqui so a cor era lida, e um escaneamento entrava como massa
+  // cinza — mais fiel em medida e muito pior de olhar do que no aplicativo que
+  // o gerou. A foto colada na malha e o que faz o comodo parecer o comodo.
   function lerMtl(texto){
-    const cores = {};
+    const cores = {}, texturas = {};
     let atual = null;
     for (const bruta of texto.split("\n")){
       const linha = bruta.trim();
@@ -1089,14 +1094,32 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         const oito = v => Math.max(0, Math.min(255, Math.round((v || 0) * 255)));
         cores[atual] = "#" + [oito(r), oito(g), oito(b)]
           .map(v => v.toString(16).padStart(2, "0")).join("");
+      } else if (atual && /^map_K[ad]\s/i.test(linha)){
+        // map_Kd aceita opcoes antes do arquivo (-s, -o, -bm): o nome e o ultimo
+        const partes = linha.split(/\s+/);
+        const arquivo = partes[partes.length - 1];
+        if (arquivo && !texturas[atual]) texturas[atual] = arquivo;
       }
     }
-    return cores;
+    return {cores: cores, texturas: texturas};
   }
 
-  function lerObj(texto, cores){
-    const vs = [], vns = [];
-    const grupos = new Map();          // material -> {pos: [], nor: []}
+  // A textura chega depois da malha, e tudo bem: o material ja esta na cena e
+  // so troca de aparencia quando a imagem termina de baixar. Prender o desenho
+  // esperando alguns megabytes deixaria a tela preta por segundos.
+  function vestirComTextura(material, url){
+    new THREE.TextureLoader().load(url, tex => {
+      tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+      material.map = tex;
+      // a cor multiplica a textura: sem branco, a foto sai encardida
+      material.color.setScalar(1);
+      material.needsUpdate = true;
+    }, undefined, () => { /* textura faltando: fica a cor, que ja e melhor que nada */ });
+  }
+
+  function lerObj(texto, mtl, base){
+    const vs = [], vns = [], vts = [];
+    const grupos = new Map();          // material -> {pos: [], nor: [], uv: []}
     let material = "padrao";
 
     const indice = (i, total) => i > 0 ? i - 1 : total + i;   // OBJ aceita negativo
@@ -1110,14 +1133,18 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         vs.push(+p[1], +p[2], +p[3]);
       } else if (p[0] === "vn"){
         vns.push(+p[1], +p[2], +p[3]);
+      } else if (p[0] === "vt"){
+        // OBJ conta o V de baixo para cima; o three.js tambem, com flipY
+        vts.push(+p[1], +p[2]);
       } else if (p[0] === "usemtl"){
         material = p.slice(1).join(" ") || "padrao";
       } else if (p[0] === "f"){
-        if (!grupos.has(material)) grupos.set(material, {pos: [], nor: []});
+        if (!grupos.has(material)) grupos.set(material, {pos: [], nor: [], uv: []});
         const g = grupos.get(material);
         const cantos = p.slice(1).map(c => {
           const partes = c.split("/");
           return {v: indice(parseInt(partes[0], 10), vs.length / 3),
+                  t: partes[1] ? indice(parseInt(partes[1], 10), vts.length / 2) : -1,
                   n: partes[2] ? indice(parseInt(partes[2], 10), vns.length / 3) : -1};
         });
         // leque de triangulos: escaneamento as vezes traz quadrilatero
@@ -1127,13 +1154,18 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
             if (c.n >= 0 && vns.length){
               g.nor.push(vns[c.n * 3], vns[c.n * 3 + 1], vns[c.n * 3 + 2]);
             }
+            if (c.t >= 0 && vts.length){
+              g.uv.push(vts[c.t * 2], vts[c.t * 2 + 1]);
+            }
           }
         }
       }
     }
 
+    const cores = (mtl && mtl.cores) || null;
+    const texturas = (mtl && mtl.texturas) || null;
     const conjunto = new THREE.Group();
-    let triangulos = 0;
+    let triangulos = 0, vestidos = 0;
     grupos.forEach((g, nome) => {
       if (!g.pos.length) return;
       const geo = new THREE.BufferGeometry();
@@ -1145,12 +1177,26 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       } else {
         geo.computeVertexNormals();     // escaneamento nem sempre traz normais
       }
+      // uv so entra se houver um par por vertice: meia coordenada desenha a
+      // foto embaralhada, que e pior do que desenhar sem ela
+      const completa = g.uv.length === (g.pos.length / 3) * 2;
+      if (completa){
+        geo.setAttribute("uv",
+          new THREE.BufferAttribute(new Float32Array(g.uv), 2));
+      }
       const cor = (cores && cores[nome]) || "#c2c2c2";
-      conjunto.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
-        color: new THREE.Color(cor), side: THREE.DoubleSide})));
+      const material = new THREE.MeshLambertMaterial({
+        color: new THREE.Color(cor), side: THREE.DoubleSide});
+      const arquivo = texturas && texturas[nome];
+      if (arquivo && completa && base){
+        vestirComTextura(material, base + "/modelo/textura/"
+                                   + encodeURIComponent(arquivo));
+        vestidos++;
+      }
+      conjunto.add(new THREE.Mesh(geo, material));
       triangulos += g.pos.length / 9;
     });
-    return {conjunto: conjunto, triangulos: triangulos};
+    return {conjunto: conjunto, triangulos: triangulos, vestidos: vestidos};
   }
 
   // ---------------------------------------------------------------- manche

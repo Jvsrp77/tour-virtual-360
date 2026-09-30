@@ -82,6 +82,28 @@ def arq_modelo(imovel_id, ext=".obj"):
     return os.path.join(pasta_imovel(imovel_id), "modelo" + ext)
 
 
+def arq_textura(imovel_id, nome):
+    """
+    A imagem que o escaneamento cola na malha.
+
+    Guardada com o nome que o .mtl pede, porque e assim que a pagina vai
+    procura-la — mas so depois de passar pela limpeza do modelo3d.
+    """
+    limpo = modelo3d.nome_de_textura_seguro(nome)
+    if not limpo:
+        return None
+    return os.path.join(pasta_imovel(imovel_id), "modelotex_" + limpo)
+
+
+def texturas_do_modelo(imovel_id):
+    """Os nomes de textura que ja estao no disco para este imovel."""
+    pasta = pasta_imovel(imovel_id)
+    if not os.path.isdir(pasta):
+        return []
+    return sorted(n[len("modelotex_"):] for n in os.listdir(pasta)
+                  if n.startswith("modelotex_"))
+
+
 def tem_modelo(imovel_id):
     return os.path.exists(arq_modelo(imovel_id))
 
@@ -274,6 +296,7 @@ ROTAS_PUBLICAS = {
     "api.api_obter_tour", "api.api_registrar_lead", "api.api_registrar_visita",
     "api.api_embed", "maquete", "api.api_maquete",
     "api.api_baixar_modelo", "api.api_baixar_modelo_mtl",
+    "api.api_textura_do_modelo",
 }
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
@@ -1197,6 +1220,7 @@ def api_maquete():
                 "medidas": info.get("medidas", {}),
                 "avisos": info.get("avisos", []),
                 "tem_mtl": os.path.exists(arq_modelo(g.imovel, ".mtl")),
+                "texturas": texturas_do_modelo(g.imovel),
                 "frente": _orientacao(tour_agora),
                 "zonas": [], "caixas": [], "pontos": [], "janelas": [],
                 "larg": (info.get("medidas") or {}).get("largura", 10),
@@ -1335,11 +1359,38 @@ def api_enviar_modelo():
     with open(arq_modelo(g.imovel), "wb") as f:
         f.write(bruto)
     mtl = request.files.get("mtl")
+    pedidas = []
     if mtl and mtl.filename.lower().endswith(".mtl"):
-        mtl.save(arq_modelo(g.imovel, ".mtl"))
+        bruto_mtl = mtl.read()
+        with open(arq_modelo(g.imovel, ".mtl"), "wb") as f:
+            f.write(bruto_mtl)
+        pedidas = modelo3d.texturas_do_mtl(
+            bruto_mtl.decode("utf-8", errors="replace"))
+
+    # As imagens que o .mtl pede. Sem elas o escaneamento entra como massa
+    # cinza: mais fiel em medida e muito pior de olhar do que no aplicativo.
+    guardadas = []
+    for imagem in request.files.getlist("texturas"):
+        destino = arq_textura(g.imovel, imagem.filename)
+        if not destino:
+            avisos.append("Ignorei %s: não é imagem de textura conhecida."
+                          % imagem.filename)
+            continue
+        imagem.save(destino)
+        guardadas.append(os.path.basename(destino)[len("modelotex_"):])
+
+    faltando = [n for n in (modelo3d.nome_de_textura_seguro(p) for p in pedidas)
+                if n and n not in guardadas]
+    if faltando:
+        avisos.append(
+            "O modelo pede %d imagem(ns) de textura que não vieram (%s). Ele "
+            "abre assim mesmo, em cinza. No aplicativo, exporte o OBJ com as "
+            "texturas e envie os arquivos juntos."
+            % (len(faltando), ", ".join(faltando[:3])))
 
     tour = carregar_tour()
     tour["modelo"] = {"medidas": medidas, "avisos": avisos,
+                      "texturas": guardadas,
                       "enviado_em": datetime.now().isoformat(timespec="seconds")}
     salvar_tour(tour)
     return jsonify({"ok": True, "medidas": medidas, "avisos": avisos})
@@ -1350,6 +1401,11 @@ def api_apagar_modelo():
     for ext in (".obj", ".mtl"):
         caminho = arq_modelo(g.imovel, ext)
         if os.path.exists(caminho):
+            os.remove(caminho)
+    # textura sem modelo e lixo que ninguem vai procurar depois
+    for nome in texturas_do_modelo(g.imovel):
+        caminho = arq_textura(g.imovel, nome)
+        if caminho and os.path.exists(caminho):
             os.remove(caminho)
     tour = carregar_tour()
     tour.pop("modelo", None)
@@ -1379,6 +1435,20 @@ def api_baixar_modelo_mtl():
     if not os.path.exists(caminho):
         return jsonify({"ok": False, "erro": "Sem materiais."}), 404
     return send_file(caminho, mimetype="text/plain")
+
+
+@api.route("/modelo/textura/<nome>", methods=["GET"])
+def api_textura_do_modelo(nome):
+    """
+    Serve a imagem que o escaneamento cola na malha.
+
+    Publica pelo mesmo motivo do proprio modelo: a maquete desenha no navegador
+    de quem abre o link, e sem os bytes da textura o comodo aparece em cinza.
+    """
+    caminho = arq_textura(g.imovel, nome)
+    if not caminho or not os.path.exists(caminho):
+        return jsonify({"ok": False, "erro": "Textura não encontrada."}), 404
+    return send_file(caminho)
 
 
 @api.route("/maquete/obj", methods=["GET"])
