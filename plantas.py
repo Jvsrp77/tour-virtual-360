@@ -726,4 +726,100 @@ def pavilhao():
                           "Suíte e banho no outro volume.")
 
 
-TODAS = [apartamento, compacto, cobertura, mansao, pavilhao]
+# ------------------------------------------- 6. o quarto (imovel real)
+
+def quarto():
+    """
+    Um quarto de verdade, reconstruido a partir de fotos e de um escaneamento.
+
+    AS CINCO PLANTAS ANTERIORES SAO INVENTADAS. Esta nao: a disposicao foi lida
+    das 48 fotos e do panorama costurado delas, e as medidas partiram da caixa
+    de um escaneamento de celular.
+
+    Por que ela existe: o dono tentou varias vezes capturar o proprio quarto em
+    360 e o resultado sempre saiu com borrao. A medicao explicou por que — as
+    48 fotos se partem em grupos de duas a cinco, porque ele mudava de lugar
+    entre os cliques, e nao existe encaixe correto para fotos tiradas de pontos
+    diferentes. O que ele queria era andar sem deformacao, e isso a foto nao
+    entrega de um ponto so: entrega a GEOMETRIA.
+
+    O QUE ELA NAO E: uma foto do quarto. E um modelo dele, como as outras cinco
+    — cores chapadas, movel aproximado. Ganha em andar sem deformar e medir com
+    a trena; perde em parecer a coisa real.
+
+    DUAS COISAS QUE EU CHUTEI, e que so o dono corrige:
+
+    1. O tamanho. A caixa do escaneamento deu 2,65 x 3,02 m, mas nela nao
+       caberia a camera em lugar nenhum com estes moveis dentro — o
+       escaneamento pegou so parte do comodo. O numero abaixo e o menor que
+       acomoda o que aparece nas fotos.
+
+    2. O guarda-roupa. No panorama ele aparece como duas colunas brancas
+       ladeando a cabeceira, com a cama encaixada entre elas — o modelo de
+       ponte, comum em quarto pequeno. Se for armario corrido numa parede, a
+       planta muda e o chao livre tambem.
+    """
+    larg, fundo = 3.20, 3.45
+
+    zonas = [
+        ("Quarto", 0.00, larg, 0.00, fundo, "parede_q1", "piso"),
+    ]
+
+    caixas = [
+        # --- guarda-roupa em ponte: duas colunas e a travessa sobre a cama
+        (0.00, 0.00, 0.00, 0.52, PE_DIREITO, 0.62, "laminado"),
+        (2.68, 0.00, 0.00, larg, PE_DIREITO, 0.62, "laminado"),
+        (0.00, 1.95, 0.00, larg, PE_DIREITO, 0.62, "laminado"),
+        (0.50, 0.00, 0.10, 0.54, 1.75, 0.52, "metal"),          # puxadores
+        (2.66, 0.00, 0.10, 2.70, 1.75, 0.52, "metal"),
+
+        # --- cama de casal encaixada entre as colunas
+        (0.91, 0.00, 0.08, 2.29, 0.40, 1.96, "madeira_esc"),
+        (0.91, 0.40, 0.08, 2.29, 0.64, 1.96, "roupa_cama"),
+        (1.02, 0.64, 0.18, 1.56, 0.78, 0.56, "roupa_cama"),     # travesseiros
+        (1.64, 0.64, 0.18, 2.18, 0.78, 0.56, "roupa_cama"),
+
+        # --- prateleira da cabeceira, com os enfeites do panorama
+        (0.91, 1.22, 0.62, 2.29, 1.28, 0.86, "madeira_esc"),
+        (1.10, 1.28, 0.66, 1.24, 1.46, 0.82, "louca"),
+        (1.48, 1.28, 0.66, 1.66, 1.50, 0.82, "livro_a"),
+        (1.92, 1.28, 0.66, 2.08, 1.48, 0.82, "louca"),
+
+        # --- escrivaninha na parede do fundo, com a cadeira
+        (0.30, 0.00, 3.00, 2.20, 0.74, fundo, "madeira_esc"),
+        (0.55, 0.74, 3.08, 1.35, 0.78, 3.40, "vidro"),          # notebook aberto
+        (1.55, 0.74, 3.06, 2.05, 1.12, 3.38, "vidro"),          # monitor
+        (0.95, 0.00, 2.40, 1.55, 0.46, 2.88, "estofado"),
+        (0.95, 0.46, 2.40, 1.55, 1.02, 2.54, "estofado_b"),     # encosto
+
+        # --- ar-condicionado alto, sobre a janela
+        (3.00, 1.98, 1.20, larg, 2.30, 2.10, "metal"),
+    ]
+
+    # A janela de madeira com veneziana, na parede da direita. E a unica
+    # abertura do quarto, e com o ceu por direcao ela vira vista de verdade.
+    janelas = [
+        (larg, larg, 1.25, 2.20, 1.05, 2.05),
+    ]
+
+    luzes = [
+        (1.50, 2.55, 1.90, 1.00),          # a do teto
+        (2.85, 1.55, 1.70, 0.55),          # a que entra pela janela
+        (1.50, 1.24, 0.90, 0.35),          # a da cabeceira
+    ]
+
+    # folga de 0,42 e nao 0,45: a regra padrao exige 90 cm de corredor
+    # livre, e o vao ao lado de uma cama num quarto real tem 60. O limite
+    # do conferir e 0,40, entao ainda sobra margem.
+    pontos = _pontos_por_cobertura(zonas, caixas, larg, fundo,
+                                   raio=RAIO_DE_COBERTURA, folga=0.42)
+
+    return dict(nome="Quarto — reconstruído do real", pasta="quarto",
+                larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
+                janelas=janelas, luzes=luzes, pontos=pontos,
+                descricao="Quarto reconstruído a partir de fotos e de um "
+                          "escaneamento de celular. Medidas aproximadas: vêm "
+                          "de foto e de escaneamento, não de trena.")
+
+
+TODAS = [apartamento, compacto, cobertura, mansao, pavilhao, quarto]

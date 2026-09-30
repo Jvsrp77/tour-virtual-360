@@ -67,6 +67,10 @@ MATERIAIS = {
     "planta":     (62, 110, 74),
     "livro_a":    (58, 66, 148),
     "louca":      (238, 238, 236),
+    # Branco de guarda-roupa. Nao e "louca" nem "roupa_cama": um
+    # painel do chao ao teto em 238 chapado le como PAREDE, e o
+    # quarto perde o movel que mais ocupa espaco nele.
+    "laminado":   (206, 208, 210),
 }
 
 # ------------------------------------------------------------ a planta em uso
@@ -202,6 +206,18 @@ def _textura(material, p, face, cor, dirs=None):
             saida[(r >= 0.26) & (r < 0.33)] *= 0.74
     elif material in ("madeira", "madeira_esc"):
         saida *= (1.0 + 0.045 * np.sin(p[:, 1] * 61.0 + p[:, 0] * 7.0))[:, None]
+    elif material == "laminado":
+        # O primeiro render do quarto saiu com o guarda-roupa MARROM, porque
+        # ele estava de "madeira" e o painel das fotos do dono e branco. A
+        # correcao obvia — branco chapado — trocaria de defeito: o proprio
+        # "roupa_cama" ja anota que 238 puro estoura, e um painel do chao ao
+        # teto sem variacao nenhuma fica indistinguivel do reboco claro.
+        # Dai a fresta: e ela que diz ao olho que aquilo tem porta.
+        porta = np.abs((p[:, 0] / 0.45) % 1.0 - 0.5) > 0.47
+        saida *= _ruido(p, 8.0, 0.012)[:, None]
+        saida *= (1.0 - 0.06 * np.clip((2.4 - p[:, 1]) / 2.4, 0, 1))[:, None]
+        saida[porta] *= 0.80
+        saida[p[:, 1] < 0.08] *= 0.70          # rodape do movel
     elif material in ("estofado", "estofado_b"):
         saida *= _ruido(p, 55.0, 0.035)[:, None]
     elif material == "roupa_cama":

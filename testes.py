@@ -1870,6 +1870,54 @@ class TestPlantasSinteticas(unittest.TestCase):
         horizonte = self._olhar(0, 0.02, 1)
         self.assertGreater(float(horizonte.mean()), float(zenite.mean()) + 20)
 
+    def _painel(self, material, x0=0.0, x1=0.52, y0=0.0, y1=2.50):
+        """Amostra a face da frente de um painel alto, como o guarda-roupa."""
+        xs = np.linspace(x0, x1, 60)
+        ys = np.linspace(y0, y1, 60)
+        gx, gy = np.meshgrid(xs, ys)
+        p = np.stack([gx.ravel(), gy.ravel(),
+                      np.full(gx.size, 0.62, np.float32)], axis=1).astype(np.float32)
+        return cena_apartamento._textura(
+            material, p, 0, cena_apartamento.MATERIAIS[material])
+
+    def test_o_guarda_roupa_branco_nao_le_como_parede(self):
+        """
+        Medido no primeiro render do quarto: as colunas do guarda-roupa, feitas
+        de "madeira", sairam marrons — e o painel das fotos do dono e branco.
+
+        O resto aqui e criterio, nao medicao: trocar por branco chapado
+        resolveria a cor e um painel do chao ao teto sem variacao nenhuma fica
+        perto demais do reboco claro. O material precisa das duas coisas ao
+        mesmo tempo — ser claro E ter fresta — e este teste guarda a segunda,
+        que e a que se perde sozinha quando alguem simplifica a textura.
+        """
+        painel = self._painel("laminado")
+        self.assertGreater(float(painel.std()), 6.0,
+                           "o laminado saiu chapado: vira parede no render")
+
+    def test_a_fresta_do_laminado_e_escura_e_estreita(self):
+        """
+        Fresta que nao escurece nao e fresta. E se ela tomasse metade do
+        painel, o guarda-roupa viraria um gradeado — o teste prende os dois
+        lados.
+        """
+        painel = self._painel("laminado")
+        claro = float(np.percentile(painel, 75))
+        escuro = float(np.percentile(painel, 2))
+        self.assertLess(escuro, claro * 0.92, "a fresta nao escurece nada")
+        fundo = (painel.mean(axis=1) < claro * 0.90).mean()
+        self.assertLess(fundo, 0.35, "a fresta engoliu o painel")
+
+    def test_o_laminado_e_mais_claro_que_a_parede_do_quarto(self):
+        """
+        Contraste com a parede ATRAS dele: e o que o olho usa para separar o
+        movel do reboco. Sem isso, clarear o painel nao adiantou nada.
+        """
+        movel = self._painel("laminado").mean()
+        parede = self._painel("parede_q1", x0=0.2, x1=2.8).mean()
+        self.assertGreater(float(movel), float(parede) + 15,
+                           "o guarda-roupa some na parede")
+
     def test_a_janela_recebe_mesmo_a_direcao_do_raio(self):
         """
         Conferencia de texto, assumida como tal: garante que o desenho da
