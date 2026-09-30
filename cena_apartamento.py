@@ -108,7 +108,40 @@ def _ruido(p, escala, amp):
                         + 0.6 * np.sin(p[:, 1] * escala * 2.3))
 
 
-def _textura(material, p, face, cor):
+def _ceu(d):
+    """
+    O que se ve pela janela.
+
+    Ate aqui a janela era um retangulo bege CHAPADO na parede: iluminava o
+    comodo e nao mostrava nada. Olhando de qualquer angulo aparecia a mesma
+    mancha clara, e "vista" nao existia — o que e justamente o oposto do que
+    uma janela e.
+
+    Nao ha mundo la fora para tracar: modelar rua, vizinhanca e horizonte
+    custaria mais que a casa inteira, e seria cenario inventado com cara de
+    documento. O que ha e ceu e terreno distantes, escolhidos pela DIRECAO do
+    raio — para cima, ceu; para baixo, chao.
+
+    Isso basta para a janela virar abertura, e o motivo e o olho, nao a
+    imagem: o que diz ao cerebro que aquilo e fora e a vista MUDAR quando a
+    cabeca vira. Um painel chapado nao muda; um ceu por direcao, sim.
+    """
+    dy = np.clip(d[:, 1], -1.0, 1.0)
+    # BGR, porque o panorama inteiro sai em BGR para o OpenCV gravar
+    zenite = np.array([196, 148, 104], np.float32)     # azul de dia limpo
+    horizonte = np.array([232, 222, 208], np.float32)  # palido, com neblina
+    terreno = np.array([104, 118, 100], np.float32)    # verde acinzentado
+
+    acima = np.clip(dy, 0.0, 1.0)[:, None]
+    abaixo = np.clip(-dy, 0.0, 1.0)[:, None]
+    # a subida ao zenite e mais rapida que a descida ao chao: e assim que um
+    # ceu real se comporta visto de dentro de casa, com o horizonte lavado
+    ceu = horizonte * (1.0 - acima ** 0.55) + zenite * (acima ** 0.55)
+    chao = horizonte * (1.0 - abaixo ** 0.8) + terreno * (abaixo ** 0.8)
+    return np.where(dy[:, None] > 0.0, ceu, chao)
+
+
+def _textura(material, p, face, cor, dirs=None):
     saida = np.repeat(np.array(cor, np.float32)[None, :], p.shape[0], axis=0)
 
     if material == "piso":
@@ -147,7 +180,10 @@ def _textura(material, p, face, cor):
                       & (p[:, 1] >= y0) & (p[:, 1] <= y1))
             if not dentro.any():
                 continue
-            saida[dentro] = np.array([236, 233, 224], np.float32)
+            if dirs is None:
+                saida[dentro] = np.array([236, 233, 224], np.float32)
+            else:
+                saida[dentro] = _ceu(dirs[dentro])
             # caixilho: duas folhas, com montante no meio
             q = p[dentro]
             eixo = q[:, 0] if x1 - x0 > z1 - z0 else q[:, 2]
@@ -341,9 +377,11 @@ def render(x, z, largura=LARGURA):
                     s2 = grupo == g
                     if s2.any():
                         idx = base[s2]
-                        cor[idx] = _textura(mat, p[idx], i, MATERIAIS[mat])
+                        cor[idx] = _textura(mat, p[idx], i, MATERIAIS[mat],
+                                            d[idx])
             else:
-                cor[sel] = _textura(nome, p[sel], i, MATERIAIS[nome])
+                cor[sel] = _textura(nome, p[sel], i, MATERIAIS[nome],
+                                    d[sel])
 
         for k, c in enumerate(CAIXAS):
             sel = dono == k
@@ -359,9 +397,10 @@ def render(x, z, largura=LARGURA):
                     s2 = grupo == g
                     if s2.any():
                         cor[base[s2]] = _textura(m2, p[base[s2]], lado,
-                                                 MATERIAIS[m2])
+                                                 MATERIAIS[m2], d[base[s2]])
             else:
-                cor[sel] = _textura(mat, p[sel], lado, MATERIAIS[mat])
+                cor[sel] = _textura(mat, p[sel], lado, MATERIAIS[mat],
+                                    d[sel])
 
         cor *= _iluminar(p, n)[:, None]
         img[y0:y1] = np.clip(cor, 0, 255).astype(np.uint8).reshape(y1 - y0, largura, 3)

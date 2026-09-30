@@ -904,6 +904,23 @@ MUT = [
      "    if subiu >= gravado:",
      "    if True:",
      "TestCodigoNoAr.test_processo_mais_velho_que_o_arquivo_e_denunciado"),
+    # o que faz janela ser janela e a vista MUDAR quando a cabeca vira
+    ('janela volta a ser painel chapado', 'cena_apartamento.py',
+     '                saida[dentro] = _ceu(dirs[dentro])',
+     '                saida[dentro] = np.array([236, 233, 224], np.float32)',
+     'TestPlantasSinteticas.test_a_janela_recebe_mesmo_a_direcao_do_raio'),
+
+    # painel chapado de novo, por outro caminho
+    ('o ceu nao muda com a direcao do olhar', 'cena_apartamento.py',
+     '    return np.where(dy[:, None] > 0.0, ceu, chao)',
+     '    return np.repeat(horizonte[None, :], d.shape[0], axis=0)',
+     'TestPlantasSinteticas.test_a_janela_muda_conforme_o_angulo'),
+
+    # ceu real clareia perto do horizonte; sem isso vira papel de parede
+    ('ceu sem neblina no horizonte', 'cena_apartamento.py',
+     '    ceu = horizonte * (1.0 - acima ** 0.55) + zenite * (acima ** 0.55)',
+     '    ceu = np.repeat(zenite[None, :], acima.shape[0], axis=0)',
+     'TestPlantasSinteticas.test_o_horizonte_e_mais_lavado_que_o_zenite'),
 ]
 
 

@@ -1833,6 +1833,49 @@ class TestPlantasSinteticas(unittest.TestCase):
             problemas = cena_apartamento.conferir(planta)
             self.assertEqual(problemas, [], "%s: %s" % (planta["nome"], problemas))
 
+    def _olhar(self, dx, dy, dz):
+        d = np.array([[dx, dy, dz]], np.float32)
+        return cena_apartamento._ceu(d / np.linalg.norm(d))[0]
+
+    def test_a_janela_muda_conforme_o_angulo(self):
+        """
+        O QUE FAZ UMA JANELA SER JANELA. Ate aqui ela era um retangulo bege
+        chapado: de qualquer angulo, a mesma mancha clara. O que diz ao cerebro
+        que aquilo e o lado de fora nao e a cor — e a vista MUDAR quando a
+        cabeca vira. Painel chapado nao muda.
+        """
+        cima = self._olhar(0, 1, 0)
+        baixo = self._olhar(0, -1, 0)
+        self.assertGreater(float(np.abs(cima - baixo).max()), 40,
+                           "olhar para cima e para baixo da a mesma coisa")
+
+    def test_o_ceu_e_azul_e_o_chao_nao(self):
+        """O panorama sai em BGR: no ceu o azul manda, no terreno nao."""
+        cima = self._olhar(0, 1, 0)
+        baixo = self._olhar(0, -1, 0)
+        self.assertGreater(cima[0], cima[2] + 40, "o ceu nao esta azul")
+        self.assertLessEqual(baixo[0], baixo[1], "o terreno saiu azulado")
+
+    def test_o_horizonte_e_mais_lavado_que_o_zenite(self):
+        """
+        Ceu real clareia perto do horizonte, por causa da distancia de ar. Sem
+        isso o vidro parece papel de parede azul.
+        """
+        zenite = self._olhar(0, 1, 0)
+        horizonte = self._olhar(0, 0.02, 1)
+        self.assertGreater(float(horizonte.mean()), float(zenite.mean()) + 20)
+
+    def test_a_janela_recebe_mesmo_a_direcao_do_raio(self):
+        """
+        Conferencia de texto, assumida como tal: garante que o desenho da
+        janela consulta a direcao, e nao voltou ao retangulo chapado.
+        """
+        fonte = io.open("cena_apartamento.py", encoding="utf-8").read()
+        corpo = fonte[fonte.index("def _textura("):]
+        corpo = corpo[:corpo.index(chr(10) + "def ")]
+        self.assertIn("_ceu(dirs[dentro])", corpo,
+                      "a janela voltou a ser um painel chapado")
+
     def test_render_longo_retoma_de_onde_parou(self):
         """
         Custou uma hora perdida para virar codigo: a mansao leva mais de

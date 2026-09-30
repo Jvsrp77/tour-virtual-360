@@ -631,4 +631,99 @@ def mansao():
                           "Trinta e três pontos de captura.")
 
 
-TODAS = [apartamento, compacto, cobertura, mansao]
+# ----------------------------------------------------- 5. casa pavilhao
+
+def pavilhao():
+    """
+    Uma casa aberta: um unico volume, tres paredes de vidro, quase sem movel.
+
+    Por que ela existe, e por que e diferente da mansao: a mansao tem dez
+    ambientes e vinte e dois metros de corredor, e serve para mostrar o custo
+    de capturar espaco compartimentado. Esta e o oposto — 150 m2 de estar,
+    jantar e cozinha SEM uma parede entre eles, com vao livre de ponta a ponta.
+
+    E o melhor caso possivel para a caminhada, e nao por acaso: o borrao do
+    passeio nasce do que a foto nao viu atras dos moveis e das paredes. Onde
+    nao ha parede nem movel alto, quase nao ha o que esconder — e quase nao ha
+    o que o programa precise inventar.
+
+    Os vidros sao a razao de ser dela. Ate agora janela era um retangulo bege
+    chapado; com o ceu por direcao, uma parede de doze metros de vidro passa a
+    valer alguma coisa.
+    """
+    larg, fundo = 20.0, 11.0
+    wx = 13.60                    # unica parede que divide a casa
+    wz = 6.20                     # e a que separa suite do banho
+
+    zonas = [
+        ("Living integrado", 0.00, wx,   0.00, fundo, "parede",    "piso"),
+        ("Suíte",            wx,   larg, 0.00, wz,    "parede_q1", "piso"),
+        ("Banho",            wx,   larg, wz,   fundo, "banheiro",  "porcelanato"),
+    ]
+
+    caixas = []
+    # duas paredes internas na casa inteira, e so
+    caixas += _px(wx, [(0.00, 3.10), (4.20, fundo)])
+    caixas += _pz(wz, [(wx, 16.40), (17.50, larg)])
+
+    caixas += [
+        # --- estar: um sofa baixo e uma mesa de centro, longe do meio
+        (1.60, 0.00, 1.10, 4.60, 0.38, 2.00, "estofado"),
+        (1.60, 0.38, 1.10, 4.60, 0.76, 1.38, "estofado_b"),
+        (2.20, 0.00, 2.60, 3.90, 0.012, 3.60, "tapete"),
+        (2.50, 0.012, 2.90, 3.60, 0.36, 3.30, "madeira"),
+
+        # --- jantar: mesa comprida, cadeiras baixas
+        (6.60, 0.00, 4.30, 10.20, 0.73, 5.60, "madeira"),
+        (6.60, 0.73, 4.30, 10.20, 0.78, 5.60, "vidro"),
+
+        # --- cozinha: uma ilha e uma bancada rente ao fundo
+        (6.80, 0.00, 8.40, 10.60, 0.90, 9.40, "cozinha"),
+        (6.80, 0.90, 8.40, 10.60, 0.96, 9.40, "pedra"),
+        (0.30, 0.00, 9.90, 5.40, 0.88, 10.60, "cozinha"),
+        (0.30, 0.88, 9.90, 5.40, 0.94, 10.60, "pedra"),
+        (11.80, 0.00, 9.60, 13.20, 2.20, 10.60, "madeira_esc"),
+
+        # --- suite: cama e um armario rente a parede
+        (15.40, 0.00, 1.60, 17.60, 0.50, 3.80, "madeira_esc"),
+        (15.40, 0.50, 1.60, 17.60, 0.72, 3.80, "roupa_cama"),
+        (15.55, 0.72, 3.20, 16.30, 0.84, 3.65, "roupa_cama"),
+        (16.70, 0.72, 3.20, 17.45, 0.84, 3.65, "roupa_cama"),
+        (19.10, 0.00, 0.70, 19.75, 2.30, 4.60, "madeira_esc"),
+
+        # --- banho: banheira junto ao vidro e uma bancada
+        (17.80, 0.00, 9.30, 19.70, 0.60, 10.60, "louca"),
+        (13.90, 0.00, 6.60, 16.60, 0.86, 7.30, "madeira_esc"),
+        (13.90, 0.86, 6.60, 16.60, 0.92, 7.30, "pedra"),
+        (14.20, 0.92, 6.75, 15.10, 1.06, 7.15, "louca"),
+    ]
+
+    # Tres paredes de vidro no living, do chao quase ao teto. E o ponto da casa.
+    janelas = [
+        (0.50, 13.10, 0.00, 0.00, 0.35, 2.45),
+        (0.50, 13.10, fundo, fundo, 0.35, 2.45),
+        (0.00, 0.00, 0.60, 10.40, 0.35, 2.45),
+        (larg, larg, 0.80, 5.40, 0.60, 2.30),
+        (larg, larg, 6.90, 10.20, 0.90, 2.30),
+    ]
+
+    luzes = [
+        (3.20, 2.55, 2.40, 0.95), (3.20, 2.55, 8.20, 0.90),
+        (8.40, 2.55, 2.40, 0.95), (8.40, 2.55, 5.00, 1.00),
+        (8.70, 2.55, 8.90, 0.95), (11.80, 2.55, 5.50, 0.88),
+        (16.80, 2.55, 3.00, 0.92), (16.80, 2.55, 8.60, 0.90),
+        (2.80, 1.10, 3.10, 0.45),
+    ]
+
+    pontos = _pontos_por_cobertura(zonas, caixas, larg, fundo,
+                                   raio=RAIO_DE_COBERTURA)
+
+    return dict(nome="Casa pavilhão, 220 m²", pasta="pavilhao",
+                larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
+                janelas=janelas, luzes=luzes, pontos=pontos,
+                descricao="Estar, jantar e cozinha num vão único de 150 m², "
+                          "sem parede entre eles, com três fachadas de vidro. "
+                          "Suíte e banho no outro volume.")
+
+
+TODAS = [apartamento, compacto, cobertura, mansao, pavilhao]
