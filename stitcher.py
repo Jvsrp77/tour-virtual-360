@@ -19,6 +19,7 @@ os.environ.setdefault("OPENCV_OPENCL_DEVICE", "disabled")
 
 import uuid
 import cv2
+import struct
 import numpy as np
 
 import nivelamento
@@ -58,7 +59,143 @@ def _larguras_a_tentar(quantidade):
     return (2400, 1600, 1400)
 
 
-def _geometria(cameras, largura_foto):
+# ------------------------------------------------- a focal que a foto ja sabe
+#
+# O alinhamento deduz a distancia focal por ajuste de feixe, olhando so os
+# pixels. Funciona, mas o proprio codigo abaixo ja documentava o caso em que
+# o OpenCV devolve uma focal fora da realidade — e dela sai o campo de visao,
+# que decide se a volta fechou.
+#
+# A foto costuma TRAZER esse numero. O celular grava no EXIF a focal
+# equivalente a 35 mm, que e medida do aparelho e nao estimativa. Ler custa
+# milissegundos e troca um palpite por um dado.
+#
+# Leitor proprio, sem biblioteca: e a mesma licao do three.js que vinha do
+# cdnjs. Sao trinta linhas de formato bem definido, e uma dependencia a mais
+# so para isto seria paga pelo servidor de quem instala.
+
+TAG_EXIF_IFD = 0x8769          # ponteiro para o bloco onde vive a focal
+TAG_FOCAL_35 = 0xA405          # FocalLengthIn35mmFilm, em milimetros
+LADO_LONGO_MM = 36.0           # o quadro de 35 mm tem 36 x 24
+LADO_CURTO_MM = 24.0
+
+
+def _entradas_ifd(dados, base, pos, ordem):
+    """Percorre um IFD e devolve {tag: valor} para os tipos que interessam."""
+    achados = {}
+    if pos + 2 > len(dados):
+        return achados
+    (quantas,) = struct.unpack(ordem + "H", dados[pos:pos + 2])
+    pos += 2
+    for _ in range(min(quantas, 512)):        # teto: EXIF corrompido nao trava
+        if pos + 12 > len(dados):
+            break
+        tag, tipo, conta = struct.unpack(ordem + "HHI", dados[pos:pos + 8])
+        bruto = dados[pos + 8:pos + 12]
+        if tipo == 3 and conta == 1:                      # SHORT
+            achados[tag] = struct.unpack(ordem + "H", bruto[:2])[0]
+        elif tipo == 4 and conta == 1:                    # LONG
+            achados[tag] = struct.unpack(ordem + "I", bruto)[0]
+        pos += 12
+    return achados
+
+
+def focal_em_35mm(bruto):
+    """
+    A focal equivalente a 35 mm gravada pela camera, ou None.
+
+    None em todo caso duvidoso: foto sem EXIF, EXIF truncado, arquivo que nem e
+    JPEG. Chutar aqui seria pior do que nao ler, porque o numero entraria com
+    cara de medida.
+    """
+    try:
+        if not bruto[:2] == b"\xff\xd8":                 # nao e JPEG
+            return None
+        i = 2
+        while i + 4 <= len(bruto):
+            if bruto[i] != 0xFF:
+                return None
+            marcador = bruto[i + 1]
+            if marcador in (0xD8, 0xD9) or 0xD0 <= marcador <= 0xD7:
+                i += 2
+                continue
+            (tamanho,) = struct.unpack(">H", bruto[i + 2:i + 4])
+            corpo = bruto[i + 4:i + 2 + tamanho]
+            if marcador == 0xE1 and corpo[:6] == b"Exif\x00\x00":
+                return _focal_do_tiff(corpo[6:])
+            if marcador == 0xDA:                          # comecou a imagem
+                return None
+            i += 2 + tamanho
+    except (struct.error, IndexError, ValueError):
+        return None
+    return None
+
+
+def _focal_do_tiff(tiff):
+    if tiff[:2] == b"II":
+        ordem = "<"
+    elif tiff[:2] == b"MM":
+        ordem = ">"
+    else:
+        return None
+    (magico,) = struct.unpack(ordem + "H", tiff[2:4])
+    if magico != 42:
+        return None
+    (off0,) = struct.unpack(ordem + "I", tiff[4:8])
+    ifd0 = _entradas_ifd(tiff, 0, off0, ordem)
+    if TAG_FOCAL_35 in ifd0:
+        valor = ifd0[TAG_FOCAL_35]
+        return float(valor) if 4 <= valor <= 300 else None
+    ponteiro = ifd0.get(TAG_EXIF_IFD)
+    if not ponteiro:
+        return None
+    exif = _entradas_ifd(tiff, 0, ponteiro, ordem)
+    valor = exif.get(TAG_FOCAL_35)
+    if not valor:
+        return None
+    # fora desta faixa nao e lente de celular nem de camera comum: e lixo
+    return float(valor) if 4 <= valor <= 300 else None
+
+
+def focal_em_pixels(focal35, largura, altura):
+    """
+    Converte a focal de 35 mm para pixels da foto que vamos costurar.
+
+    A orientacao importa: no quadro de 35 mm o lado longo tem 36 mm e o curto
+    24. Foto em pe tem 24 mm no horizontal, e usar 36 ali daria um campo de
+    visao 50% maior do que o real — pior do que nao ler o EXIF.
+    """
+    if not focal35 or largura <= 0 or altura <= 0:
+        return None
+    lado = LADO_LONGO_MM if largura >= altura else LADO_CURTO_MM
+    return float(largura) * float(focal35) / lado
+
+
+def focal_das_fotos(caminhos, largura, altura):
+    """
+    A focal em pixels que o lote declara, ou None se as fotos nao disserem.
+
+    Mediana e nao media: uma foto com EXIF estranho no meio de vinte nao pode
+    arrastar o resultado. E exige que a MAIORIA concorde — lote com duas
+    cameras diferentes nao tem uma focal so, e fingir que tem seria inventar.
+    """
+    valores = []
+    for caminho in caminhos:
+        try:
+            with open(caminho, "rb") as f:
+                valores.append(focal_em_35mm(f.read(262144)))
+        except OSError:
+            valores.append(None)
+    lidos = [v for v in valores if v]
+    if len(lidos) < max(2, len(valores) // 2):
+        return None
+    mediana = float(np.median(lidos))
+    if max(lidos) - min(lidos) > mediana * 0.25:
+        return None                    # fotos de lentes diferentes: sem palpite
+    return focal_em_pixels(mediana, largura, altura)
+
+
+def _geometria(cameras, largura_foto, focal_exif=None):
     """
     Le a orientacao que o OpenCV calculou para cada foto e devolve a cobertura real
     da captura. E o unico jeito confiavel de saber se a volta fechou: a proporcao da
@@ -75,6 +212,12 @@ def _geometria(cameras, largura_foto):
     yaws = np.array(yaws)
     pitches = np.array(pitches)
     focal = float(np.median(focais)) or 1.0
+    # A focal do EXIF e medida do aparelho; a do ajuste de feixe e estimativa
+    # a partir dos pixels. Quando a foto diz, a foto manda.
+    origem_focal = "ajuste"
+    if focal_exif:
+        origem_focal = "exif"
+        focal = float(focal_exif)
     fov = float(np.degrees(2 * np.arctan(largura_foto / (2 * focal))))
 
     ordenados = np.sort(np.mod(yaws, 360.0))
@@ -114,6 +257,7 @@ def _geometria(cameras, largura_foto):
         "fechada_por_giro": fechada_por_giro,
         "maior_buraco": maior_buraco,
         "fov": fov,
+        "focal_origem": origem_focal,
         "confiavel": confiavel,
         "fileiras": 1 if span_pitch < 15 else (2 if span_pitch < 50 else 3),
     }
@@ -472,7 +616,7 @@ def _resultado_aproveitavel(panorama, imagens, usadas=None):
     return True, "ok"
 
 
-def _tentar_costurar(imagens):
+def _tentar_costurar(imagens, focal_exif=None):
     """
     Tenta a costura em varias configuracoes, da mais exigente para a mais tolerante,
     e so aceita um resultado que realmente seja um panorama.
@@ -518,7 +662,8 @@ def _tentar_costurar(imagens):
             if codigo != cv2.STITCHER_OK:
                 ultimo_codigo = codigo
                 continue
-            geo = _geometria(st.cameras(), imagens[0].shape[1])
+            geo = _geometria(st.cameras(), imagens[0].shape[1],
+                             focal_exif)
             usadas = st.component()
             codigo, panorama = st.composePanorama(imagens)
         except cv2.error:
@@ -836,12 +981,23 @@ def costurar(caminhos, pasta_saida, relatar=None):
         conferencia = []          # diagnostico e ajuda, nao pode derrubar a costura
 
     larguras = _larguras_a_tentar(len(caminhos))
+    # A focal precisa estar na escala da imagem que VAI ser costurada, e cada
+    # tentativa usa uma largura diferente — por isso e recalculada no laco.
+    alt0, larg0 = originais[0].shape[0], originais[0].shape[1]
+    focal35 = None
+    try:
+        focal35 = focal_das_fotos(caminhos, larg0, alt0)
+    except Exception:
+        focal35 = None            # leitura de metadado nao pode derrubar costura
+
     panorama = geo = None
     codigo, motivo = cv2.STITCHER_ERR_NEED_MORE_IMGS, None
     for i, largura in enumerate(larguras):
         aviso(25, "alinhando e costurando" + (" (%d px)" % largura if i else ""))
         imagens = [_redimensionar(img, largura) for img in originais]
-        panorama, codigo, motivo, geo = _tentar_costurar(imagens)
+        focal_lote = (focal35 * imagens[0].shape[1] / float(larg0)
+                      if focal35 else None)
+        panorama, codigo, motivo, geo = _tentar_costurar(imagens, focal_lote)
         if panorama is not None:
             break
     del originais

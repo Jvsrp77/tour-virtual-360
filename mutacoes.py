@@ -248,8 +248,8 @@ MUT = [
 
     # sem leitor proprio de OBJ a pagina abre vazia: o three.js embarcado nao traz
     ("pagina perde o leitor de OBJ", "static/maquete.html",
-     "  function lerObj(texto, cores){",
-     "  function lerObjDesativado(texto, cores){",
+     "  function lerObj(texto, mtl, base){",
+     "  function lerObjDesativado(texto, mtl, base){",
      "TestImportarModelo.test_a_pagina_traz_o_proprio_leitor_de_obj"),
 
     # escaneamento sem geometria nao pode ser gravado
@@ -549,7 +549,7 @@ MUT = [
     ("a luz da cena ignora a hora", "static/maquete.html",
      "    const alt = Math.max(s.altura, 6) * grau;",
      "    const alt = 45 * grau;",
-     "TestSolDoImovel.test_a_luz_da_cena_segue_a_hora"),
+     "TestSolDoImovel.test_a_luz_da_cena_segue_a_hora_escolhida"),
 
     # a orientacao e publica para LER e privada para escrever: ela muda o que
     # o anuncio afirma sobre o imovel
@@ -945,6 +945,35 @@ MUT = [
      '      material.color.setScalar(1);',
      '      material.color.setScalar(0.4);',
      'TestTexturaDoEscaneamento.test_a_malha_ganha_as_coordenadas_de_textura'),
+    ('retrato usa o lado longo do quadro', 'stitcher.py',
+     '    lado = LADO_LONGO_MM if largura >= altura else LADO_CURTO_MM',
+     '    lado = LADO_LONGO_MM',
+     'TestFocalDoExif.test_retrato_e_paisagem_nao_tem_o_mesmo_campo_de_visao'),
+
+    ('focal absurda entra como se fosse medida', 'stitcher.py',
+     '    # fora desta faixa nao e lente de celular nem de camera comum: e lixo\n    return float(valor) if 4 <= valor <= 300 else None',
+     '    # fora desta faixa nao e lente de celular nem de camera comum: e lixo\n    return float(valor)',
+     'TestFocalDoExif.test_focal_absurda_e_recusada'),
+
+    ('le so uma das ordens de byte', 'stitcher.py',
+     '    elif tiff[:2] == b"MM":\n        ordem = ">"',
+     '    elif False:\n        ordem = ">"',
+     'TestFocalDoExif.test_le_nas_duas_ordens_de_byte'),
+
+    ('minoria com exif decide pelo lote inteiro', 'stitcher.py',
+     '    if len(lidos) < max(2, len(valores) // 2):',
+     '    if not lidos:',
+     'TestFocalDoExif.test_minoria_com_exif_nao_decide_pelo_lote'),
+
+    ('lentes diferentes viram uma media', 'stitcher.py',
+     '    if max(lidos) - min(lidos) > mediana * 0.25:',
+     '    if False:',
+     'TestFocalDoExif.test_lentes_diferentes_no_mesmo_lote_nao_decidem'),
+
+    ('o palpite vence a medida do aparelho', 'stitcher.py',
+     '    if focal_exif:\n        origem_focal = "exif"',
+     '    if False:\n        origem_focal = "exif"',
+     'TestFocalDoExif.test_quando_a_foto_diz_a_foto_manda'),
 ]
 
 

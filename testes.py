@@ -13,6 +13,8 @@ Nao precisa de servidor: usa o cliente de teste do proprio Flask.
 """
 import io
 import os
+import struct
+import math
 import json
 import hashlib
 import tempfile
@@ -4955,6 +4957,255 @@ class TestTexturaDoEscaneamento(PaginaNoNode, unittest.TestCase):
             self.assertIsNone(modelo3d.nome_de_textura_seguro(ruim), ruim)
         self.assertEqual(modelo3d.nome_de_textura_seguro("pasta/sub/tex.PNG"),
                          "tex.png")
+
+
+class TestFocalDoExif(unittest.TestCase):
+    """
+    A focal que a foto ja traz.
+
+    O alinhamento deduz a distancia focal olhando so os pixels, e o proprio
+    codigo do costurador ja documentava o caso em que o OpenCV devolve um valor
+    fora da realidade. Dessa focal sai o campo de visao, que decide se a volta
+    fechou — entao o erro nao para nela.
+
+    O celular GRAVA esse numero no EXIF. Ler troca um palpite por uma medida do
+    aparelho, e custa milissegundos.
+
+    O EXIF dos testes e montado byte a byte de proposito: depender de uma
+    biblioteca para FABRICAR o caso de teste faria o teste passar por motivos
+    que o codigo de producao nao tem.
+    """
+
+    def _exif(self, focal=26, ordem="II", tag=0xA405, tipo=3):
+        """Monta um bloco TIFF/EXIF minimo com a focal pedida."""
+        e = "<" if ordem == "II" else ">"
+        # IFD0 em 8: conta(2) + entrada(12) + proximo(4) = 18 -> Exif IFD em 26
+        ifd0 = (struct.pack(e + "H", 1)
+                + struct.pack(e + "HHI", 0x8769, 4, 1)
+                + struct.pack(e + "I", 26)
+                + struct.pack(e + "I", 0))
+        valor = (struct.pack(e + "H", focal) + b"\x00\x00" if tipo == 3
+                 else struct.pack(e + "I", focal))
+        exif = (struct.pack(e + "H", 1)
+                + struct.pack(e + "HHI", tag, tipo, 1)
+                + valor
+                + struct.pack(e + "I", 0))
+        return ordem.encode() + struct.pack(e + "H", 42) + struct.pack(e + "I", 8) \
+            + ifd0 + exif
+
+    def _jpeg(self, tiff=None):
+        """Um JPEG de mentira: cabecalho, o APP1 com o EXIF, e o inicio da imagem."""
+        corpo = b"\xff\xd8"
+        if tiff is not None:
+            carga = b"Exif\x00\x00" + tiff
+            corpo += b"\xff\xe1" + struct.pack(">H", len(carga) + 2) + carga
+        return corpo + b"\xff\xda\x00\x02\x00" + b"\x00" * 40
+
+    # ------------------------------------------------------------- a leitura
+
+    def test_a_focal_gravada_pela_camera_e_lida(self):
+        self.assertEqual(stitcher.focal_em_35mm(self._jpeg(self._exif(26))), 26.0)
+
+    def test_le_nas_duas_ordens_de_byte(self):
+        """
+        Canon grava em big-endian e a maioria dos celulares em little. Ler so
+        uma das duas deixaria metade do parque sem o dado, em silencio.
+        """
+        for ordem in ("II", "MM"):
+            self.assertEqual(
+                stitcher.focal_em_35mm(self._jpeg(self._exif(24, ordem))), 24.0,
+                ordem)
+
+    def test_foto_sem_exif_nao_inventa_numero(self):
+        """
+        None e a resposta certa. Chutar seria pior do que nao ler, porque o
+        valor entraria no calculo com cara de medida.
+        """
+        self.assertIsNone(stitcher.focal_em_35mm(self._jpeg()))
+
+    def test_arquivo_que_nem_e_jpeg_nao_derruba(self):
+        self.assertIsNone(stitcher.focal_em_35mm(b"isto nao e uma foto"))
+        self.assertIsNone(stitcher.focal_em_35mm(b""))
+
+    def test_exif_truncado_no_meio_nao_derruba(self):
+        """
+        Arquivo cortado pela metade e coisa que acontece em upload.
+
+        Os cortes ficam DENTRO do bloco EXIF de proposito. Cortar depois dele
+        nao estraga nada — o dado ja foi lido — e um teste que exigisse None
+        ali estaria cobrando do codigo um erro que ele nao deve cometer. Foi o
+        que aconteceu na primeira versao deste teste.
+        """
+        inteiro = self._jpeg(self._exif(26))
+        # medido neste gabarito: a entrada que carrega a focal termina no byte
+        # 51, entao qualquer corte abaixo disso perde o valor. Cortar depois
+        # nao perde nada — e exigir None ali seria cobrar do codigo um erro que
+        # ele nao deve cometer, que foi como este teste nasceu errado.
+        for corte in (8, 14, 20, 30, 44, 50):
+            self.assertIsNone(stitcher.focal_em_35mm(inteiro[:corte]),
+                              "cortado em %d" % corte)
+
+    def test_lixo_depois_do_exif_nao_atrapalha(self):
+        """O dado ja foi lido: o que vem depois nao muda a resposta."""
+        inteiro = self._jpeg(self._exif(26))
+        self.assertEqual(stitcher.focal_em_35mm(inteiro + b"\x00" * 99), 26.0)
+
+    def test_focal_absurda_e_recusada(self):
+        """
+        Fora da faixa de lente real o numero e lixo, e lixo com cara de medida
+        e pior do que ausencia.
+        """
+        for ruim in (0, 1, 2, 999, 5000):
+            self.assertIsNone(stitcher.focal_em_35mm(self._jpeg(self._exif(ruim))),
+                              str(ruim))
+
+    # -------------------------------------------------- a conta dos pixels
+
+    def test_retrato_e_paisagem_nao_tem_o_mesmo_campo_de_visao(self):
+        """
+        A SUTILEZA QUE DECIDE. No quadro de 35 mm o lado longo tem 36 mm e o
+        curto 24. Foto em pe tem 24 mm no horizontal; usar 36 ali daria um
+        campo de visao 50% maior que o real — pior do que nao ler o EXIF.
+        """
+        paisagem = stitcher.focal_em_pixels(26, 1280, 960)
+        retrato = stitcher.focal_em_pixels(26, 960, 1280)
+        self.assertAlmostEqual(paisagem, 1280 * 26 / 36.0, places=3)
+        self.assertAlmostEqual(retrato, 960 * 26 / 24.0, places=3)
+
+        graus = lambda larg, f: math.degrees(2 * math.atan(larg / (2 * f)))
+        self.assertAlmostEqual(graus(1280, paisagem), 69.4, delta=0.5)
+        self.assertAlmostEqual(graus(960, retrato), 49.6, delta=0.5)
+
+    def test_sem_focal_nao_ha_conta(self):
+        self.assertIsNone(stitcher.focal_em_pixels(None, 1280, 960))
+        self.assertIsNone(stitcher.focal_em_pixels(26, 0, 960))
+
+    # ----------------------------------------------------------- o lote
+
+    def _gravar_lote(self, focais):
+        pasta = os.path.join(_TEMP, "exif-%d" % len(os.listdir(_TEMP)))
+        os.makedirs(pasta, exist_ok=True)
+        caminhos = []
+        for i, f in enumerate(focais):
+            p = os.path.join(pasta, "foto_%d.jpg" % i)
+            with open(p, "wb") as arq:
+                arq.write(self._jpeg(self._exif(f) if f else None))
+            caminhos.append(p)
+        return caminhos
+
+    def test_o_lote_decide_pela_mediana(self):
+        caminhos = self._gravar_lote([26, 26, 26, 27])
+        self.assertAlmostEqual(stitcher.focal_das_fotos(caminhos, 1280, 960),
+                               1280 * 26 / 36.0, places=1)
+
+    def test_minoria_com_exif_nao_decide_pelo_lote(self):
+        """
+        Duas fotos de vinte trazendo o dado nao autorizam falar pelas outras
+        dezoito. Melhor voltar ao ajuste de feixe, que ao menos olha todas.
+        """
+        caminhos = self._gravar_lote([26, 26] + [None] * 10)
+        self.assertIsNone(stitcher.focal_das_fotos(caminhos, 1280, 960))
+
+    def test_lentes_diferentes_no_mesmo_lote_nao_decidem(self):
+        """
+        Metade na grande-angular e metade na teleobjetiva nao tem uma focal so.
+        Fingir que tem seria inventar com ar de medida.
+        """
+        caminhos = self._gravar_lote([13, 13, 77, 77])
+        self.assertIsNone(stitcher.focal_das_fotos(caminhos, 1280, 960))
+
+    def test_arquivo_ilegivel_nao_derruba_o_lote(self):
+        caminhos = self._gravar_lote([26, 26, 26])
+        caminhos.append(os.path.join(_TEMP, "nao-existe.jpg"))
+        self.assertIsNotNone(stitcher.focal_das_fotos(caminhos, 1280, 960))
+
+    # --------------------------------------------- o uso na geometria
+
+    def test_quando_a_foto_diz_a_foto_manda(self):
+        """
+        O ajuste de feixe as vezes devolve focal fora da realidade — o proprio
+        costurador ja documentava isso. Havendo medida do aparelho, ela vence.
+        """
+        class Camera(object):
+            def __init__(self, focal):
+                self.R = np.eye(3)
+                self.focal = focal
+
+        cams = [Camera(300.0), Camera(300.0)]      # estimativa: fov largo
+        sem = stitcher._geometria(cams, 1280)
+        com = stitcher._geometria(cams, 1280, focal_exif=1280 * 26 / 36.0)
+        self.assertEqual(sem["focal_origem"], "ajuste")
+        self.assertEqual(com["focal_origem"], "exif")
+        self.assertLess(com["fov"], sem["fov"],
+                        "a focal do EXIF nao mudou o campo de visao")
+        self.assertAlmostEqual(com["fov"], 69.4, delta=0.6)
+
+
+class TestAncorasDasMutacoes(unittest.TestCase):
+    """
+    Toda mutacao precisa apontar para um trecho que existe.
+
+    Custou uma rodada de vinte minutos para virar teste. Ao mudar a assinatura
+    do leitor de OBJ para aceitar textura, quebrei sem perceber a ancora de uma
+    mutacao antiga — ela passou a apontar para uma linha que nao existe mais.
+
+    O modo de falhar e traicoeiro: a mutacao nao acusa erro, ela some da conta.
+    Sai como "ANCORA 0" no meio de cento e cinquenta linhas, e quem le o total
+    ve "153 de 156 detectadas" e comemora. Uma protecao deixou de ser
+    verificada e ninguem soube.
+
+    Aqui custa dois segundos, roda junto com o resto, e diz o nome.
+    """
+
+    def _mutacoes(self):
+        fonte = io.open("mutacoes.py", encoding="utf-8").read()
+        espaco = {}
+        exec(compile(fonte.split("def _esquecer_bytecode")[0],
+                     "mutacoes.py", "exec"), espaco)
+        return espaco["MUT"]
+
+    def test_toda_ancora_existe_uma_vez_so_no_arquivo(self):
+        """
+        Uma vez so, e nao "pelo menos uma": ancora que casa em dois lugares
+        muta o trecho errado, e o teste que deveria acusar continua passando
+        porque o pedaco que importa ficou intacto.
+        """
+        mortas, ambiguas = [], []
+        for nome, arq, velho, _novo, _teste in self._mutacoes():
+            if not os.path.exists(arq):
+                mortas.append("%s (arquivo %s sumiu)" % (nome, arq))
+                continue
+            quantas = io.open(arq, encoding="utf-8").read().count(velho)
+            if quantas == 0:
+                mortas.append(nome)
+            elif quantas > 1:
+                ambiguas.append("%s (%d vezes)" % (nome, quantas))
+        self.assertEqual(mortas, [], "ancoras que nao existem mais")
+        self.assertEqual(ambiguas, [], "ancoras que casam em mais de um lugar")
+
+    def test_a_mutacao_muda_mesmo_alguma_coisa(self):
+        """Mutacao que troca um texto por ele mesmo nunca reprovaria nada."""
+        iguais = [n for n, _a, velho, novo, _t in self._mutacoes() if velho == novo]
+        self.assertEqual(iguais, [])
+
+    def test_todo_teste_apontado_existe(self):
+        """
+        Mutacao que chama um teste inexistente sempre "acusa", porque o
+        unittest falha ao nao achar o nome. Acusar por motivo errado e pior do
+        que nao acusar: conta como protecao e nao protege.
+        """
+        fonte = io.open("testes.py", encoding="utf-8").read()
+        faltando = []
+        for nome, _a, _v, _n, alvo in self._mutacoes():
+            classe = alvo.split(".")[0]
+            if ("class %s(" % classe) not in fonte:
+                faltando.append("%s -> %s" % (nome, alvo))
+                continue
+            if "." in alvo:
+                metodo = alvo.split(".", 1)[1]
+                if ("def %s(" % metodo) not in fonte:
+                    faltando.append("%s -> %s" % (nome, alvo))
+        self.assertEqual(faltando, [], "mutacoes apontando para teste inexistente")
 
 
 def limpar():
