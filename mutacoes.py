@@ -898,6 +898,12 @@ MUT = [
      "    return os.path.exists(foto) and os.path.exists(prof)",
      "    return os.path.exists(foto)",
      "TestPlantasSinteticas.test_render_longo_retoma_de_onde_parou"),
+    # custou uma hora de verdade: arquivos novos copiados, processo velho de pe
+    # segurando a porta, e o estado respondendo "respondendo: sim" o tempo todo
+    ("processo velho passa por atualizado", "servico.py",
+     "    if subiu >= gravado:",
+     "    if True:",
+     "TestCodigoNoAr.test_processo_mais_velho_que_o_arquivo_e_denunciado"),
 ]
 
 

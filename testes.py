@@ -2396,13 +2396,23 @@ class TestCodigoNoAr(unittest.TestCase):
         servico._inicio_do_servidor = self.original
 
     def test_processo_mais_velho_que_o_arquivo_e_denunciado(self):
-        servico._inicio_do_servidor = lambda: time.time() - 7200
+        """
+        Ancorado no arquivo mais novo, e nao no relogio.
+
+        Antes fingia "duas horas atras" e comparava com a data do fonte mais
+        recente — entao so passava se alguem tivesse editado algo nas ultimas
+        duas horas. Reprovou de verdade num dia parado, com o produto inteiro
+        certo, e teste que reprova por calendario ensina a ignorar vermelho.
+        """
+        gravado = servico._gravado_mais_recente()
+        servico._inicio_do_servidor = lambda: gravado - 3600
         veredito, detalhe = servico.codigo_no_ar()
         self.assertIs(veredito, False, detalhe)
         self.assertIn("MAIS VELHO", detalhe)
 
     def test_processo_mais_novo_passa(self):
-        servico._inicio_do_servidor = lambda: time.time() + 60
+        gravado = servico._gravado_mais_recente()
+        servico._inicio_do_servidor = lambda: gravado + 60
         veredito, _ = servico.codigo_no_ar()
         self.assertIs(veredito, True)
 

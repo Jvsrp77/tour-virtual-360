@@ -217,6 +217,24 @@ def remover():
     return 0
 
 
+def _gravado_mais_recente():
+    """
+    A data do fonte mais novo do projeto, ou None se nao houver nenhum.
+
+    Extraida de codigo_no_ar para poder ser MEDIDA. O teste que a usa fingia
+    um processo de "duas horas atras" e comparava com esta data — entao ele so
+    passava se alguem tivesse editado um arquivo nas ultimas duas horas, e
+    reprovava sozinho num dia parado. Teste que reprova por calendario ensina
+    a ignorar teste vermelho.
+    """
+    import glob
+    fontes = (glob.glob(os.path.join(RAIZ, "*.py"))
+              + glob.glob(os.path.join(RAIZ, "static", "*.html")))
+    if not fontes:
+        return None
+    return max(os.path.getmtime(f) for f in fontes)
+
+
 def codigo_no_ar():
     """
     Diz se o processo que atende agora carregou os arquivos que estao no disco.
@@ -230,14 +248,11 @@ def codigo_no_ar():
     fingir certeza aqui seria repetir o erro de ontem por outro caminho.
     """
     try:
-        import glob
-        fontes = (glob.glob(os.path.join(RAIZ, "*.py"))
-                  + glob.glob(os.path.join(RAIZ, "static", "*.html")))
-        if not fontes:
-            return None, "não achei os arquivos do projeto"
-        gravado = max(os.path.getmtime(f) for f in fontes)
+        gravado = _gravado_mais_recente()
     except OSError as e:
         return None, "não consegui ler a data dos arquivos: %s" % e
+    if gravado is None:
+        return None, "não achei os arquivos do projeto"
 
     subiu = _inicio_do_servidor()
     if subiu is None:
