@@ -71,6 +71,21 @@ MATERIAIS = {
     # painel do chao ao teto em 238 chapado le como PAREDE, e o
     # quarto perde o movel que mais ocupa espaco nele.
     "laminado":   (206, 208, 210),
+
+    # --- a partir daqui, os materiais do loft e da casa de praia. Todos com
+    # desenho proprio em _textura: cor chapada le como plastico, e o que da
+    # leitura a uma cena sem sombra e a textura, nao a cor.
+    "tijolo":     (56, 70, 126),
+    "concreto":   (142, 143, 141),
+    "marmore":    (234, 233, 228),
+    "azulejo":    (214, 212, 206),
+    "cortina":    (204, 208, 212),
+    "couro":      (54, 76, 114),
+    "inox":       (176, 178, 180),
+    "tela":       (26, 25, 24),
+    "quadro":     (120, 120, 120),      # a cor sai do proprio desenho
+    "madeira_clara": (138, 168, 196),
+    "palha":      (122, 162, 198),
 }
 
 # ------------------------------------------------------------ a planta em uso
@@ -89,8 +104,9 @@ _LIMITES = ()
 def usar(planta):
     """Aponta o tracador para uma planta. Devolve ela mesma, para encadear."""
     global PLANTA, LARG, FUNDO, ZONAS, CAIXAS, JANELAS, LUZES, PONTOS
-    global _PAREDE_DA_ZONA, _PISO_DA_ZONA, _LIMITES
+    global _PAREDE_DA_ZONA, _PISO_DA_ZONA, _LIMITES, VISTA
     PLANTA = planta
+    VISTA = planta.get("vista", "campo")
     LARG, FUNDO = planta["larg"], planta["fundo"]
     ZONAS = planta["zonas"]
     CAIXAS = planta["caixas"]
@@ -112,6 +128,84 @@ def _ruido(p, escala, amp):
                         + 0.6 * np.sin(p[:, 1] * escala * 2.3))
 
 
+# O que existe do lado de fora. Cada entrada e (zenite, horizonte, terreno) em
+# BGR — o ceu la em cima, a neblina na linha do horizonte, e o que fica abaixo
+# dela. Tres cores bastam porque e tudo distante: perto da janela nao ha nada.
+#
+# Por que virou tabela. A vista era uma so, verde, chapada no codigo. Um imovel
+# de praia com campo na janela e um erro que o comprador ve antes de ver o
+# imovel — e e justamente pela janela que ele decide se quer morar ali.
+VISTAS = {
+    "campo":  ((196, 148, 104), (232, 222, 208), (104, 118, 100)),
+    "mar":    ((190, 134,  76), (238, 231, 216), (146, 114,  48)),
+    "cidade": ((192, 156, 124), (216, 213, 212), (132, 132, 130)),
+}
+
+VISTA = "campo"          # trocada por usar(), conforme a planta pede
+
+
+def _relevo_da_vista(d, abaixo, chao):
+    """
+    O que separa mar de campo de cidade ABAIXO da linha do horizonte.
+
+    Acima dela e tudo ceu e muda pouco. O que o olho usa para dizer "isto e
+    mar" ou "isto e cidade" esta embaixo: a agua vem em bandas que se apertam
+    ao chegar no horizonte, e a cidade tem silhueta recortada. Sem isso as
+    tres vistas sao a mesma mancha em cores diferentes.
+    """
+    if VISTA == "mar":
+        # As bandas se apertam perto do horizonte sozinhas: 1/abaixo cresce
+        # sem limite ali. E perspectiva de graca — a mesma razao pela qual as
+        # ondas parecem mais juntas quanto mais longe estao.
+        banda = np.sin(1.9 / np.maximum(abaixo[:, 0], 0.025))
+        return chao * (1.0 + 0.055 * banda)[:, None]
+
+    if VISTA == "cidade":
+        # A silhueta. Predios de alturas diferentes conforme o azimute, e o
+        # raio que passa por baixo do topo bate em predio, nao em chao. Sem
+        # recorte, "cidade" e so um cinza — e cinza chapado le como parede,
+        # que e o defeito que a janela existia para resolver.
+        az = np.arctan2(d[:, 0], d[:, 2])
+        topo = (0.055 + 0.045 * np.sin(az * 7.0)
+                + 0.022 * np.sin(az * 23.0 + 1.1)
+                + 0.012 * np.sin(az * 53.0))
+        predio = abaixo[:, 0] < topo
+        if predio.any():
+            chao = chao.copy()
+            face = 0.84 + 0.16 * (np.floor(az * 9.0) % 3.0) / 2.0
+            chao[predio] *= face[predio][:, None]
+            # janelas acesas: pontinhos claros na face, em grade
+            luz = (np.sin(az * 180.0) > 0.88) & predio
+            chao[luz] = np.minimum(chao[luz] * 1.5, 255.0)
+    return chao
+
+
+def _faces(face, quantos):
+    """
+    A face que o raio achou, sempre como vetor.
+
+    POR QUE ISTO EXISTE. `face` chega de dois lugares com dois formatos: da
+    casca vem um INTEIRO (a parede inteira e aquela face), e das caixas vem um
+    VETOR com uma face por raio. Nenhuma textura usava a face ate agora, entao
+    a diferenca nunca incomodou — a primeira que usasse estouraria com
+    "truth value of an array is ambiguous", e seria no meio de um render.
+    """
+    return np.broadcast_to(np.asarray(face), (quantos,))
+
+
+def _horizontal(p, face):
+    """
+    O eixo que corre na horizontal sobre a superficie achada.
+
+    Fiada de tijolo, veio de tabua e trama de palha correm ao longo da parede,
+    nao pelos eixos do mundo. Numa parede de x constante quem corre e o z; numa
+    de z constante, o x. Sem isto, o tijolo de uma parede sai em fiada e o da
+    parede vizinha sai em coluna.
+    """
+    ehx = np.isin(_faces(face, p.shape[0]), (0, 1))
+    return np.where(ehx, p[:, 2], p[:, 0])
+
+
 def _ceu(d):
     """
     O que se ve pela janela.
@@ -131,10 +225,14 @@ def _ceu(d):
     cabeca vira. Um painel chapado nao muda; um ceu por direcao, sim.
     """
     dy = np.clip(d[:, 1], -1.0, 1.0)
-    # BGR, porque o panorama inteiro sai em BGR para o OpenCV gravar
-    zenite = np.array([196, 148, 104], np.float32)     # azul de dia limpo
-    horizonte = np.array([232, 222, 208], np.float32)  # palido, com neblina
-    terreno = np.array([104, 118, 100], np.float32)    # verde acinzentado
+    # BGR, porque o panorama inteiro sai em BGR para o OpenCV gravar. A vista
+    # cai no campo se vier nome desconhecido: aqui, no meio de um render de
+    # meia hora, nao e lugar de estourar — quem recusa nome errado e o
+    # conferir(), antes de o render comecar.
+    cores = VISTAS.get(VISTA, VISTAS["campo"])
+    zenite = np.array(cores[0], np.float32)
+    horizonte = np.array(cores[1], np.float32)
+    terreno = np.array(cores[2], np.float32)
 
     acima = np.clip(dy, 0.0, 1.0)[:, None]
     abaixo = np.clip(-dy, 0.0, 1.0)[:, None]
@@ -142,6 +240,7 @@ def _ceu(d):
     # ceu real se comporta visto de dentro de casa, com o horizonte lavado
     ceu = horizonte * (1.0 - acima ** 0.55) + zenite * (acima ** 0.55)
     chao = horizonte * (1.0 - abaixo ** 0.8) + terreno * (abaixo ** 0.8)
+    chao = _relevo_da_vista(d, abaixo, chao)
     return np.where(dy[:, None] > 0.0, ceu, chao)
 
 
@@ -218,6 +317,113 @@ def _textura(material, p, face, cor, dirs=None):
         saida *= (1.0 - 0.06 * np.clip((2.4 - p[:, 1]) / 2.4, 0, 1))[:, None]
         saida[porta] *= 0.80
         saida[p[:, 1] < 0.08] *= 0.70          # rodape do movel
+    elif material == "tijolo":
+        # Fiada corrida, com a junta a meio tijolo em fiada alternada — e o
+        # travamento que qualquer parede de tijolo de verdade tem. Em fiadas
+        # alinhadas a parede le como ladrilho, nao como alvenaria.
+        alto, comp = 0.077, 0.252
+        eixo = _horizontal(p, face)
+        fiada = np.floor(p[:, 1] / alto)
+        u = (eixo + (fiada % 2.0) * (comp / 2.0)) / comp
+        # cada peca com seu tom: barro nao sai do forno duas vezes igual
+        tom = ((np.floor(u) * 7.0 + fiada * 13.0) * 0.37) % 1.0
+        saida *= (0.86 + 0.28 * tom)[:, None]
+        saida *= _ruido(p, 34.0, 0.05)[:, None]
+        junta = ((np.abs((p[:, 1] / alto) % 1.0 - 0.5) > 0.42)
+                 | (np.abs(u % 1.0 - 0.5) > 0.47))
+        saida[junta] = np.array([148, 150, 152], np.float32)
+    elif material == "concreto":
+        # Concreto aparente guarda a marca da forma: as juntas das tabuas e os
+        # furos dos tirantes. Liso, vira parede pintada de cinza.
+        saida *= _ruido(p, 2.2, 0.055)[:, None]
+        saida *= _ruido(p, 11.0, 0.03)[:, None]
+        saida[np.abs((p[:, 1] / 0.22) % 1.0 - 0.5) > 0.47] *= 0.90
+        eixo = _horizontal(p, face)
+        furo = ((np.abs((eixo / 0.66) % 1.0 - 0.5) < 0.030)
+                & (np.abs((p[:, 1] / 0.66) % 1.0 - 0.5) < 0.030))
+        saida[furo] *= 0.74
+    elif material == "marmore":
+        # O veio e o marmore. Uma pedra clara sem veio e Corian, e o olho sabe
+        # a diferenca mesmo sem saber o nome.
+        # Os TRES eixos entram. A primeira versao usava so x e z, e numa
+        # parede o z e constante: o veio saiu em listra vertical, igual em
+        # toda a altura. Com y dentro da conta, qualquer plano — parede,
+        # tampo ou lateral — corta a pedra num angulo diferente, que e o que
+        # acontece quando se serra um bloco de marmore de verdade.
+        t = (p[:, 0] * 1.9 + p[:, 2] * 1.3 + p[:, 1] * 1.55
+             + 0.55 * np.sin(p[:, 2] * 3.3 + p[:, 1] * 2.1)
+             + 0.40 * np.sin(p[:, 0] * 5.1 - p[:, 1] * 1.7)
+             + 0.18 * np.sin(p[:, 0] * 13.0 + p[:, 2] * 11.0))
+        veio = np.abs(np.sin(t * 2.2))
+        saida *= (0.97 + 0.05 * veio)[:, None]
+        saida[veio < 0.035] *= 0.74                 # veio principal, fino
+        saida[np.abs(np.sin(t * 7.0 + 1.3)) < 0.020] *= 0.88   # os secundarios
+        saida *= _ruido(p, 26.0, 0.015)[:, None]
+        saida[_faces(face, p.shape[0]) == 3] *= 1.05       # tampo polido
+    elif material == "azulejo":
+        eixo = _horizontal(p, face)
+        fiada = np.floor(p[:, 1] / 0.10)
+        u = (eixo + (fiada % 2.0) * 0.10) / 0.20
+        # o vidrado clareia de baixo para cima dentro de CADA peca: e o
+        # reflexo da peca, e e o que faz ler como ceramica e nao como pintura
+        saida *= (0.95 + 0.09 * ((p[:, 1] / 0.10) % 1.0))[:, None]
+        saida *= _ruido(p, 14.0, 0.018)[:, None]
+        rejunte = ((np.abs(u % 1.0 - 0.5) > 0.465)
+                   | (np.abs((p[:, 1] / 0.10) % 1.0 - 0.5) > 0.44))
+        saida[rejunte] *= 0.84
+    elif material == "cortina":
+        # Prega vertical, e o pe mais escuro que a cabeceira. Tecido chapado
+        # le como placa de isopor encostada na parede.
+        eixo = _horizontal(p, face)
+        saida *= (1.0 + 0.11 * np.sin(eixo * 34.0))[:, None]
+        saida *= (0.80 + 0.26 * np.clip(p[:, 1] / 2.2, 0, 1))[:, None]
+        saida *= _ruido(p, 60.0, 0.02)[:, None]
+    elif material == "couro":
+        saida *= _ruido(p, 85.0, 0.05)[:, None]
+        saida *= _ruido(p, 23.0, 0.04)[:, None]
+        assento = _faces(face, p.shape[0]) == 3
+        # o assento marca com o uso, e marca mais no meio
+        saida[assento] *= (1.04 + 0.05 * np.sin(p[assento][:, 0] * 9.0)
+                           * np.sin(p[assento][:, 2] * 11.0))[:, None]
+    elif material == "inox":
+        eixo = _horizontal(p, face)
+        saida *= (1.0 + 0.05 * np.sin(eixo * 420.0))[:, None]   # escovado
+        saida *= _ruido(p, 6.0, 0.03)[:, None]
+        if dirs is not None:
+            # O que separa aco de plastico cinza e o brilho MUDAR com o
+            # angulo. Nao ha normal aqui para um especular de verdade, entao
+            # serve a inclinacao do olhar: assumido como aproximacao, e o
+            # bastante para o inox parar de parecer papel.
+            saida *= (1.0 + 0.30 * np.clip(dirs[:, 1] + 0.25, 0, 1) ** 2)[:, None]
+    elif material == "tela":
+        saida *= (0.92 + 0.16 * np.clip(p[:, 1] / 2.0, 0, 1))[:, None]
+        if dirs is not None:
+            # vidro preto devolve o teto quando o olhar passa rasante
+            saida += (np.clip(0.5 - np.abs(dirs[:, 1]), 0, 0.5) * 92.0)[:, None]
+    elif material == "quadro":
+        # Campos de cor, do jeito de uma tela abstrata. Quem olha nao precisa
+        # reconhecer a obra: precisa que a parede pare de ser so parede.
+        # Campos GRANDES. Em 11 cm a tela virava mosaico de azulejo colorido,
+        # que chama mais atencao que o imovel — e quadro na parede existe para
+        # a parede parar de ser so parede, nao para disputar com ela.
+        eixo = _horizontal(p, face)
+        k = np.floor(eixo / 0.38) + np.floor(p[:, 1] / 0.46) * 5.0
+        saida = np.stack([(k * 53.0) % 70.0 + 118.0,
+                          (k * 29.0) % 62.0 + 124.0,
+                          (k * 71.0) % 78.0 + 112.0], axis=1).astype(np.float32)
+        saida *= _ruido(p, 9.0, 0.05)[:, None]
+    elif material == "madeira_clara":
+        eixo = _horizontal(p, face)
+        tabua = np.floor(eixo / 0.14)
+        saida *= (0.94 + 0.08 * (tabua % 3.0) / 2.0)[:, None]
+        saida *= (1.0 + 0.05 * np.sin(p[:, 1] * 53.0 + tabua * 2.7))[:, None]
+        saida[np.abs((eixo / 0.14) % 1.0 - 0.5) > 0.47] *= 0.86
+    elif material == "palha":
+        # trama cruzada: e o xadrez que diz fibra, e nenhuma outra coisa aqui
+        # tem xadrez
+        eixo = _horizontal(p, face)
+        saida *= (1.0 + 0.15 * np.sin(eixo * 52.0) * np.sin(p[:, 1] * 52.0))[:, None]
+        saida *= _ruido(p, 70.0, 0.04)[:, None]
     elif material in ("estofado", "estofado_b"):
         saida *= _ruido(p, 55.0, 0.035)[:, None]
     elif material == "roupa_cama":
@@ -298,6 +504,139 @@ def _caixa(o, inv, c):
     return np.where((sai >= entra) & (entra > 1e-4), entra, np.inf)
 
 
+class _Rascunho(object):
+    """
+    Os vetores de trabalho do tracado, alocados UMA vez por fatia.
+
+    POR QUE EXISTE. A versao anterior criava uns quinze vetores novos por
+    caixa — e com 322 caixas numa casa de 520 m2, em 8k, sao mais de vinte mil
+    alocacoes de 16 MB por panorama. Medido: o custo estava quase todo em
+    pedir e devolver memoria, nao em calcular.
+    """
+
+    def __init__(self, linhas, largura):
+        f = (linhas, largura)
+        self.a = np.empty(f, np.float32)
+        self.b = np.empty(f, np.float32)
+        self.tmp = np.empty(f, np.float32)
+        self.entra = np.empty(f, np.float32)
+        self.sai = np.empty(f, np.float32)
+        self.m1 = np.empty(f, bool)
+        self.m2 = np.empty(f, bool)
+
+
+def _tangentes_da_fatia(d):
+    """A inclinacao do olhar mais baixa e mais alta desta fatia de linhas."""
+    def tg(dy):
+        return dy / math.sqrt(max(1.0 - dy * dy, 1e-12))
+    return tg(float(d[:, 1].min())), tg(float(d[:, 1].max()))
+
+
+def _fora_da_faixa(o, c, tan0, tan1):
+    """
+    Nenhum raio desta fatia alcanca esta caixa?
+
+    Um raio que sai do olho a uma inclinacao `tan` e chega a uma distancia
+    horizontal `dh` esta na altura o[1] + dh*tan. A caixa so pode ser atingida
+    se a altura dela cruzar o intervalo que sai das distancias e das
+    inclinacoes extremas — e isso e barato de conferir, uma vez por caixa, em
+    vez de quatro milhoes de vezes.
+
+    Erra sempre para o lado de MANTER a caixa: os quatro cantos da pegada dao
+    o alcance maximo, e o ponto mais proximo da pegada da o minimo.
+    """
+    dx = max(c[0] - o[0], 0.0, o[0] - c[3])
+    dz = max(c[2] - o[2], 0.0, o[2] - c[5])
+    perto = math.hypot(dx, dz)
+    longe = max(math.hypot(cx - o[0], cz - o[2])
+                for cx in (c[0], c[3]) for cz in (c[2], c[5]))
+    alturas = [o[1] + dd * tt for dd in (perto, longe) for tt in (tan0, tan1)]
+    return c[4] < min(alturas) or c[1] > max(alturas)
+
+
+def _colunas_da_caixa(o, c, largura):
+    """
+    Em que colunas da imagem esta caixa pode aparecer.
+
+    A coluna do equirretangular E o azimute: a coluna k olha para
+    th = ((k+0,5)/largura*2 - 1)*pi. Uma caixa vista de fora ocupa um arco de
+    menos de meia volta, e fora dele nao ha o que testar — um movel a cinco
+    metros cabe em 3% das colunas.
+
+    Com a camera DENTRO da pegada da caixa (um tapete sob os pes, a parede em
+    volta) o arco e a volta inteira, e a resposta e "todas".
+    """
+    ox, oz = float(o[0]), float(o[2])
+    if c[0] - 1e-6 <= ox <= c[3] + 1e-6 and c[2] - 1e-6 <= oz <= c[5] + 1e-6:
+        return ((0, largura),)
+
+    angs = sorted(math.atan2(cx - ox, cz - oz)
+                  for cx in (c[0], c[3]) for cz in (c[2], c[5]))
+    # o maior vao entre cantos vizinhos e o lado de FORA do arco
+    vao, onde = -1.0, 0
+    for i in range(4):
+        g = angs[(i + 1) % 4] - angs[i] + (2.0 * math.pi if i == 3 else 0.0)
+        if g > vao:
+            vao, onde = g, i
+    if onde == 3:
+        inicio, fim = angs[0], angs[3]
+    else:
+        inicio, fim = angs[onde + 1], angs[onde] + 2.0 * math.pi
+
+    c0 = (inicio / math.pi + 1.0) * 0.5 * largura
+    c1 = (fim / math.pi + 1.0) * 0.5 * largura
+    if c1 - c0 >= largura - 4:
+        return ((0, largura),)
+    ini = (int(math.floor(c0)) - 2) % largura
+    qtd = int(math.ceil(c1 - c0)) + 4
+    if ini + qtd <= largura:
+        return ((ini, ini + qtd),)
+    return ((ini, largura), (0, ini + qtd - largura))
+
+
+def _caixa_em(o, inv, c, t, dono, k, r, ca, cb):
+    """
+    O teste de fatias de sempre, so que num recorte de colunas e sem alocar.
+
+    Faz exatamente a mesma conta que _caixa(): mesma ordem, mesmos tipos. O
+    resultado tem de sair identico bit a bit, e ha teste que confere isso.
+    """
+    entra, sai = r.entra[:, ca:cb], r.sai[:, ca:cb]
+    A, B, T = r.a[:, ca:cb], r.b[:, ca:cb], r.tmp[:, ca:cb]
+    m1, m2 = r.m1[:, ca:cb], r.m2[:, ca:cb]
+    entra.fill(-np.inf)
+    sai.fill(np.inf)
+    for eixo in range(3):
+        iv = inv[:, ca:cb, eixo]
+        np.multiply(iv, c[eixo] - o[eixo], out=A)
+        np.multiply(iv, c[eixo + 3] - o[eixo], out=B)
+        np.minimum(A, B, out=T)
+        np.maximum(A, B, out=B)
+        np.maximum(entra, T, out=entra)
+        np.minimum(sai, B, out=sai)
+    np.greater_equal(sai, entra, out=m1)
+    np.greater(entra, 1e-4, out=m2)
+    np.logical_and(m1, m2, out=m1)
+    np.less(entra, t[:, ca:cb], out=m2)
+    np.logical_and(m1, m2, out=m1)
+    np.copyto(t[:, ca:cb], entra, where=m1)
+    np.copyto(dono[:, ca:cb], k, where=m1)
+
+
+def _todas_as_caixas(o, inv, d, t, dono, linhas, largura, r):
+    """Passa a fatia por todas as caixas, pulando as que nao podem aparecer."""
+    inv2 = inv.reshape(linhas, largura, 3)
+    t2 = t.reshape(linhas, largura)
+    dono2 = dono.reshape(linhas, largura)
+    tan0, tan1 = _tangentes_da_fatia(d)
+    for k, c in enumerate(CAIXAS):
+        if _fora_da_faixa(o, c, tan0, tan1):
+            continue
+        for ca, cb in _colunas_da_caixa(o, c, largura):
+            if cb > ca:
+                _caixa_em(o, inv2, c, t2, dono2, k, r, ca, cb)
+
+
 def _face_caixa(p, c):
     d = np.stack([np.abs(p[:, 0] - c[0]), np.abs(p[:, 0] - c[3]),
                   np.abs(p[:, 1] - c[1]), np.abs(p[:, 1] - c[4]),
@@ -363,17 +702,16 @@ def render(x, z, largura=LARGURA):
     dist_total = np.empty((altura, largura), np.float32)
 
     passo = max(1, 2 ** 22 // largura)               # fatias, para caber na memoria
+    rascunho = None
     for y0 in range(0, altura, passo):
         y1 = min(altura, y0 + passo)
         d = _direcoes(y0, y1, largura, altura)
         inv = _inverso(d)
         t, face = _casca(o, d)
         dono = np.full(d.shape[0], -1, np.int32)
-        for k, c in enumerate(CAIXAS):
-            tk = _caixa(o, inv, c)
-            perto = tk < t
-            t = np.where(perto, tk, t)
-            dono = np.where(perto, k, dono)
+        if rascunho is None or rascunho.a.shape != (y1 - y0, largura):
+            rascunho = _Rascunho(y1 - y0, largura)
+        _todas_as_caixas(o, inv, d, t, dono, y1 - y0, largura, rascunho)
 
         p = o[None, :] + d * t[:, None]
         cor = np.zeros((d.shape[0], 3), np.float32)
@@ -457,6 +795,12 @@ def conferir(planta):
     o chao inteiro. Aqui a checagem custa milissegundos e diz o nome do ponto.
     """
     problemas = []
+    vista = planta.get("vista", "campo")
+    if vista not in VISTAS:
+        # Antes do render, e nao depois. Nome errado aqui custaria meia hora de
+        # maquina para sair um imovel de praia com campo na janela.
+        problemas.append("vista %r nao existe (ha %s)"
+                         % (vista, ", ".join(sorted(VISTAS))))
     for nome, x, z in planta["pontos"]:
         pior = float("inf")
         for c in planta["caixas"]:

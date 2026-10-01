@@ -1842,6 +1842,131 @@ class TestPlantasSinteticas(unittest.TestCase):
         d = np.array([[dx, dy, dz]], np.float32)
         return cena_apartamento._ceu(d / np.linalg.norm(d))[0]
 
+    def _vista(self, nome, fn):
+        """Roda fn() com a vista trocada, e devolve o que estava antes."""
+        antes = cena_apartamento.VISTA
+        cena_apartamento.VISTA = nome
+        try:
+            return fn()
+        finally:
+            cena_apartamento.VISTA = antes
+
+    def _anel(self, dy, quantos=720):
+        """Uma volta completa de raios, todos na mesma altura de olhar."""
+        az = np.linspace(-np.pi, np.pi, quantos)
+        cy = float(np.cos(np.arcsin(dy)))
+        return np.stack([np.sin(az) * cy, np.full(quantos, dy),
+                         np.cos(az) * cy], axis=1).astype(np.float32)
+
+    def _coluna(self, quantos=400):
+        """Descendo do horizonte para os pes, num azimute so."""
+        dy = -np.linspace(0.02, 0.5, quantos)
+        return np.stack([np.zeros(quantos), dy,
+                         np.sqrt(1.0 - dy ** 2)], axis=1).astype(np.float32)
+
+    def test_o_mar_e_mais_azul_que_o_campo(self):
+        """
+        A janela existe para dizer ONDE o imovel esta. Mar e campo na mesma
+        cor desfaz isso — e e pela janela que o comprador decide o bairro
+        antes de olhar a planta.
+
+        Medido em BGR, abaixo da linha do horizonte: o azul tem de ganhar do
+        verde na agua, e nao ganhar no campo.
+        """
+        d = self._anel(-0.35)
+        campo = self._vista("campo", lambda: cena_apartamento._ceu(d)).mean(axis=0)
+        mar = self._vista("mar", lambda: cena_apartamento._ceu(d)).mean(axis=0)
+        self.assertGreater(float(mar[0] - mar[1]), 10.0,
+                           "a agua nao puxou para o azul")
+        self.assertGreater(float(mar[0] - mar[1]), float(campo[0] - campo[1]) + 10.0,
+                           "mar e campo saem da mesma cor")
+
+    def test_a_agua_vem_em_bandas_que_se_apertam_no_horizonte(self):
+        """
+        Agua chapada le como piso pintado. O que o olho reconhece como mar e a
+        ondulacao — e ela apertar ao se afastar, que e perspectiva.
+
+        Mede a ondulacao tirando a tendencia suave da coluna: o que sobra e a
+        banda. No campo tem de sobrar zero.
+        """
+        d = self._coluna()
+
+        def ondula():
+            col = cena_apartamento._ceu(d).mean(axis=1)
+            suave = np.convolve(col, np.ones(21) / 21.0, "same")
+            return float(np.abs(col - suave)[20:-20].std())
+
+        self.assertGreater(self._vista("mar", ondula), 1.0, "a agua saiu lisa")
+        self.assertLess(self._vista("campo", ondula), 0.2,
+                        "o campo ganhou onda que nao devia ter")
+
+    def test_a_cidade_tem_silhueta_e_o_campo_nao(self):
+        """
+        Cinza chapado no lugar da cidade le como PAREDE, que e exatamente o
+        defeito que a janela veio resolver. O que faz ler como cidade e o
+        recorte: a linha dos predios mudando conforme a cabeca vira.
+
+        Mede o desvio ao longo de uma volta completa logo abaixo do horizonte,
+        que e onde a silhueta mora.
+        """
+        d = self._anel(-0.06)
+
+        def recorte():
+            return float(cena_apartamento._ceu(d).mean(axis=1).std())
+
+        self.assertGreater(self._vista("cidade", recorte), 5.0,
+                           "a cidade saiu chapada")
+        self.assertLess(self._vista("campo", recorte), 0.5,
+                        "o campo ganhou predio")
+
+    def test_a_planta_escolhe_a_vista_e_a_omissao_vale_campo(self):
+        """
+        Imovel antigo nao tem a chave "vista", e nao pode parar de renderizar
+        por causa disso. A omissao vale campo, que era o unico comportamento
+        que existia antes.
+        """
+        antes = cena_apartamento.VISTA
+        try:
+            cena_apartamento.usar(dict(plantas.pavilhao(), vista="mar"))
+            self.assertEqual(cena_apartamento.VISTA, "mar")
+            sem = dict(plantas.pavilhao())
+            sem.pop("vista", None)
+            cena_apartamento.usar(sem)
+            self.assertEqual(cena_apartamento.VISTA, "campo")
+        finally:
+            cena_apartamento.VISTA = antes
+
+    def test_vista_com_nome_errado_e_recusada_antes_do_render(self):
+        """
+        O custo de descobrir tarde: a mansao leva mais de uma hora, e um nome
+        de vista digitado errado so apareceria no panorama pronto. O
+        conferir() ja recusa ponto de captura ruim pelo mesmo motivo.
+
+        E o render, se chegar la assim mesmo, NAO pode estourar no meio — cai
+        no campo. As duas coisas juntas: recusa cedo, aguenta tarde.
+        """
+        planta = dict(plantas.pavilhao(), vista="marte")
+        problemas = cena_apartamento.conferir(planta)
+        self.assertTrue(problemas, "aceitou uma vista que nao existe")
+        self.assertIn("marte", problemas[0])
+
+        antes = cena_apartamento.VISTA
+        try:
+            cena_apartamento.VISTA = "marte"
+            d = self._anel(-0.3)
+            campo = self._vista("campo", lambda: cena_apartamento._ceu(d))
+            self.assertTrue(np.allclose(cena_apartamento._ceu(d), campo),
+                            "vista desconhecida nao caiu no campo")
+        finally:
+            cena_apartamento.VISTA = antes
+
+    def test_toda_planta_pede_uma_vista_que_existe(self):
+        """Erro de digitacao numa planta nao espera o render para aparecer."""
+        for construir in plantas.TODAS:
+            p = construir()
+            self.assertIn(p.get("vista", "campo"), cena_apartamento.VISTAS,
+                          p["nome"])
+
     def test_a_janela_muda_conforme_o_angulo(self):
         """
         O QUE FAZ UMA JANELA SER JANELA. Ate aqui ela era um retangulo bege
@@ -5254,6 +5379,421 @@ class TestAncorasDasMutacoes(unittest.TestCase):
                 if ("def %s(" % metodo) not in fonte:
                     faltando.append("%s -> %s" % (nome, alvo))
         self.assertEqual(faltando, [], "mutacoes apontando para teste inexistente")
+
+
+class TestMateriaisDoImovel(unittest.TestCase):
+    """
+    Os materiais, que e onde mora o detalhamento.
+
+    A cena nao calcula sombra: em 8k o raio de sombra nao se paga. Entao tudo
+    o que da leitura a uma superficie vem da TEXTURA. Material chapado nao e um
+    detalhe feio — e uma parede que nao diz nada a quem olha e nada a quem
+    mede, e ja foi medido neste projeto: 69 pontos de interesse contra 4038.
+    """
+
+    NOVOS = ("tijolo", "concreto", "marmore", "azulejo", "cortina", "couro",
+             "inox", "tela", "quadro", "madeira_clara", "palha", "laminado")
+
+    def _plano(self, material, face=5, lado=90, metros=1.4, dirs=True):
+        """Um retalho de parede: x corre na horizontal, y na vertical."""
+        u = np.linspace(0.0, metros, lado)
+        v = np.linspace(0.0, metros, lado)
+        gx, gy = np.meshgrid(u, v)
+        p = np.stack([gx.ravel(), gy.ravel(),
+                      np.full(gx.size, 0.5)], axis=1).astype(np.float32)
+        d = None
+        if dirs:
+            d = np.stack([np.full(p.shape[0], 0.25),
+                          np.linspace(-0.45, 0.45, p.shape[0]),
+                          np.full(p.shape[0], 0.86)], axis=1).astype(np.float32)
+        cor = cena_apartamento._textura(
+            material, p, face, cena_apartamento.MATERIAIS[material], d)
+        return cor.reshape(lado, lado, 3)
+
+    def test_nenhum_material_novo_sai_chapado(self):
+        """
+        O teste mais barato e o que mais pegaria: material cadastrado em
+        MATERIAIS e esquecido em _textura sai como cor pura, e cor pura numa
+        cena sem sombra e um retangulo morto.
+        """
+        chapados = [m for m in self.NOVOS if self._plano(m).std() < 3.0]
+        self.assertEqual(chapados, [], "materiais sem desenho nenhum")
+
+    def test_a_face_chega_como_numero_e_como_vetor_sem_estourar(self):
+        """
+        ESTE E O DEFEITO QUE EU ESPERAVA. A face chega de dois lugares com dois
+        formatos: da casca vem um inteiro — a parede inteira e aquela face — e
+        das caixas vem um vetor, uma face por raio.
+
+        Nenhuma textura usava a face ate os materiais novos, entao a diferenca
+        nunca incomodou. A primeira que usasse estouraria com "truth value of
+        an array is ambiguous" — e estouraria no meio de um render de meia
+        hora, nao aqui.
+        """
+        for m in self.NOVOS:
+            plano = self._plano(m, face=5)
+            vetor = np.full(plano.shape[0] * plano.shape[1], 5)
+            try:
+                igual = self._plano(m, face=vetor)
+            except Exception as erro:
+                self.fail("%s estourou com a face em vetor: %s" % (m, erro))
+            self.assertTrue(np.allclose(plano, igual),
+                            "%s muda de desenho entre face numero e vetor" % m)
+
+    def _juntas(self, p, face):
+        """Onde caiu argamassa. E cor chapada, entao da para achar exato."""
+        cor = cena_apartamento._textura(
+            "tijolo", p, face, cena_apartamento.MATERIAIS["tijolo"])
+        argamassa = np.array([148, 150, 152], np.float32)
+        return np.abs(cor - argamassa).max(axis=1) < 1.0
+
+    def test_a_fiada_acompanha_a_parede_e_nao_os_eixos_do_mundo(self):
+        """
+        Tijolo corre ao longo da parede. Numa parede de z constante quem corre
+        e o x; numa de x constante, o z. Sem isso, duas paredes do mesmo comodo
+        saem uma em fiada e a outra em coluna.
+
+        COMPARA SO A JUNTA, e nao a parede inteira. O tom de cada peca e o
+        ruido fino sao ancorados no MUNDO de proposito — duas paredes de
+        tijolo nao devem mesmo sair identicas pixel a pixel, senao a casa
+        inteira vira papel de parede repetido. O que tem de bater e o desenho
+        da fiada, e a junta e cor chapada, entao da para achar exato.
+
+        A primeira versao deste teste comparava a parede inteira e reprovou
+        codigo que estava certo.
+        """
+        lado = 90
+        u = np.linspace(0.0, 1.4, lado)
+        gx, gy = np.meshgrid(u, u)
+        pz = np.stack([gx.ravel(), gy.ravel(),
+                       np.full(gx.size, 0.5)], axis=1).astype(np.float32)
+        px = np.stack([np.full(gx.size, 0.5), gy.ravel(),
+                       gx.ravel()], axis=1).astype(np.float32)
+
+        em_z = self._juntas(pz, 5)
+        em_x = self._juntas(px, 0)
+        self.assertTrue(np.array_equal(em_z, em_x),
+                        "a fiada muda de direcao conforme a parede")
+
+    def test_a_fiada_e_deitada_e_travada(self):
+        """
+        Que a junta exista ja e testado; aqui, que ela forme FIADA. Uma linha
+        de argamassa atravessa a parede inteira na horizontal — e as verticais
+        nao se alinham entre fiadas vizinhas, que e o travamento que toda
+        alvenaria de verdade tem.
+        """
+        lado = 180
+        u = np.linspace(0.0, 1.4, lado)
+        gx, gy = np.meshgrid(u, u)
+        p = np.stack([gx.ravel(), gy.ravel(),
+                      np.full(gx.size, 0.5)], axis=1).astype(np.float32)
+        junta = self._juntas(p, 5).reshape(lado, lado)
+
+        por_linha = junta.mean(axis=1)
+        self.assertGreater(float(por_linha.max()), 0.9,
+                           "nenhuma linha de argamassa atravessa a parede")
+        self.assertLess(float(por_linha.min()), 0.35,
+                        "a parede inteira virou argamassa")
+
+        # travamento: as juntas verticais de duas fiadas vizinhas nao coincidem
+        cheias = np.nonzero(por_linha > 0.9)[0]
+        self.assertGreater(len(cheias), 2, "so uma fiada na parede toda")
+        meios = []
+        for i in range(len(cheias) - 1):
+            a, b = cheias[i], cheias[i + 1]
+            if b - a > 3:
+                meios.append(junta[(a + b) // 2])
+        self.assertGreater(len(meios), 1, "nao deu para comparar duas fiadas")
+        iguais = float((meios[0] == meios[1]).mean())
+        self.assertLess(iguais, 0.97,
+                        "as juntas verticais se alinham: a parede nao travou")
+
+    def test_o_marmore_tem_veio_nas_duas_direcoes(self):
+        """
+        Medido e corrigido: a primeira versao somava so x e z. Numa parede o z
+        e constante, entao o veio saia igual em toda a altura — listra
+        vertical, que nao e marmore, e sim papel de parede listrado.
+
+        A pedra tem de variar TAMBEM subindo. Compara o desvio entre colunas
+        com o desvio entre linhas: se o segundo for quase zero, voltou a
+        listra.
+        """
+        plano = self._plano("marmore").mean(axis=2)
+        por_coluna = float(plano.mean(axis=0).std())
+        por_linha = float(plano.mean(axis=1).std())
+        self.assertGreater(por_linha, 0.25 * por_coluna,
+                           "o marmore voltou a ser listra vertical")
+
+    def test_a_alvenaria_tem_junta_e_ela_e_mais_clara_que_o_tijolo(self):
+        """
+        Junta de argamassa e o que faz ler alvenaria. Sem ela sobra uma mancha
+        vermelha — e com junta demais sobra uma grade branca.
+        """
+        plano = self._plano("tijolo").mean(axis=2)
+        junta = plano > plano.mean() + 25
+        fracao = float(junta.mean())
+        self.assertGreater(fracao, 0.04, "a parede de tijolo nao tem junta")
+        self.assertLess(fracao, 0.45, "a junta engoliu o tijolo")
+
+    def test_o_inox_muda_de_brilho_conforme_o_angulo(self):
+        """
+        O que separa aco de plastico cinza e o brilho mudar quando a cabeca
+        vira. Nao ha normal disponivel aqui para um especular de verdade — o
+        codigo assume a inclinacao do olhar, e o comentario diz isso.
+
+        O teste guarda so o essencial: dois olhares diferentes, dois brilhos.
+        """
+        lado = 40
+        u = np.linspace(0.0, 1.0, lado)
+        gx, gy = np.meshgrid(u, u)
+        p = np.stack([gx.ravel(), gy.ravel(),
+                      np.full(gx.size, 0.5)], axis=1).astype(np.float32)
+
+        def olhando(dy):
+            d = np.stack([np.full(p.shape[0], 0.3), np.full(p.shape[0], dy),
+                          np.full(p.shape[0], 0.9)], axis=1).astype(np.float32)
+            return float(cena_apartamento._textura(
+                "inox", p, 5, cena_apartamento.MATERIAIS["inox"], d).mean())
+
+        self.assertGreater(olhando(0.6), olhando(-0.6) + 8.0,
+                           "o inox nao responde ao angulo: e plastico cinza")
+
+    def test_o_inox_sem_direcao_de_raio_nao_estoura(self):
+        """
+        `dirs` chega None em quem desenha sem tracar — a maquete e os proprios
+        testes. Materiais que usam o angulo precisam aguentar a ausencia dele.
+        """
+        for m in ("inox", "tela"):
+            self._plano(m, dirs=False)      # basta nao levantar
+
+    def test_o_quadro_e_campo_de_cor_e_nao_confete(self):
+        """
+        Medido e corrigido: com campo de 11 cm a tela virava mosaico de
+        azulejo colorido e roubava a cena. Quadro na parede existe para a
+        parede parar de ser so parede, nao para disputar com o imovel.
+
+        Mede o salto entre pixels vizinhos contra a variacao da tela inteira:
+        campo grande tem muita cor e pouca borda.
+        """
+        plano = self._plano("quadro", metros=0.9).mean(axis=2)
+        salto = float(np.abs(np.diff(plano, axis=1)).mean())
+        espalha = float(plano.std())
+        self.assertGreater(espalha, 12.0, "a tela saiu de uma cor so")
+        self.assertLess(salto, 0.25 * espalha, "a tela virou confete")
+
+    def test_todo_material_citado_nas_plantas_existe_de_verdade(self):
+        """
+        Material com nome errado numa planta estoura o render no meio, com
+        KeyError e sem dizer qual imovel. Aqui diz o nome e custa nada.
+        """
+        for construir in plantas.TODAS:
+            p = construir()
+            for c in p["caixas"]:
+                self.assertIn(c[6], cena_apartamento.MATERIAIS,
+                              "%s: caixa com material inexistente" % p["nome"])
+
+
+class TestTracadoRapido(unittest.TestCase):
+    """
+    O tracador pula caixa que nao pode aparecer. Estes testes guardam o pulo.
+
+    POR QUE PRECISA DE GUARDA. A casa de 520 m2 levava 652 segundos por ponto
+    em 8k — vinte e quatro horas para os 133 pontos. O recorte derrubou para
+    87 s, sete vezes e meia mais rapido. Mas o modo de falhar de um recorte e
+    traicoeiro: ele nao quebra, ele APAGA. Uma caixa pulada a mais e um movel
+    que simplesmente nao esta no panorama, e ninguem repara numa casa com 322.
+
+    Por isso a prova aqui nao e "parece certo": e o desenho sair IDENTICO ao
+    do caminho lento, e os dois recortes nunca descartarem caixa que o caminho
+    lento diz que aparece.
+    """
+
+    def _fatia(self, planta, largura):
+        """Monta uma fatia de raios como o render monta, e devolve as pecas."""
+        cena_apartamento.usar(planta)
+        _nome, x, z = planta["pontos"][0]
+        o = np.array([x, cena_apartamento.OLHO, z], np.float32)
+        altura = largura // 2
+        d = cena_apartamento._direcoes(0, altura, largura, altura)
+        return o, d, cena_apartamento._inverso(d), altura
+
+    def _lento(self, o, d, inv):
+        """O caminho antigo: toda caixa contra todo raio, sem recorte."""
+        t, _face = cena_apartamento._casca(o, d)
+        dono = np.full(d.shape[0], -1, np.int32)
+        for k, c in enumerate(cena_apartamento.CAIXAS):
+            tk = cena_apartamento._caixa(o, inv, c)
+            perto = tk < t
+            t = np.where(perto, tk, t)
+            dono = np.where(perto, k, dono)
+        return t, dono
+
+    def _rapido(self, o, d, inv, linhas, largura):
+        t, _face = cena_apartamento._casca(o, d)
+        dono = np.full(d.shape[0], -1, np.int32)
+        r = cena_apartamento._Rascunho(linhas, largura)
+        cena_apartamento._todas_as_caixas(o, inv, d, t, dono, linhas, largura, r)
+        return t, dono
+
+    def test_o_tracado_rapido_desenha_o_mesmo_que_o_lento(self):
+        """
+        Identico, e nao parecido. Distancia e dono de cada raio, bit a bit —
+        porque a distancia vira o mapa de profundidade, e um erro de um
+        milimetro ali vira borrao ao caminhar.
+        """
+        for construir in (plantas.pavilhao, plantas.compacto):
+            planta = construir()
+            o, d, inv, altura = self._fatia(planta, 512)
+            t_l, dono_l = self._lento(o, d, inv)
+            t_r, dono_r = self._rapido(o, d, inv, altura, 512)
+            self.assertTrue(np.array_equal(t_l, t_r),
+                            "%s: a distancia mudou" % planta["nome"])
+            self.assertTrue(np.array_equal(dono_l, dono_r),
+                            "%s: outra caixa ficou na frente" % planta["nome"])
+
+    def test_o_recorte_de_colunas_nunca_perde_caixa(self):
+        """
+        Confere o recorte contra a VERDADE do caminho lento: para cada caixa
+        que o lento diz que aparece, toda coluna em que ela aparece tem de
+        estar dentro do arco que o recorte devolveu.
+        """
+        largura = 512
+        planta = plantas.compacto()
+        o, d, inv, altura = self._fatia(planta, largura)
+        _t, dono = self._lento(o, d, inv)
+        mapa = dono.reshape(altura, largura)
+        for k in sorted(set(np.unique(mapa)) - {-1}):
+            colunas = set(np.nonzero((mapa == k).any(axis=0))[0].tolist())
+            arco = set()
+            for a, b in cena_apartamento._colunas_da_caixa(
+                    o, cena_apartamento.CAIXAS[k], largura):
+                arco.update(range(a, b))
+            self.assertFalse(colunas - arco,
+                             "caixa %d aparece em coluna que o recorte descarta"
+                             % k)
+
+    def test_o_recorte_de_altura_nunca_perde_caixa(self):
+        """
+        O mesmo, para o recorte pela inclinacao do olhar.
+
+        EM FAIXAS ESTREITAS, e nao na imagem inteira. A primeira versao deste
+        teste usava uma fatia so, cobrindo de -90 a +90 graus — e nessa faixa
+        a tangente vai ao infinito, entao o recorte nao corta NADA e o teste
+        passava com ele quebrado. Conferido: apertando as tangentes em 20%,
+        nenhum teste acusava.
+
+        O render de verdade trabalha em faixas de algumas centenas de linhas.
+        E ai que o recorte morde, e e ai que ele tem de ser conferido.
+        """
+        largura = 512
+        planta = plantas.compacto()
+        cena_apartamento.usar(planta)
+        _nome, x, z = planta["pontos"][0]
+        o = np.array([x, cena_apartamento.OLHO, z], np.float32)
+        altura = largura // 2
+        passo = altura // 8
+        conferidas = 0
+        for y0 in range(0, altura, passo):
+            y1 = min(altura, y0 + passo)
+            d = cena_apartamento._direcoes(y0, y1, largura, altura)
+            inv = cena_apartamento._inverso(d)
+            _t, dono = self._lento(o, d, inv)
+            tan0, tan1 = cena_apartamento._tangentes_da_fatia(d)
+            for k in sorted(set(np.unique(dono)) - {-1}):
+                self.assertFalse(
+                    cena_apartamento._fora_da_faixa(
+                        o, cena_apartamento.CAIXAS[k], tan0, tan1),
+                    "linhas %d-%d: a caixa %d aparece e foi descartada"
+                    % (y0, y1, k))
+                conferidas += 1
+        self.assertGreater(conferidas, 20, "quase nada foi conferido")
+
+    def test_o_render_inteiro_em_varias_fatias_bate_com_o_sem_recorte(self):
+        """
+        A prova final, no caminho que roda de verdade: o render completo, com
+        varias fatias de linhas, contra o mesmo render com os dois recortes
+        DESLIGADOS. Tem de sair identico.
+
+        Vale os segundos que custa. As pecas foram conferidas uma a uma acima,
+        mas e aqui que elas trabalham juntas — e foi exatamente na montagem,
+        com o render fatiando a imagem, que o recorte de altura passou a
+        morder sem que nenhum teste de peca percebesse.
+        """
+        planta = plantas.pavilhao()
+        cena_apartamento.usar(planta)
+        _nome, x, z = planta["pontos"][0]
+        largura = 3072                     # garante mais de uma fatia
+        self.assertLess(2 ** 22 // largura, largura // 2, "ficou uma fatia so")
+
+        com, dcom = cena_apartamento.render(x, z, largura)
+        faixa = cena_apartamento._fora_da_faixa
+        colunas = cena_apartamento._colunas_da_caixa
+        try:
+            cena_apartamento._fora_da_faixa = lambda o, c, a, b: False
+            cena_apartamento._colunas_da_caixa = lambda o, c, lg: ((0, lg),)
+            sem, dsem = cena_apartamento.render(x, z, largura)
+        finally:
+            cena_apartamento._fora_da_faixa = faixa
+            cena_apartamento._colunas_da_caixa = colunas
+
+        self.assertTrue(np.array_equal(com, sem),
+                        "o recorte mudou a imagem: %d pixels"
+                        % int((com != sem).any(axis=2).sum()))
+        self.assertTrue(np.array_equal(dcom, dsem),
+                        "o recorte mudou a profundidade")
+
+    def test_o_recorte_de_colunas_corta_mesmo_alguma_coisa(self):
+        """
+        Recorte que nunca recorta nao e recorte — seria o teste de cima
+        passando com a otimizacao desligada, e a casa voltaria a 24 horas.
+
+        Um movel pequeno e distante tem de caber numa fracao das colunas.
+        """
+        o = np.array([2.0, 1.50, 2.0], np.float32)
+        longe = (11.80, 0.0, 11.80, 12.20, 0.80, 12.20, "madeira_esc")
+        colunas = sum(b - a for a, b in
+                      cena_apartamento._colunas_da_caixa(o, longe, 4096))
+        self.assertLess(colunas, 4096 * 0.08,
+                        "o recorte de colunas nao esta cortando nada")
+
+    def test_o_recorte_de_altura_corta_mesmo_alguma_coisa(self):
+        """Olhando para o alto, o tapete do chao nao pode entrar na conta."""
+        o = np.array([3.0, 1.50, 3.0], np.float32)
+        tapete = (1.0, 0.0, 1.0, 5.0, 0.012, 5.0, "tapete")
+        # faixa de olhar bem para cima: entre 60 e 80 graus
+        tan0, tan1 = math.tan(math.radians(60)), math.tan(math.radians(80))
+        self.assertTrue(cena_apartamento._fora_da_faixa(o, tapete, tan0, tan1),
+                        "o tapete entrou na conta de quem olha para o teto")
+        # e olhando para a frente ele volta, porque esta nos pes
+        self.assertFalse(cena_apartamento._fora_da_faixa(o, tapete, -2.0, 0.1))
+
+    def test_camera_dentro_da_pegada_enxerga_todas_as_colunas(self):
+        """
+        Caso que o arco nao resolve: a parede em volta, o tapete sob os pes.
+        Vista de dentro, a caixa ocupa a volta inteira — e tratar isso como um
+        arco apagaria metade do chao.
+        """
+        o = np.array([3.0, 1.50, 3.0], np.float32)
+        tapete = (1.0, 0.0, 1.0, 5.0, 0.012, 5.0, "tapete")
+        self.assertEqual(cena_apartamento._colunas_da_caixa(o, tapete, 512),
+                         ((0, 512),))
+
+    def test_caixa_na_emenda_do_panorama_volta_em_dois_pedacos(self):
+        """
+        O panorama tem costura: a coluna 0 e a ultima sao vizinhas no mundo e
+        opostas no vetor. Um movel bem atras da camera cai em cima dela, e um
+        arco so o cortaria pela metade — o movel apareceria partido.
+        """
+        o = np.array([5.0, 1.50, 5.0], np.float32)
+        atras = (4.50, 0.0, 2.00, 5.50, 1.20, 3.00, "madeira_esc")
+        faixas = cena_apartamento._colunas_da_caixa(o, atras, 512)
+        self.assertEqual(len(faixas), 2, "a emenda nao foi tratada: %r" % (faixas,))
+        colunas = set()
+        for a, b in faixas:
+            colunas.update(range(a, b))
+        self.assertIn(0, colunas)
+        self.assertIn(511, colunas)
+        self.assertLess(len(colunas), 512 * 0.5)
 
 
 def limpar():

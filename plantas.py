@@ -113,6 +113,166 @@ def _pontos_por_cobertura(zonas, caixas, larg, fundo, raio, folga=0.45):
 
 # ------------------------------------------------------ 1. apartamento padrao
 
+# ------------------------------------------------- moveis que se repetem
+#
+# POR QUE ISTO EXISTE. A casa grande tem 22 comodos. Escrita caixa por caixa
+# daria umas quinhentas linhas de tuplas de sete numeros, e um numero trocado
+# no meio nao apareceria em revisao nenhuma — apareceria no render, horas
+# depois, com a cama atravessando o guarda-roupa.
+#
+# Cada funcao aqui devolve a lista de caixas de um movel JA MONTADO, nas
+# proporcoes certas. Quem escreve a planta diz onde o movel fica, e nao de que
+# ele e feito por dentro.
+#
+# Convencao de orientacao: `frente` diz para que lado o movel encara, em
+# "x+", "x-", "z+" ou "z-". Um sofa que encara z+ tem o encosto em z0.
+
+
+def _cama(x0, z0, larg, comp, madeira="madeira_esc", roupa="roupa_cama"):
+    """
+    Cama com estrado, colchao, cabeceira e dois travesseiros.
+
+    A cabeceira fica sempre em z0: a cama encosta pela cabeca, e deixar isso
+    implicito evita o erro de pendurar o quadro atras dos pes.
+    """
+    x1, z1 = x0 + larg, z0 + comp
+    meio = (x0 + x1) / 2.0
+    return [
+        (x0, 0.08, z0, x1, 0.42, z1, madeira),
+        (x0, 0.42, z0, x1, 0.66, z1, roupa),
+        (x0, 0.0, z0 - 0.07, x1, 1.05, z0, madeira),            # cabeceira
+        (x0 + 0.12, 0.66, z0 + 0.10, meio - 0.05, 0.80, z0 + 0.54, roupa),
+        (meio + 0.05, 0.66, z0 + 0.10, x1 - 0.12, 0.80, z0 + 0.54, roupa),
+    ]
+
+
+def _mesa(x0, z0, x1, z1, alt=0.76, tampo="madeira_esc", pe="madeira_esc"):
+    """Mesa com tampo e quatro pes. Pe de 7 cm: mais fino some no render."""
+    e, r = 0.07, 0.09
+    return [
+        (x0, alt - 0.05, z0, x1, alt, z1, tampo),
+        (x0 + r, 0.0, z0 + r, x0 + r + e, alt - 0.05, z0 + r + e, pe),
+        (x1 - r - e, 0.0, z0 + r, x1 - r, alt - 0.05, z0 + r + e, pe),
+        (x0 + r, 0.0, z1 - r - e, x0 + r + e, alt - 0.05, z1 - r, pe),
+        (x1 - r - e, 0.0, z1 - r - e, x1 - r, alt - 0.05, z1 - r, pe),
+    ]
+
+
+def _cadeira(x, z, frente="z+", assento="estofado", encosto="estofado_b"):
+    """Cadeira de 46 cm. O encosto fica do lado OPOSTO ao que ela encara."""
+    a, h, e = 0.46, 0.45, 0.07
+    caixas = [(x, 0.0, z, x + a, h, z + a, assento)]
+    if frente == "z+":
+        caixas.append((x, h, z, x + a, h + 0.50, z + e, encosto))
+    elif frente == "z-":
+        caixas.append((x, h, z + a - e, x + a, h + 0.50, z + a, encosto))
+    elif frente == "x+":
+        caixas.append((x, h, z, x + e, h + 0.50, z + a, encosto))
+    else:
+        caixas.append((x + a - e, h, z, x + a, h + 0.50, z + a, encosto))
+    return caixas
+
+
+def _sofa(x0, z0, x1, z1, frente, couro="couro"):
+    """Sofa com base, assento, encosto e dois bracos."""
+    b = 0.24
+    caixas = [(x0, 0.0, z0, x1, 0.42, z1, couro),
+              (x0, 0.42, z0, x1, 0.64, z1, couro)]
+    if frente in ("z+", "z-"):
+        ze = (z0, z0 + b) if frente == "z+" else (z1 - b, z1)
+        caixas += [(x0, 0.64, ze[0], x1, 1.04, ze[1], couro),
+                   (x0, 0.42, z0, x0 + b, 0.80, z1, couro),
+                   (x1 - b, 0.42, z0, x1, 0.80, z1, couro)]
+    else:
+        xe = (x0, x0 + b) if frente == "x+" else (x1 - b, x1)
+        caixas += [(xe[0], 0.64, z0, xe[1], 1.04, z1, couro),
+                   (x0, 0.42, z0, x1, 0.80, z0 + b, couro),
+                   (x0, 0.42, z1 - b, x1, 0.80, z1, couro)]
+    return caixas
+
+
+def _armario(x0, z0, x1, z1, frente, alt=PE_DIREITO, corpo="laminado"):
+    """Armario do chao ao teto, com dois puxadores na face da frente."""
+    caixas = [(x0, 0.0, z0, x1, alt, z1, corpo)]
+    a, b = 0.95, 1.45                    # alturas dos puxadores
+    if frente in ("z+", "z-"):
+        z = (z0 - 0.025, z0) if frente == "z-" else (z1, z1 + 0.025)
+        t = (x1 - x0) / 3.0
+        caixas += [(x0 + t * 0.7, a, z[0], x0 + t * 1.0, b, z[1], "metal"),
+                   (x0 + t * 2.0, a, z[0], x0 + t * 2.3, b, z[1], "metal")]
+    else:
+        x = (x0 - 0.025, x0) if frente == "x-" else (x1, x1 + 0.025)
+        t = (z1 - z0) / 3.0
+        caixas += [(x[0], a, z0 + t * 0.7, x[1], b, z0 + t * 1.0, "metal"),
+                   (x[0], a, z0 + t * 2.0, x[1], b, z0 + t * 2.3, "metal")]
+    return caixas
+
+
+def _quadro(parede, valor, lado, a, b, y0, y1):
+    """
+    Um quadro pendurado: moldura rente a parede, tela SALIENTE a frente dela.
+
+    A tela precisa sair da moldura. Rente, o tracador decide no fio da navalha
+    qual das duas o raio encontrou, e a tela aparece e some conforme o angulo.
+
+    `parede` e "x" ou "z"; `lado` vale +1 quando a parede olha para o lado
+    positivo do eixo (parede no comeco do comodo) e -1 quando olha para tras.
+    """
+    fundo, sai = 0.055, 0.095
+    if parede == "z":
+        m = (valor, valor + fundo) if lado > 0 else (valor - fundo, valor)
+        t = ((valor + fundo, valor + sai) if lado > 0
+             else (valor - sai, valor - fundo))
+        return [(a, y0, m[0], b, y1, m[1], "madeira_esc"),
+                (a + 0.10, y0 + 0.10, t[0], b - 0.10, y1 - 0.10, t[1], "quadro")]
+    m = (valor, valor + fundo) if lado > 0 else (valor - fundo, valor)
+    t = ((valor + fundo, valor + sai) if lado > 0
+         else (valor - sai, valor - fundo))
+    return [(m[0], y0, a, m[1], y1, b, "madeira_esc"),
+            (t[0], y0 + 0.10, a + 0.10, t[1], y1 - 0.10, b - 0.10, "quadro")]
+
+
+def _televisao(parede, valor, lado, a, b, chao=True):
+    """Painel na parede, tela saliente e, opcionalmente, o rack embaixo."""
+    p, s = 0.09, 0.14
+    y0, y1 = 0.95, 1.80
+    if parede == "z":
+        pm = (valor, valor + p) if lado > 0 else (valor - p, valor)
+        tm = ((valor + p, valor + s) if lado > 0 else (valor - s, valor - p))
+        caixas = [(a, 0.32, pm[0], b, 2.15, pm[1], "madeira_esc"),
+                  (a + 0.22, y0, tm[0], b - 0.22, y1, tm[1], "tela")]
+        if chao:
+            rm = (valor, valor + 0.42) if lado > 0 else (valor - 0.42, valor)
+            caixas.append((a, 0.0, rm[0], b, 0.32, rm[1], "madeira_esc"))
+        return caixas
+    pm = (valor, valor + p) if lado > 0 else (valor - p, valor)
+    tm = ((valor + p, valor + s) if lado > 0 else (valor - s, valor - p))
+    caixas = [(pm[0], 0.32, a, pm[1], 2.15, b, "madeira_esc"),
+              (tm[0], y0, a + 0.22, tm[1], y1, b - 0.22, "tela")]
+    if chao:
+        rm = (valor, valor + 0.42) if lado > 0 else (valor - 0.42, valor)
+        caixas.append((rm[0], 0.0, a, rm[1], 0.32, b, "madeira_esc"))
+    return caixas
+
+
+def _bancada(x0, z0, x1, z1, alt=0.92, tampo="marmore", corpo="laminado"):
+    """Bancada de cozinha: corpo com rodape recuado e tampo de pedra."""
+    return [
+        (x0, 0.10, z0, x1, alt - 0.04, z1, corpo),
+        (x0 + 0.05, 0.0, z0 + 0.05, x1 - 0.05, 0.10, z1 - 0.05, "metal"),
+        (x0 - 0.015, alt - 0.04, z0 - 0.015, x1 + 0.015, alt, z1 + 0.015, tampo),
+    ]
+
+
+def _vaso(x, z, raio=0.24, alt=1.35, pote="pedra", folha="planta"):
+    """Vaso com planta. Duas caixas, porque so o verde parece brinquedo."""
+    return [
+        (x - raio, 0.0, z - raio, x + raio, 0.42, z + raio, pote),
+        (x - raio * 1.25, 0.42, z - raio * 1.25,
+         x + raio * 1.25, alt, z + raio * 1.25, folha),
+    ]
+
+
 def apartamento():
     larg, fundo = 12.0, 9.0
     wx1, wx2, wx3, wz1 = 4.40, 8.20, 6.30, 4.50
@@ -822,4 +982,338 @@ def quarto():
                           "de foto e de escaneamento, não de trena.")
 
 
-TODAS = [apartamento, compacto, cobertura, mansao, pavilhao, quarto]
+# ------------------------------------------- 7. a casa grande (520 m2)
+
+def casa_grande():
+    """
+    Uma casa inteira: 26 x 20 m, 520 m2, 23 comodos, com vista para o mar.
+
+    O QUE ELA TEM QUE AS OUTRAS NAO TINHAM. As plantas anteriores mostravam um
+    pedaco de imovel — um apartamento, um pavilhao aberto, um quarto. Esta tem
+    a casa COMPLETA, com as tres coisas que faltavam para parecer uma casa de
+    verdade e nao uma maquete de sala:
+
+    1. Circulacao. Um corredor de 19 m ligando a ala social a intima, e um
+       corredor menor servindo os quartos do fundo. Andar por corredor e
+       metade da experiencia de visitar uma casa, e era exatamente o que
+       nenhuma planta anterior oferecia.
+    2. Servico. Despensa, lavanderia, deposito, rouparia. Comodo feio tambem
+       conta: quem compra casa de 520 m2 pergunta onde fica a lavanderia.
+    3. Materiais de verdade em cada ambiente. Tijolo aparente na adega,
+       concreto na academia e na varanda, azulejo nos banhos, marmore nas
+       bancadas, couro nos sofas, palha na varanda.
+
+    OS COMODOS, em tres faixas:
+
+      z 0,0 a 8,4   social   varanda gourmet, sala de estar, hall, sala de
+                             jantar, copa, cozinha, despensa, lavabo,
+                             lavanderia, deposito
+      z 8,4 a 10,2  corredor a espinha da casa, de x 7,2 ate a parede do fundo
+      z 10,2 a 20   intima   suite master com closet e banho, quarto 2, quarto
+                             3, banho social, rouparia, sala de estudos,
+                             adega, academia, sala intima
+
+    O QUE ELA NAO E: um imovel que existe. E inventada, como as cinco
+    primeiras — e ao contrario do quarto, que saiu de fotos de um quarto real.
+    Serve para demonstrar navegacao, medicao e caminhada numa casa do tamanho
+    que o corretor de alto padrao vende, nao para julgar arquitetura.
+    """
+    larg, fundo = 26.00, 20.00
+
+    zonas = [
+        # social
+        ("Varanda gourmet",   0.00,  5.40,  0.00,  8.40, "concreto", "porcelanato"),
+        ("Sala de estar",     5.40, 12.60,  0.00,  8.40, "parede", "piso"),
+        ("Hall de entrada",  12.60, 16.20,  0.00,  4.20, "parede", "porcelanato"),
+        ("Sala de jantar",   16.20, 21.00,  0.00,  4.20, "jantar", "piso"),
+        ("Despensa",         21.00, 23.40,  0.00,  2.20, "servico", "porcelanato"),
+        ("Lavabo",           21.00, 23.40,  2.20,  4.20, "azulejo", "porcelanato"),
+        ("Depósito",         23.40, 26.00,  0.00,  4.20, "servico", "porcelanato"),
+        ("Copa",             12.60, 18.00,  4.20,  8.40, "cozinha", "porcelanato"),
+        ("Cozinha",          18.00, 23.40,  4.20,  8.40, "cozinha", "porcelanato"),
+        ("Lavanderia",       23.40, 26.00,  4.20,  8.40, "servico", "porcelanato"),
+        # circulacao
+        ("Corredor",          7.20, 26.00,  8.40, 10.20, "parede", "piso"),
+        # intima
+        ("Suíte master",      0.00,  7.20,  8.40, 16.40, "parede_q1", "piso"),
+        ("Closet",            0.00,  3.60, 16.40, 20.00, "parede_q1", "piso"),
+        ("Banho da suíte",    3.60,  7.20, 16.40, 20.00, "azulejo", "porcelanato"),
+        ("Rouparia",          7.20,  9.80, 10.20, 13.20, "servico", "porcelanato"),
+        ("Banho social",      9.80, 12.60, 10.20, 13.20, "azulejo", "porcelanato"),
+        ("Quarto 2",          7.20, 12.60, 13.20, 20.00, "parede_q2", "piso"),
+        ("Corredor íntimo",  12.60, 14.40, 10.20, 20.00, "parede", "piso"),
+        ("Sala de estudos",  14.40, 18.20, 10.20, 13.60, "parede", "piso"),
+        ("Adega",            18.20, 21.40, 10.20, 13.60, "tijolo", "pedra"),
+        ("Academia",         21.40, 26.00, 10.20, 13.60, "concreto", "porcelanato"),
+        ("Quarto 3",         14.40, 19.00, 13.60, 20.00, "parede_q1", "piso"),
+        ("Sala íntima",      19.00, 26.00, 13.60, 20.00, "parede", "piso"),
+    ]
+
+    # As paredes. O vao entre dois trechos e a porta — e cada porta aqui foi
+    # conferida contra o comodo que ela serve: comodo sem porta e comodo que
+    # o visitante ve pela planta e nunca alcanca andando.
+    paredes = (
+        _px(5.40,  [(0.00, 2.20), (6.20, 8.40)]) +
+        _px(12.60, [(0.00, 1.40), (2.40, 5.40), (6.40, 8.40)]) +
+        _px(16.20, [(0.00, 1.00), (3.20, 4.20)]) +
+        _px(18.00, [(4.20, 5.00), (7.00, 8.40)]) +
+        _px(21.00, [(0.00, 0.80), (1.60, 2.80), (3.60, 4.20)]) +
+        _px(23.40, [(0.00, 5.40), (6.20, 8.40)]) +
+        _px(7.20,  [(8.40, 9.10), (10.00, 20.00)]) +
+        _px(3.60,  [(16.40, 20.00)]) +
+        _px(9.80,  [(10.20, 13.20)]) +
+        _px(12.60, [(10.20, 11.20), (12.00, 14.20), (15.10, 20.00)]) +
+        _px(14.40, [(10.20, 15.20), (16.10, 20.00)]) +
+        _px(18.20, [(10.20, 11.60), (12.40, 13.60)]) +
+        _px(21.40, [(10.20, 11.60), (12.40, 13.60)]) +
+        _px(19.00, [(13.60, 20.00)]) +
+        _pz(2.20,  [(21.00, 23.40)]) +
+        _pz(4.20,  [(12.60, 13.60), (15.00, 16.60), (17.60, 19.40),
+                    (20.40, 24.20), (25.20, 26.00)]) +
+        _pz(8.40,  [(0.00, 11.00), (12.20, 14.40), (15.60, 26.00)]) +
+        _pz(10.20, [(7.20, 8.00), (8.80, 12.60), (14.40, 15.60),
+                    (16.50, 19.40), (20.30, 23.00), (23.90, 26.00)]) +
+        _pz(13.20, [(7.20, 12.60)]) +
+        _pz(13.60, [(14.40, 26.00)]) +
+        _pz(16.40, [(0.00, 1.20), (2.10, 5.00), (5.90, 7.20)])
+    )
+
+    moveis = (
+        # ---------------------------------------------- varanda gourmet
+        _bancada(0.20, 0.40, 1.10, 3.60) +
+        [(0.20, 0.92, 1.30, 1.10, 2.15, 2.50, "tijolo"),       # churrasqueira
+         (0.20, 2.15, 1.40, 1.15, 2.52, 2.40, "inox"),         # coifa
+         (4.70, 0.00, 0.30, 5.25, 0.50, 2.80, "pedra"),        # jardineira
+         (4.70, 0.50, 0.35, 5.25, 1.25, 2.75, "planta")] +
+        _mesa(1.90, 4.20, 4.70, 6.60, tampo="madeira_clara") +
+        _cadeira(2.10, 3.60, "z+", "palha", "palha") +
+        _cadeira(2.90, 3.60, "z+", "palha", "palha") +
+        _cadeira(3.70, 3.60, "z+", "palha", "palha") +
+        _cadeira(2.10, 6.70, "z-", "palha", "palha") +
+        _cadeira(2.90, 6.70, "z-", "palha", "palha") +
+        _cadeira(3.70, 6.70, "z-", "palha", "palha") +
+        _vaso(4.90, 7.60) +
+
+        # ---------------------------------------------- sala de estar
+        _sofa(6.40, 3.80, 7.30, 6.80, "x+") +
+        _sofa(8.60, 2.40, 9.60, 3.30, "z+") +
+        _sofa(10.40, 2.40, 11.40, 3.30, "z+") +
+        _televisao("x", 12.60, -1, 4.20, 7.00) +
+        _quadro("x", 5.40, 1, 6.50, 7.90, 1.15, 2.05) +
+        [(7.60, 0.00, 3.60, 11.80, 0.012, 7.20, "tapete"),
+         (8.80, 0.38, 4.60, 10.60, 0.44, 6.00, "vidro"),       # mesa de centro
+         (9.20, 0.00, 4.90, 10.20, 0.38, 5.70, "madeira_esc"),
+         (5.55, 0.00, 0.70, 6.15, 2.30, 2.90, "madeira_esc"),  # estante
+         (5.62, 0.30, 0.78, 6.10, 2.15, 2.82, "livro_a"),
+         (11.90, 0.00, 7.40, 12.10, 1.55, 7.60, "metal"),      # luminaria
+         (11.76, 1.55, 7.26, 12.24, 1.85, 7.74, "roupa_cama")] +
+        _vaso(12.10, 1.00) +
+
+        # ---------------------------------------------- hall de entrada
+        [(12.80, 0.30, 0.20, 13.20, 0.86, 1.30, "madeira_esc"),
+         (13.40, 0.00, 0.60, 15.60, 0.012, 2.40, "tapete")] +
+        _quadro("x", 12.60, 1, 2.60, 3.90, 1.20, 2.10) +
+        _vaso(15.60, 3.70) +
+
+        # ---------------------------------------------- sala de jantar
+        _mesa(17.10, 1.30, 20.10, 2.90) +
+        _cadeira(17.40, 0.70, "z+") + _cadeira(18.30, 0.70, "z+") +
+        _cadeira(19.20, 0.70, "z+") + _cadeira(17.40, 3.00, "z-") +
+        _cadeira(18.30, 3.00, "z-") + _cadeira(19.20, 3.00, "z-") +
+        _cadeira(16.50, 1.85, "x+") + _cadeira(20.25, 1.85, "x-") +
+        _quadro("z", 4.20, -1, 17.80, 19.30, 1.25, 2.15) +
+        [(16.32, 0.00, 3.55, 18.40, 0.88, 4.05, "madeira_esc"),   # buffet
+         (18.10, 2.35, 1.90, 19.10, 2.60, 2.40, "vidro")] +       # lustre
+
+        # ---------------------------------------------- copa
+        _mesa(13.40, 5.40, 15.60, 7.00, alt=0.75, tampo="marmore") +
+        _cadeira(13.70, 4.80, "z+") + _cadeira(14.60, 4.80, "z+") +
+        _cadeira(13.70, 7.10, "z-") + _cadeira(14.60, 7.10, "z-") +
+        _armario(16.60, 7.60, 17.90, 8.25, "z-", alt=2.20) +
+        _vaso(17.40, 4.90) +
+
+        # ---------------------------------------------- cozinha
+        _bancada(18.20, 7.70, 23.20, 8.25) +
+        _bancada(18.20, 4.35, 19.00, 7.20) +
+        _bancada(20.20, 5.40, 22.60, 6.60) +                       # ilha
+        [(18.20, 1.60, 7.95, 23.20, 2.45, 8.25, "laminado"),       # aereos
+         (22.40, 0.00, 4.35, 23.20, 1.95, 5.10, "inox"),           # geladeira
+         (20.60, 0.88, 7.72, 21.80, 0.94, 8.20, "inox"),           # cooktop
+         (20.50, 1.95, 7.80, 21.90, 2.30, 8.25, "inox"),           # coifa
+         (20.60, 0.00, 6.70, 20.95, 0.72, 7.05, "metal"),
+         (20.52, 0.72, 6.62, 21.03, 0.80, 7.13, "couro"),
+         (21.60, 0.00, 6.70, 21.95, 0.72, 7.05, "metal"),
+         (21.52, 0.72, 6.62, 22.03, 0.80, 7.13, "couro")] +
+
+        # ---------------------------------------------- despensa / lavabo
+        # Prateleira de um lado so. Com as duas sobrava um corredor de 80
+        # cm, e a amostragem nao achava UM ponto onde a camera coubesse: a
+        # despensa aparecia na planta e o visitante nunca chegava nela.
+        [(21.12, 0.30, 0.20, 21.55, 2.30, 2.05, "laminado"),
+         (22.75, 0.78, 2.55, 23.40, 0.88, 3.15, "marmore"),        # cuba
+         (23.33, 1.05, 2.60, 23.40, 1.95, 3.10, "vidro"),          # espelho
+         (21.15, 0.00, 3.45, 21.65, 0.78, 4.15, "louca")] +
+
+        # ---------------------------------------------- deposito / lavanderia
+        [(23.50, 0.20, 0.10, 24.00, 2.40, 4.10, "laminado"),
+         (25.00, 0.00, 1.00, 25.90, 1.20, 2.40, "madeira_esc"),
+         (23.60, 0.00, 4.40, 24.25, 0.88, 5.05, "inox"),           # maquina
+         (24.35, 0.00, 4.40, 25.00, 0.88, 5.05, "inox")] +         # secadora
+        _bancada(23.50, 7.70, 25.90, 8.25, tampo="inox") +
+        _armario(25.20, 4.35, 25.90, 6.60, "x-", alt=2.20) +
+
+        # ---------------------------------------------- corredor
+        _quadro("z", 8.40, 1, 17.00, 18.60, 1.20, 2.00) +
+        _quadro("z", 8.40, 1, 20.00, 21.40, 1.20, 2.00) +
+        [(8.20, 0.30, 8.55, 10.40, 0.85, 8.95, "madeira_esc")] +
+        _vaso(25.30, 9.30) +
+
+        # ---------------------------------------------- suite master
+        _cama(2.40, 8.59, 1.90, 2.10) +
+        _televisao("z", 16.40, -1, 2.20, 4.60, chao=False) +
+        _sofa(5.40, 13.60, 6.60, 14.80, "x-") +
+        [(1.90, 0.00, 8.60, 2.35, 0.55, 9.05, "madeira_esc"),
+         (4.35, 0.00, 8.60, 4.80, 0.55, 9.05, "madeira_esc"),
+         (1.80, 0.00, 10.80, 5.00, 0.012, 13.20, "tapete"),
+         (0.06, 0.00, 9.40, 0.22, 2.50, 15.40, "cortina")] +
+        _vaso(6.50, 9.40) +
+
+        # ---------------------------------------------- closet / banho suite
+        _armario(0.15, 16.60, 0.80, 19.80, "x+") +
+        _armario(2.80, 16.60, 3.45, 19.80, "x-") +
+        [(1.20, 0.00, 17.80, 2.40, 0.90, 18.90, "madeira_esc"),
+         (1.40, 0.00, 19.20, 2.20, 0.45, 19.60, "estofado")] +
+        _bancada(3.80, 16.60, 6.00, 17.20) +
+        [(3.80, 1.10, 16.53, 6.00, 2.10, 16.60, "vidro"),          # espelho
+         (6.10, 0.00, 18.40, 7.05, 0.58, 19.80, "louca"),          # banheira
+         (3.75, 0.00, 18.80, 5.30, 2.10, 19.85, "vidro"),          # box
+         (5.60, 0.00, 17.40, 6.10, 0.78, 18.10, "louca")] +
+
+        # ---------------------------------------------- rouparia / banho social
+        _armario(7.40, 10.40, 9.60, 11.05, "z+", alt=2.30) +
+        [(7.40, 0.30, 12.60, 9.60, 2.30, 13.05, "laminado")] +
+        _bancada(10.00, 10.40, 11.80, 11.00) +
+        [(10.00, 1.10, 10.33, 11.80, 2.05, 10.40, "vidro"),
+         (12.00, 0.00, 10.50, 12.50, 0.78, 11.20, "louca"),
+         (9.95, 0.00, 12.00, 11.40, 2.10, 13.05, "vidro")] +
+
+        # ---------------------------------------------- quarto 2
+        _cama(9.00, 13.39, 1.60, 2.00) +
+        _armario(7.35, 17.60, 8.00, 19.80, "x+") +
+        _mesa(10.80, 18.60, 12.45, 19.60, alt=0.74) +
+        _cadeira(11.40, 17.90, "z-") +
+        _televisao("x", 12.60, -1, 15.30, 17.10, chao=False) +
+        [(8.55, 0.00, 13.40, 8.95, 0.52, 13.85, "madeira_esc"),
+         (10.65, 0.00, 13.40, 11.05, 0.52, 13.85, "madeira_esc"),
+         (8.60, 0.00, 15.60, 11.60, 0.012, 18.00, "tapete")] +
+
+        # ---------------------------------------------- corredor intimo
+        _quadro("x", 14.40, -1, 17.40, 18.80, 1.20, 2.00) +
+        [(12.75, 0.30, 18.90, 13.15, 0.85, 19.70, "madeira_esc")] +
+
+        # ---------------------------------------------- sala de estudos
+        _mesa(15.00, 11.40, 17.60, 12.60, alt=0.74) +
+        _cadeira(16.00, 12.80, "z-") +
+        [(14.55, 0.00, 12.40, 15.00, 2.30, 13.45, "madeira_esc"),
+         (14.62, 0.30, 12.48, 14.95, 2.15, 13.38, "livro_a"),
+         (15.40, 0.00, 13.10, 17.80, 2.30, 13.52, "madeira_esc"),
+         (15.48, 0.30, 13.14, 17.72, 2.15, 13.46, "livro_a")] +
+
+        # ---------------------------------------------- adega
+        _mesa(19.30, 11.60, 20.40, 12.70, alt=1.05) +
+        [(18.35, 0.20, 10.40, 18.85, 2.30, 13.40, "madeira_esc"),
+         (20.85, 0.20, 10.40, 21.35, 2.30, 13.40, "madeira_esc"),
+         (19.50, 0.00, 12.90, 19.85, 0.72, 13.25, "metal"),
+         (19.42, 0.72, 12.82, 19.93, 0.80, 13.33, "couro"),
+         (20.05, 0.00, 12.90, 20.40, 0.72, 13.25, "metal"),
+         (19.97, 0.72, 12.82, 20.48, 0.80, 13.33, "couro")] +
+
+        # ---------------------------------------------- academia
+        [(21.60, 0.60, 13.46, 25.80, 2.40, 13.52, "vidro"),        # espelho
+         (22.00, 0.00, 10.60, 22.90, 0.25, 12.00, "metal"),        # esteira
+         (22.00, 0.25, 10.60, 22.90, 1.35, 10.90, "tela"),
+         (23.60, 0.00, 11.20, 24.10, 0.48, 12.40, "estofado"),
+         (25.20, 0.00, 10.50, 25.80, 0.70, 12.60, "metal")] +
+
+        # ---------------------------------------------- quarto 3
+        _cama(15.90, 13.79, 1.50, 2.00) +
+        _armario(18.20, 17.40, 18.85, 19.70, "x-") +
+        _mesa(14.60, 18.40, 16.30, 19.40, alt=0.74) +
+        _cadeira(15.20, 17.70, "z-") +
+        [(15.45, 0.00, 13.80, 15.85, 0.52, 14.25, "madeira_esc"),
+         (17.45, 0.00, 13.80, 17.85, 0.52, 14.25, "madeira_esc"),
+         (15.40, 0.00, 16.00, 18.00, 0.012, 18.40, "tapete")] +
+
+        # ---------------------------------------------- sala intima
+        _sofa(20.20, 15.00, 23.80, 16.00, "z-") +
+        _sofa(24.60, 14.40, 25.70, 15.50, "x-") +
+        _televisao("z", 13.60, 1, 20.80, 23.40) +
+        [(20.00, 0.00, 13.90, 24.20, 0.012, 15.00, "tapete"),
+         (21.60, 0.38, 14.20, 22.80, 0.44, 14.80, "vidro"),
+         (21.90, 0.00, 14.32, 22.50, 0.38, 14.68, "madeira_esc"),
+         (19.15, 0.00, 17.00, 19.70, 2.30, 19.60, "madeira_esc"),
+         (19.22, 0.30, 17.08, 19.63, 2.15, 19.52, "livro_a"),
+         (20.20, 0.00, 19.80, 25.40, 2.50, 19.96, "cortina")] +
+        _vaso(25.40, 18.60)
+    )
+
+    caixas = paredes + moveis
+
+    janelas = [
+        # fachada da frente
+        (0.60, 4.80, 0.00, 0.00, 0.30, 2.40),        # varanda, vao aberto
+        (6.40, 11.60, 0.00, 0.00, 0.50, 2.40),       # sala de estar
+        (13.60, 15.20, 0.00, 0.00, 0.00, 2.20),      # porta de entrada
+        (17.40, 20.40, 0.00, 0.00, 0.80, 2.30),      # sala de jantar
+        (24.20, 25.40, 0.00, 0.00, 1.40, 2.20),      # deposito
+        # lateral esquerda
+        (0.00, 0.00, 1.20, 7.20, 0.30, 2.40),        # varanda
+        (0.00, 0.00, 9.60, 15.20, 0.60, 2.30),       # suite master
+        (0.00, 0.00, 17.60, 19.20, 1.50, 2.30),      # closet
+        # fundos
+        (4.60, 6.40, 20.00, 20.00, 1.30, 2.30),      # banho da suite
+        (8.40, 11.60, 20.00, 20.00, 0.80, 2.30),     # quarto 2
+        (13.00, 14.00, 20.00, 20.00, 1.60, 2.40),    # corredor intimo
+        (15.40, 18.20, 20.00, 20.00, 0.80, 2.30),    # quarto 3
+        (20.40, 25.20, 20.00, 20.00, 0.50, 2.40),    # sala intima
+        # lateral direita
+        (26.00, 26.00, 5.40, 7.40, 1.30, 2.20),      # lavanderia
+        (26.00, 26.00, 8.80, 9.80, 1.50, 2.40),      # corredor
+        (26.00, 26.00, 10.80, 13.00, 0.80, 2.30),    # academia
+        (26.00, 26.00, 15.00, 19.00, 0.70, 2.30),    # sala intima
+    ]
+
+    luzes = [
+        (2.70, 2.55, 4.20, 0.85),      (9.00, 2.55, 4.20, 1.00),
+        (14.40, 2.55, 2.10, 0.80),     (18.90, 2.55, 2.10, 0.95),
+        (22.20, 2.55, 1.10, 0.50),     (22.20, 2.55, 3.20, 0.55),
+        (24.70, 2.55, 2.10, 0.50),     (15.30, 2.55, 6.30, 0.90),
+        (20.70, 2.55, 6.30, 0.95),     (24.70, 2.55, 6.30, 0.60),
+        (11.00, 2.55, 9.30, 0.70),     (19.00, 2.55, 9.30, 0.70),
+        (3.60, 2.55, 12.40, 1.00),     (1.80, 2.55, 18.20, 0.65),
+        (5.40, 2.55, 18.20, 0.70),     (8.50, 2.55, 11.70, 0.50),
+        (11.20, 2.55, 11.70, 0.70),    (9.90, 2.55, 16.60, 0.95),
+        (13.50, 2.55, 15.00, 0.60),    (16.30, 2.55, 11.90, 0.80),
+        (19.80, 2.55, 11.90, 0.50),    (23.70, 2.55, 11.90, 0.85),
+        (16.70, 2.55, 16.80, 0.95),    (22.50, 2.55, 16.80, 1.00),
+        # o que entra pelas aberturas grandes
+        (0.40, 1.70, 12.40, 0.45),     (9.00, 1.70, 0.40, 0.45),
+        (22.80, 1.70, 19.60, 0.45),
+    ]
+
+    pontos = _pontos_por_cobertura(zonas, caixas, larg, fundo,
+                                   raio=RAIO_DE_COBERTURA)
+
+    return dict(nome="Casa de 520 m², com vista para o mar", pasta="casa_grande",
+                larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
+                janelas=janelas, luzes=luzes, pontos=pontos, vista="mar",
+                descricao="Casa completa de 520 m² em 23 cômodos: varanda "
+                          "gourmet, sala de estar, hall, jantar, copa, "
+                          "cozinha, despensa, lavabo, lavanderia, depósito, "
+                          "corredor, suíte master com closet e banho, dois "
+                          "quartos, banho social, rouparia, sala de estudos, "
+                          "adega, academia e sala íntima.")
+
+
+TODAS = [apartamento, compacto, cobertura, mansao, pavilhao, quarto,
+         casa_grande]
