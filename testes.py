@@ -1839,8 +1839,23 @@ class TestPlantasSinteticas(unittest.TestCase):
             self.assertEqual(problemas, [], "%s: %s" % (planta["nome"], problemas))
 
     def _olhar(self, dx, dy, dz):
+        """
+        O ceu do CAMPO, fixado de proposito.
+
+        Estes testes nasceram quando havia uma vista so, e liam o _ceu() com a
+        VISTA que estivesse largada no modulo. Ao ganharem companhia — mar e
+        cidade — passaram a reprovar conforme a ORDEM da suite: rodando depois
+        de qualquer teste que usasse a casa de praia, acusavam "o terreno saiu
+        azulado". E o terreno era o mar; eles e que nao diziam qual ceu
+        queriam.
+
+        A VISTA e global de modulo, como LARG e ZONAS: quem a le tem de dizer
+        em qual imovel esta. Vale para qualquer teste que chame _ceu() ou
+        render() sem passar por usar() antes.
+        """
         d = np.array([[dx, dy, dz]], np.float32)
-        return cena_apartamento._ceu(d / np.linalg.norm(d))[0]
+        d = (d / np.linalg.norm(d)).astype(np.float32)
+        return self._vista("campo", lambda: cena_apartamento._ceu(d))[0]
 
     def _vista(self, nome, fn):
         """Roda fn() com a vista trocada, e devolve o que estava antes."""
@@ -2026,7 +2041,11 @@ class TestPlantasSinteticas(unittest.TestCase):
         painel, o guarda-roupa viraria um gradeado — o teste prende os dois
         lados.
         """
-        painel = self._painel("laminado")
+        # ACIMA DO RODAPE. A primeira versao amostrava o painel inteiro, a
+        # partir do chao — e os 8 cm escuros do pe do movel ja bastavam para o
+        # percentil 2 baixar. Conferido com mutacao: tirando a fresta inteira,
+        # o teste continuava verde, porque quem o satisfazia era o rodape.
+        painel = self._painel("laminado", y0=0.20)
         claro = float(np.percentile(painel, 75))
         escuro = float(np.percentile(painel, 2))
         self.assertLess(escuro, claro * 0.92, "a fresta nao escurece nada")
@@ -5794,6 +5813,155 @@ class TestTracadoRapido(unittest.TestCase):
         self.assertIn(0, colunas)
         self.assertIn(511, colunas)
         self.assertLess(len(colunas), 512 * 0.5)
+
+
+class TestJanelaEmQualquerParede(unittest.TestCase):
+    """
+    A janela tem de aparecer seja qual for o material da parede.
+
+    O DEFEITO QUE ISTO GUARDA, e que viveu escondido em TODAS as plantas: o
+    desenho da janela morava dentro do ramo dos materiais de parede, e so valia
+    para "parede", "parede_q1", "parede_q2" e "cozinha". Zona com parede de
+    "jantar", "banheiro", "servico", "concreto" ou "azulejo" engolia a propria
+    janela — a abertura estava na planta, iluminava o comodo, e nao aparecia.
+
+    Treze comodos em seis plantas: sala de jantar, banheiro, area de servico,
+    varanda gourmet, home office, academia. Ninguem reparou porque a parede
+    ficava clara do mesmo jeito; o que sumia era a VISTA, que e a unica coisa
+    que diz ao visitante para que lado ele esta olhando.
+    """
+
+    def _face_da_janela(self, planta, j):
+        """Qual das seis faces da casca e esta janela."""
+        x0, x1, z0, z1, _y0, _y1 = j
+        if x0 == x1:
+            return 0 if x0 <= 0.001 else 1
+        return 4 if z0 <= 0.001 else 5
+
+    def _pontos_da_janela(self, j, quantos=24):
+        """Uma grade no miolo do vao, longe do caixilho."""
+        x0, x1, z0, z1, y0, y1 = j
+        ys = np.linspace(y0 + 0.12, y1 - 0.12, quantos)
+        if x0 == x1:
+            cs = np.linspace(z0 + 0.12, z1 - 0.12, quantos)
+            gy, gc = np.meshgrid(ys, cs)
+            return np.stack([np.full(gy.size, x0), gy.ravel(),
+                             gc.ravel()], axis=1).astype(np.float32)
+        cs = np.linspace(x0 + 0.12, x1 - 0.12, quantos)
+        gy, gc = np.meshgrid(ys, cs)
+        return np.stack([gc.ravel(), gy.ravel(),
+                         np.full(gy.size, z0)], axis=1).astype(np.float32)
+
+    def _olhares(self, n):
+        d = np.stack([np.linspace(-0.6, 0.6, n), np.linspace(-0.5, 0.5, n),
+                      np.full(n, 0.8)], axis=1).astype(np.float32)
+        return (d / np.linalg.norm(d, axis=1)[:, None]).astype(np.float32)
+
+    def _zona_da_janela(self, planta, j):
+        x0, x1, z0, z1, _y0, _y1 = j
+        for nome, a0, a1, b0, b1, parede, _piso in planta["zonas"]:
+            if (x0 >= a0 - 0.2 and x1 <= a1 + 0.2
+                    and z0 >= b0 - 0.2 and z1 <= b1 + 0.2):
+                return nome, parede
+        return None, None
+
+    def test_toda_janela_de_toda_planta_mostra_o_lado_de_fora(self):
+        """
+        Varre as sete plantas, janela por janela, no material de parede do
+        comodo em que ela esta. No miolo do vao a cor tem de ser a do _ceu().
+        """
+        mudos = []
+        for construir in plantas.TODAS:
+            planta = construir()
+            cena_apartamento.usar(planta)
+            for j in planta["janelas"]:
+                nome, parede = self._zona_da_janela(planta, j)
+                if parede is None:
+                    continue
+                p = self._pontos_da_janela(j)
+                dirs = self._olhares(p.shape[0])
+                saida = cena_apartamento._textura(
+                    parede, p, self._face_da_janela(planta, j),
+                    cena_apartamento.MATERIAIS[parede], dirs, casca=True)
+                ceu = cena_apartamento._ceu(dirs)
+                fracao = float(np.isclose(saida, ceu).all(axis=1).mean())
+                if fracao < 0.40:
+                    mudos.append("%s / %s (parede %s): %.0f%% de vao"
+                                 % (planta["pasta"], nome, parede, fracao * 100))
+        self.assertEqual(mudos, [], "janelas que a parede engoliu")
+
+    def test_a_janela_nao_vaza_para_o_movel_encostado_nela(self):
+        """
+        Um armario embaixo da janela nao e janela. So a casca ganha vao — e
+        quem diz isso e o `casca`, nao o material, porque a parede e o movel
+        podem ser do mesmo material.
+        """
+        planta = plantas.casa_grande()
+        cena_apartamento.usar(planta)
+        j = planta["janelas"][1]
+        p = self._pontos_da_janela(j)
+        dirs = self._olhares(p.shape[0])
+        cor = cena_apartamento.MATERIAIS["parede"]
+        movel = cena_apartamento._textura("parede", p, 4, cor, dirs)
+        ceu = cena_apartamento._ceu(dirs)
+        self.assertLess(float(np.isclose(movel, ceu).all(axis=1).mean()), 0.02,
+                        "o movel encostado na janela virou ceu")
+
+    def test_a_janela_nao_vaza_para_o_piso_nem_para_o_teto(self):
+        """
+        Ha janela que comeca no chao — a porta de entrada da casa grande vai de
+        y 0,00 a 2,20. O piso encosta nela em y = 0, e piso nao e vista.
+        """
+        planta = plantas.casa_grande()
+        cena_apartamento.usar(planta)
+        porta = [j for j in planta["janelas"] if j[4] <= 0.001][0]
+        x0, x1 = porta[0], porta[1]
+        n = 40
+        p = np.stack([np.linspace(x0 + 0.2, x1 - 0.2, n),
+                      np.zeros(n), np.zeros(n)], axis=1).astype(np.float32)
+        dirs = self._olhares(n)
+        ceu = cena_apartamento._ceu(dirs)
+        for face, qual in ((2, "piso"), (3, "teto")):
+            saida = cena_apartamento._textura(
+                "porcelanato", p, face, cena_apartamento.MATERIAIS["porcelanato"],
+                dirs, casca=True)
+            self.assertLess(float(np.isclose(saida, ceu).all(axis=1).mean()), 0.02,
+                            "o %s virou ceu embaixo da porta" % qual)
+
+    def test_parede_entre_dois_comodos_de_materiais_diferentes(self):
+        """
+        DEFEITO ANTIGO, acordado pelos materiais novos. Quando uma parede
+        divisoria atravessa a fronteira de dois comodos, o render parte os
+        pontos dela por comodo para dar a cada metade o material certo — e
+        passava o vetor de FACES inteiro junto com o subconjunto de pontos.
+
+        Nao doia porque nenhuma textura olhava a face. O primeiro material que
+        olhou (tijolo na adega, concreto na academia) derrubou o render inteiro
+        com "could not be broadcast together".
+
+        O comodo aqui e fabricado de proposito: precisa de uma parede que
+        cruze a divisa, e as plantas de verdade quase nunca tem uma.
+        """
+        planta = dict(
+            nome="teste", pasta="teste", larg=6.0, fundo=4.0,
+            zonas=[("A", 0.0, 3.0, 0.0, 4.0, "tijolo", "porcelanato"),
+                   ("B", 3.0, 6.0, 0.0, 4.0, "concreto", "porcelanato")],
+            caixas=plantas._pz(2.0, [(0.0, 6.0)]),
+            janelas=[], luzes=[(3.0, 2.55, 2.0, 1.0)],
+            pontos=[("A - 1", 1.5, 3.2)])
+        cena_apartamento.usar(planta)
+        img, _dist = cena_apartamento.render(1.5, 3.2, 512)   # nao pode estourar
+
+        # e cada metade da parede tem de sair com o seu material
+        p = np.array([[1.0, 1.2, 2.0], [5.0, 1.2, 2.0]], np.float32)
+        faces = np.array([4, 4], np.int32)
+        a = cena_apartamento._textura("tijolo", p[:1], faces[:1],
+                                      cena_apartamento.MATERIAIS["tijolo"])
+        b = cena_apartamento._textura("concreto", p[1:], faces[1:],
+                                      cena_apartamento.MATERIAIS["concreto"])
+        self.assertGreater(float(np.abs(a.mean() - b.mean())), 25.0,
+                           "tijolo e concreto sairam da mesma cor")
+        self.assertEqual(img.shape, (256, 512, 3))
 
 
 def limpar():

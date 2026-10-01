@@ -974,6 +974,97 @@ MUT = [
      '    if focal_exif:\n        origem_focal = "exif"',
      '    if False:\n        origem_focal = "exif"',
      'TestFocalDoExif.test_quando_a_foto_diz_a_foto_manda'),
+
+    # ------------------------------------------- a casa grande e o que veio com ela
+
+    # o defeito que viveu escondido em todas as plantas
+    ('a parede volta a engolir a propria janela', 'cena_apartamento.py',
+     '    if casca and face in (0, 1, 4, 5):',
+     '    if casca and face in (0, 1, 4, 5) and material == "parede":',
+     'TestJanelaEmQualquerParede.test_toda_janela_de_toda_planta_mostra_o_lado_de_fora'),
+
+    ('janela vaza para o movel encostado nela', 'cena_apartamento.py',
+     '    if casca and face in (0, 1, 4, 5):',
+     '    if face in (0, 1, 4, 5):',
+     'TestJanelaEmQualquerParede.test_a_janela_nao_vaza_para_o_movel_encostado_nela'),
+
+    # a parede divisoria recortava os pontos e esquecia as faces
+    ('parede divisoria sem recortar as faces', 'cena_apartamento.py',
+     'p[base[s2]], lado[s2],',
+     'p[base[s2]], lado,',
+     'TestJanelaEmQualquerParede.test_parede_entre_dois_comodos_de_materiais_diferentes'),
+
+    # o tracado acelerado: recorte que apaga em vez de quebrar
+    ('recorte de colunas desligado', 'cena_apartamento.py',
+     '    if ini + qtd <= largura:\n        return ((ini, ini + qtd),)',
+     '    if True:\n        return ((0, largura),)',
+     'TestTracadoRapido.test_o_recorte_de_colunas_corta_mesmo_alguma_coisa'),
+
+    ('recorte de colunas cortando demais', 'cena_apartamento.py',
+     '    ini = (int(math.floor(c0)) - 2) % largura',
+     '    ini = (int(math.floor(c0)) + 2) % largura',
+     'TestTracadoRapido.test_o_recorte_de_colunas_nunca_perde_caixa'),
+
+    ('recorte de altura cortando demais', 'cena_apartamento.py',
+     '    return c[4] < min(alturas) or c[1] > max(alturas)',
+     '    return c[4] < min(alturas) * 1.25 or c[1] > max(alturas)',
+     'TestTracadoRapido.test_o_recorte_de_altura_nunca_perde_caixa'),
+
+    # a vista pela janela
+    ('a vista para de seguir a planta', 'cena_apartamento.py',
+     '    VISTA = planta.get("vista", "campo")',
+     '    VISTA = "campo"',
+     'TestPlantasSinteticas.test_a_planta_escolhe_a_vista_e_a_omissao_vale_campo'),
+
+    ('mar e cidade viram campo chapado', 'cena_apartamento.py',
+     '    chao = _relevo_da_vista(d, abaixo, chao)',
+     '    chao = chao',
+     'TestPlantasSinteticas.test_a_agua_vem_em_bandas_que_se_apertam_no_horizonte'),
+
+    ('vista com nome errado passa para o render', 'cena_apartamento.py',
+     '    if vista not in VISTAS:',
+     '    if False:',
+     'TestPlantasSinteticas.test_vista_com_nome_errado_e_recusada_antes_do_render'),
+
+    # os materiais, que e onde mora o detalhamento
+    ('guarda-roupa branco volta a ser chapado', 'cena_apartamento.py',
+     '        saida[porta] *= 0.80',
+     '        saida[porta] *= 1.00',
+     'TestPlantasSinteticas.test_a_fresta_do_laminado_e_escura_e_estreita'),
+
+    ('marmore volta a ser listra vertical', 'cena_apartamento.py',
+     '        t = (p[:, 0] * 1.9 + p[:, 2] * 1.3 + p[:, 1] * 1.55\n'
+     '             + 0.55 * np.sin(p[:, 2] * 3.3 + p[:, 1] * 2.1)\n'
+     '             + 0.40 * np.sin(p[:, 0] * 5.1 - p[:, 1] * 1.7)',
+     '        t = (p[:, 0] * 1.9 + p[:, 2] * 1.3\n'
+     '             + 0.55 * np.sin(p[:, 2] * 3.3)\n'
+     '             + 0.40 * np.sin(p[:, 0] * 5.1)',
+     'TestMateriaisDoImovel.test_o_marmore_tem_veio_nas_duas_direcoes'),
+
+    ('alvenaria sem junta de argamassa', 'cena_apartamento.py',
+     '        saida[junta] = np.array([148, 150, 152], np.float32)',
+     '        saida[junta] = saida[junta]',
+     'TestMateriaisDoImovel.test_a_alvenaria_tem_junta_e_ela_e_mais_clara_que_o_tijolo'),
+
+    ('fiada de tijolo deixa de travar', 'cena_apartamento.py',
+     '        u = (eixo + (fiada % 2.0) * (comp / 2.0)) / comp',
+     '        u = eixo / comp',
+     'TestMateriaisDoImovel.test_a_fiada_e_deitada_e_travada'),
+
+    ('a fiada para de acompanhar a parede', 'cena_apartamento.py',
+     '    ehx = np.isin(_faces(face, p.shape[0]), (0, 1))',
+     '    ehx = np.zeros(p.shape[0], bool)',
+     'TestMateriaisDoImovel.test_a_fiada_acompanha_a_parede_e_nao_os_eixos_do_mundo'),
+
+    ('inox vira plastico cinza', 'cena_apartamento.py',
+     '            saida *= (1.0 + 0.30 * np.clip(dirs[:, 1] + 0.25, 0, 1) ** 2)[:, None]',
+     '            saida *= 1.0',
+     'TestMateriaisDoImovel.test_o_inox_muda_de_brilho_conforme_o_angulo'),
+
+    ('quadro volta a ser confete', 'cena_apartamento.py',
+     '        k = np.floor(eixo / 0.38) + np.floor(p[:, 1] / 0.46) * 5.0',
+     '        k = np.floor(eixo / 0.04) + np.floor(p[:, 1] / 0.05) * 5.0',
+     'TestMateriaisDoImovel.test_o_quadro_e_campo_de_cor_e_nao_confete'),
 ]
 
 

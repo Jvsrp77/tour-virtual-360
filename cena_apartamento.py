@@ -244,7 +244,14 @@ def _ceu(d):
     return np.where(dy[:, None] > 0.0, ceu, chao)
 
 
-def _textura(material, p, face, cor, dirs=None):
+def _textura(material, p, face, cor, dirs=None, casca=False):
+    """
+    A cor de cada ponto de superficie.
+
+    `casca` diz se o que foi atingido e a casca do imovel — as seis faces
+    externas — ou uma caixa de dentro. So a casca ganha janela: movel encostado
+    na parede da janela nao vira ceu, e piso nao vira ceu nunca.
+    """
     saida = np.repeat(np.array(cor, np.float32)[None, :], p.shape[0], axis=0)
 
     if material == "piso":
@@ -274,30 +281,6 @@ def _textura(material, p, face, cor, dirs=None):
             gy = np.abs((p[:, 1] / 0.20) % 1.0 - 0.5) > 0.44
             saida[faixa] *= 1.06
             saida[faixa & (gx | gy)] *= 0.86
-        # Janelas de verdade. Antes havia uma "luz de janela" sem janela nenhuma
-        # na parede: iluminava a sala e nao aparecia. Alem de estranho, tirava do
-        # visitante a unica referencia que diz para que lado ele esta olhando.
-        for x0, x1, z0, z1, y0, y1 in JANELAS:
-            dentro = ((p[:, 0] >= x0 - 0.08) & (p[:, 0] <= x1 + 0.08)
-                      & (p[:, 2] >= z0 - 0.08) & (p[:, 2] <= z1 + 0.08)
-                      & (p[:, 1] >= y0) & (p[:, 1] <= y1))
-            if not dentro.any():
-                continue
-            if dirs is None:
-                saida[dentro] = np.array([236, 233, 224], np.float32)
-            else:
-                saida[dentro] = _ceu(dirs[dentro])
-            # caixilho: duas folhas, com montante no meio
-            q = p[dentro]
-            eixo = q[:, 0] if x1 - x0 > z1 - z0 else q[:, 2]
-            a0, a1 = (x0, x1) if x1 - x0 > z1 - z0 else (z0, z1)
-            meio = np.abs(eixo - (a0 + a1) / 2.0) < 0.035
-            trav = np.abs(q[:, 1] - (y0 + y1) / 2.0) < 0.030
-            moldura = ((eixo < a0 + 0.06) | (eixo > a1 - 0.06)
-                       | (q[:, 1] < y0 + 0.06) | (q[:, 1] > y1 - 0.06))
-            escuro = np.array([116, 118, 120], np.float32)
-            idx = np.nonzero(dentro)[0]
-            saida[idx[meio | trav | moldura]] = escuro
     elif material == "teto":
         for lx, ly, lz, _ in [l for l in LUZES if l[1] > 2.3]:
             r = np.hypot(p[:, 0] - lx, p[:, 2] - lz)
@@ -448,6 +431,42 @@ def _textura(material, p, face, cor, dirs=None):
         saida *= (1.0 + 0.05 * np.sin(p[:, 1] * 24.0))[:, None]
         borda = (p[:, 1] < 0.16) | (p[:, 1] > 1.88)
         saida[borda] *= 0.62
+
+    # Janelas de verdade. Antes havia uma "luz de janela" sem janela nenhuma na
+    # parede: iluminava a sala e nao aparecia. Alem de estranho, tirava do
+    # visitante a unica referencia que diz para que lado ele esta olhando.
+    #
+    # ISTO FICAVA DENTRO DO RAMO DOS MATERIAIS DE PAREDE, e por isso so valia
+    # para "parede", "parede_q1", "parede_q2" e "cozinha". No dia em que um
+    # comodo ganhou parede de concreto, a varanda perdeu os dois vaos para o
+    # mar — a parede engolia a propria janela, e o imovel de praia ficava sem
+    # praia. Agora vale para o material que for, e o que decide e a CASCA.
+    #
+    # So a casca, e so nas quatro faces de parede: movel encostado embaixo da
+    # janela nao vira ceu, e o piso nao vira ceu nunca. As faces 2 e 3 da
+    # casca sao piso e teto.
+    if casca and face in (0, 1, 4, 5):
+        for x0, x1, z0, z1, y0, y1 in JANELAS:
+            dentro = ((p[:, 0] >= x0 - 0.08) & (p[:, 0] <= x1 + 0.08)
+                      & (p[:, 2] >= z0 - 0.08) & (p[:, 2] <= z1 + 0.08)
+                      & (p[:, 1] >= y0) & (p[:, 1] <= y1))
+            if not dentro.any():
+                continue
+            if dirs is None:
+                saida[dentro] = np.array([236, 233, 224], np.float32)
+            else:
+                saida[dentro] = _ceu(dirs[dentro])
+            # caixilho: duas folhas, com montante no meio
+            q = p[dentro]
+            eixo = q[:, 0] if x1 - x0 > z1 - z0 else q[:, 2]
+            a0, a1 = (x0, x1) if x1 - x0 > z1 - z0 else (z0, z1)
+            meio = np.abs(eixo - (a0 + a1) / 2.0) < 0.035
+            trav = np.abs(q[:, 1] - (y0 + y1) / 2.0) < 0.030
+            moldura = ((eixo < a0 + 0.06) | (eixo > a1 - 0.06)
+                       | (q[:, 1] < y0 + 0.06) | (q[:, 1] > y1 - 0.06))
+            escuro = np.array([116, 118, 120], np.float32)
+            idx = np.nonzero(dentro)[0]
+            saida[idx[meio | trav | moldura]] = escuro
     return saida
 
 
@@ -732,10 +751,10 @@ def render(x, z, largura=LARGURA):
                     if s2.any():
                         idx = base[s2]
                         cor[idx] = _textura(mat, p[idx], i, MATERIAIS[mat],
-                                            d[idx])
+                                            d[idx], casca=True)
             else:
                 cor[sel] = _textura(nome, p[sel], i, MATERIAIS[nome],
-                                    d[sel])
+                                    d[sel], casca=True)
 
         for k, c in enumerate(CAIXAS):
             sel = dono == k
@@ -750,7 +769,13 @@ def render(x, z, largura=LARGURA):
                 for g, m2 in enumerate(_PAREDE_DA_ZONA):
                     s2 = grupo == g
                     if s2.any():
-                        cor[base[s2]] = _textura(m2, p[base[s2]], lado,
+                        # `lado[s2]`, e nao `lado`: os pontos vao recortados
+                        # por comodo e as faces tem de ir junto. Passava o
+                        # vetor inteiro desde sempre, e nao doia porque
+                        # nenhuma textura olhava a face — o primeiro material
+                        # que olhou (tijolo na adega, concreto na academia)
+                        # derrubou o render com "could not be broadcast".
+                        cor[base[s2]] = _textura(m2, p[base[s2]], lado[s2],
                                                  MATERIAIS[m2], d[base[s2]])
             else:
                 cor[sel] = _textura(mat, p[sel], lado, MATERIAIS[mat],
