@@ -1827,6 +1827,42 @@ class TestPlantasSinteticas(unittest.TestCase):
         self.assertIn(str(a), fonte, "o traçador usa outra constante que o visor")
         self.assertIn(str(b), fonte, "o traçador usa outra constante que o visor")
 
+    def test_nenhum_movel_fica_escondido_dentro_de_outro(self):
+        """
+        Caixa inteiramente dentro de outra nunca e atingida por raio nenhum.
+
+        O tracador fica sempre com a interseccao mais PROXIMA, e a caixa de
+        fora e sempre a mais proxima. Entao a de dentro existe na planta, pesa
+        no tempo de render e nao aparece em lugar nenhum.
+
+        MEDIDO: vinte e nove delas, em cinco plantas. Os LIVROS de todas as
+        estantes do projeto — cada estante lia como um bloco macico de madeira
+        —, duas frentes de gaveta, e cinco quadros mais uma TV que nasciam
+        dentro da alvenaria porque foram pendurados a partir do PLANO da
+        parede em vez da FACE dela. A parede tem 12 cm, e o quadro cabia
+        inteiro neles.
+
+        E o tipo de defeito que nenhum teste de render pega: a imagem sai
+        bonita, sem erro nenhum, so sem o movel.
+        """
+        def dentro(a, b):
+            return all(b[i] <= a[i] + 1e-9 and a[i + 3] <= b[i + 3] + 1e-9
+                       for i in range(3))
+
+        for construir in plantas.TODAS:
+            p = construir()
+            caixas = p["caixas"]
+            escondidas = []
+            for i, a in enumerate(caixas):
+                for j, b in enumerate(caixas):
+                    if i != j and dentro(a, b):
+                        escondidas.append(
+                            "%s x%.2f-%.2f y%.2f-%.2f z%.2f-%.2f dentro de %s"
+                            % (a[6], a[0], a[3], a[1], a[4], a[2], a[5], b[6]))
+                        break
+            self.assertEqual(escondidas, [],
+                             "%s: movel que nenhum raio alcanca" % p["nome"])
+
     def test_nenhuma_planta_poe_a_camera_dentro_de_movel(self):
         """
         Ja aconteceu: a camera caiu dentro do retangulo da cama e o colchao virou

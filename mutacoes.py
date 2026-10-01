@@ -1065,6 +1065,16 @@ MUT = [
      '        k = np.floor(eixo / 0.38) + np.floor(p[:, 1] / 0.46) * 5.0',
      '        k = np.floor(eixo / 0.04) + np.floor(p[:, 1] / 0.05) * 5.0',
      'TestMateriaisDoImovel.test_o_quadro_e_campo_de_cor_e_nao_confete'),
+
+    ('livros voltam para dentro da estante', 'plantas.py',
+     '(5.52, 0.30, 0.78, 6.18, 2.15, 2.82, "livro_a")',
+     '(5.62, 0.30, 0.78, 6.10, 2.15, 2.82, "livro_a")',
+     'TestPlantasSinteticas.test_nenhum_movel_fica_escondido_dentro_de_outro'),
+
+    ('quadro volta a nascer dentro da parede', 'plantas.py',
+     '_quadro("x", 5.40 + PAREDE, 1, 6.50, 7.90, 1.15, 2.05)',
+     '_quadro("x", 5.40, 1, 6.50, 7.90, 1.15, 2.05)',
+     'TestPlantasSinteticas.test_nenhum_movel_fica_escondido_dentro_de_outro'),
 ]
 
 
