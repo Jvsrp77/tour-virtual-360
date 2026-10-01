@@ -45,7 +45,8 @@ import aviso                      # noqa: E402
 import maquete3d                  # noqa: E402
 import modelo3d                   # noqa: E402
 import numpy as np                # noqa: E402
-import plantas                    # noqa: E402
+import plantas
+import publicar                    # noqa: E402
 import cena_apartamento           # noqa: E402
 import usuarios                   # noqa: E402
 import backup                     # noqa: E402
@@ -6042,6 +6043,82 @@ class TestJanelaEmQualquerParede(unittest.TestCase):
                            "tijolo e concreto sairam da mesma cor")
         self.assertEqual(img.shape, (256, 512, 3))
 
+
+class TestPublicarPlanta(unittest.TestCase):
+    """
+    O caminho pelo qual uma planta sintetica vira tour.
+
+    Nao passa pela tela de upload de proposito: a tela recebe foto e nao sabe
+    de onde ela foi tirada, enquanto aqui a POSICAO de cada ponto e a
+    PROFUNDIDADE exata vem da planta. A profundidade exata e o que permite
+    caminhar sem borrao, e e a unica vantagem real do imovel sintetico sobre a
+    foto — o modelo de IA deduz profundidade da imagem e erra no contorno dos
+    moveis, que e a origem do escorrido.
+
+    Existiu um script assim antes, de uma vez so, e se perdeu. Refazer a mansao
+    dependia dele, e nao havia como. Por isso virou codigo do produto, com
+    teste.
+    """
+
+    def test_a_cor_da_maquete_sai_em_rgb_e_nao_em_bgr(self):
+        """
+        DEFEITO QUE ISTO CONSERTA, e que esta gravado nas maquetes de todos os
+        imoveis sinteticos ja publicados: o conversor anterior pegava a tupla
+        de MATERIAIS, que e BGR porque e a ordem do OpenCV, e gravava como se
+        fosse RGB.
+
+        Em cinza quase nao aparece. No piso de madeira aparece inteiro: o
+        marrom #867060 virava #607086, que e azul. A casa tinha chao de
+        piscina na maquete e chao de madeira no panorama.
+        """
+        geo = publicar.maquete_da_planta(plantas.quarto())
+        b, g, r = cena_apartamento.MATERIAIS["piso"]
+        esperado = "#%02x%02x%02x" % (r, g, b)
+        pisos = {z["piso"] for z in geo["zonas"]}
+        self.assertIn(esperado, pisos,
+                      "a cor do piso saiu com os canais trocados")
+        self.assertNotIn("#%02x%02x%02x" % (b, g, r), pisos)
+
+    def test_a_maquete_leva_tudo_o_que_o_visor_consome(self):
+        """Chave faltando aqui vira maquete em branco, sem erro nenhum."""
+        geo = publicar.maquete_da_planta(plantas.casa_grande())
+        for chave in ("nome", "descricao", "larg", "fundo", "pe",
+                      "zonas", "caixas", "janelas", "pontos"):
+            self.assertIn(chave, geo)
+        self.assertEqual(len(geo["pontos"]), len(plantas.casa_grande()["pontos"]))
+        self.assertEqual(len(geo["caixas"]), len(plantas.casa_grande()["caixas"]))
+        for z in geo["zonas"]:
+            self.assertGreater(z["m2"], 0, z["nome"])
+            for c in (z["piso"], z["parede"]):
+                self.assertRegex(c, r"^#[0-9a-f]{6}$")
+
+    def test_recusa_publicar_planta_que_nao_terminou_de_renderizar(self):
+        """
+        Publicar pela metade e pior do que nao publicar: o tour abre, parece
+        inteiro, e falta comodo. O render de 520 m2 leva horas e ja foi
+        interrompido tres vezes.
+
+        Exige os DOIS arquivos. Um ponto que gravou a foto e morreu antes do
+        mapa de profundidade esta pela metade — e metade parece pronto.
+        """
+        pasta = os.path.join(_TEMP, "publicar")
+        os.makedirs(pasta, exist_ok=True)
+        self.assertEqual(publicar.pontos_faltando(pasta, 3), [0, 1, 2])
+
+        io.open(os.path.join(pasta, "ponto_0.jpg"), "w").close()
+        self.assertEqual(publicar.pontos_faltando(pasta, 3), [0, 1, 2],
+                         "deu por pronto um ponto sem profundidade")
+
+        io.open(os.path.join(pasta, "dist_0.npy"), "w").close()
+        self.assertEqual(publicar.pontos_faltando(pasta, 3), [1, 2])
+
+        io.open(os.path.join(pasta, "dist_1.npy"), "w").close()
+        self.assertEqual(publicar.pontos_faltando(pasta, 3), [1, 2],
+                         "deu por pronto um ponto sem foto")
+
+    def test_recusa_planta_que_nao_existe(self):
+        with self.assertRaises(SystemExit):
+            publicar.publicar("mansao_de_marte", saida=lambda *a: None)
 
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
