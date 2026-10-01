@@ -77,11 +77,15 @@ MATERIAIS = {
     # leitura a uma cena sem sombra e a textura, nao a cor.
     "tijolo":     (56, 70, 126),
     "concreto":   (142, 143, 141),
-    "marmore":    (234, 233, 228),
-    "azulejo":    (214, 212, 206),
+    # Medido no render da cozinha: marmore, azulejo, laminado e a parede
+    # ficavam todos no mesmo valor, e com a luz do teto a bancada saturava em
+    # branco chapado. Um ambiente em que tudo tem o mesmo tom nao tem
+    # profundidade — e a coifa de inox sumia dentro do armario.
+    "marmore":    (216, 215, 210),
+    "azulejo":    (206, 204, 198),
     "cortina":    (204, 208, 212),
     "couro":      (54, 76, 114),
-    "inox":       (176, 178, 180),
+    "inox":       (162, 164, 166),   # mais escuro que o armario branco
     "tela":       (26, 25, 24),
     "quadro":     (120, 120, 120),      # a cor sai do proprio desenho
     "madeira_clara": (138, 168, 196),
@@ -414,14 +418,38 @@ def _textura(material, p, face, cor, dirs=None, casca=False):
                  + 0.02 * np.sin(p[:, 0] * 53.0))
         saida *= (1.0 + vinco)[:, None]
     elif material == "livro_a":
-        # lombadas: a faixa de cor muda a cada ~3,5 cm
-        k = np.floor(p[:, 2] / 0.035).astype(np.int32)
-        matiz = np.stack([(k * 53 % 140) + 60, (k * 97 % 120) + 70,
-                          (k * 31 % 150) + 70], axis=1).astype(np.float32)
-        saida = matiz
-        saida[np.abs((p[:, 2] / 0.035) % 1.0 - 0.5) > 0.44] *= 0.6
+        # Lombadas ao longo da ESTANTE, e nao do eixo z do mundo. O livro_a e
+        # anterior ao _horizontal() e ficou de fora daquela correcao — e
+        # ninguem viu, porque ate agora a caixa dos livros vivia enterrada
+        # dentro da carcaca da estante e raio nenhum chegava nela. Na estante
+        # da mansao, que e comprida no x, as lombadas sairiam atravessadas.
+        eixo = _horizontal(p, face)
+        larg = 0.032
+        k = np.floor(eixo / larg)
+        # Paleta CONTIDA. A versao anterior sorteava matiz cheia, e numa
+        # estante inteira saia uma parede de neon que roubava a sala. Lombada
+        # de livro e papel e tecido: varia mais de valor do que de cor.
+        saida = np.stack([96.0 + 86.0 * ((k * 0.37) % 1.0),
+                          104.0 + 78.0 * ((k * 0.71) % 1.0),
+                          110.0 + 74.0 * ((k * 0.19) % 1.0)],
+                         axis=1).astype(np.float32)
+        # nem todo livro tem a mesma altura: o topo da fileira nao sai reto
+        recuo = 0.10 + 0.17 * ((k * 0.53) % 1.0)
+        saida[(p[:, 1] % 0.62) > (0.62 - recuo)] *= 0.52
+        saida[np.abs((eixo / larg) % 1.0 - 0.5) > 0.44] *= 0.62
     elif material == "planta":
-        saida *= (1.0 + 0.16 * np.sin(p[:, 1] * 40.0) * np.sin(p[:, 0] * 37.0))[:, None]
+        # Folhagem: manchas irregulares e vaos escuros entre as folhas. A
+        # versao anterior era um xadrez regular — e xadrez nenhum existe em
+        # planta nenhuma, entao a caixa lia como caixa pintada de verde.
+        eixo = _horizontal(p, face)
+        f1 = np.sin(eixo * 23.0 + p[:, 1] * 17.0)
+        f2 = np.sin(eixo * 41.0 - p[:, 1] * 53.0 + 1.3)
+        f3 = np.sin(eixo * 11.0 + p[:, 1] * 7.0 + 2.1)
+        folha = 0.50 * f1 + 0.33 * f2 + 0.17 * f3
+        saida *= (0.80 + 0.45 * (folha * 0.5 + 0.5))[:, None]
+        # o escuro entre as folhas e o que da volume a uma massa verde
+        saida[folha < -0.45] *= 0.42
+        saida *= _ruido(p, 55.0, 0.05)[:, None]
     elif material == "vidro":
         # Sem transparencia de verdade (o tracado nao refrata), o que faz o
         # olho aceitar o vidro e o degrade vertical mais a moldura. Chapado ele

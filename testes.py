@@ -5446,8 +5446,12 @@ class TestMateriaisDoImovel(unittest.TestCase):
     mede, e ja foi medido neste projeto: 69 pontos de interesse contra 4038.
     """
 
+    # livro_a e planta sao materiais ANTIGOS e entram aqui tarde, de proposito:
+    # ate os moveis engolidos aparecerem, a caixa dos livros vivia enterrada
+    # dentro da estante e ninguem nunca tinha visto um livro renderizado.
     NOVOS = ("tijolo", "concreto", "marmore", "azulejo", "cortina", "couro",
-             "inox", "tela", "quadro", "madeira_clara", "palha", "laminado")
+             "inox", "tela", "quadro", "madeira_clara", "palha", "laminado",
+             "livro_a", "planta")
 
     def _plano(self, material, face=5, lado=90, metros=1.4, dirs=True):
         """Um retalho de parede: x corre na horizontal, y na vertical."""
@@ -5501,6 +5505,45 @@ class TestMateriaisDoImovel(unittest.TestCase):
             "tijolo", p, face, cena_apartamento.MATERIAIS["tijolo"])
         argamassa = np.array([148, 150, 152], np.float32)
         return np.abs(cor - argamassa).max(axis=1) < 1.0
+
+    def test_as_lombadas_correm_ao_longo_da_estante(self):
+        """
+        O livro_a desenhava as lombadas ao longo do eixo z DO MUNDO. Na estante
+        da sala calhava de dar certo; na da mansao, que e comprida no x, as
+        lombadas sairiam atravessadas — deitadas em vez de em pe.
+
+        Ficou de fora da correcao que o _horizontal() trouxe porque, naquele
+        dia, livro nenhum aparecia: a caixa deles estava enterrada dentro da
+        carcaca da estante em todas as plantas do projeto.
+        """
+        lado = 90
+        u = np.linspace(0.0, 1.4, lado)
+        gx, gy = np.meshgrid(u, u)
+        pz = np.stack([gx.ravel(), gy.ravel(),
+                       np.full(gx.size, 0.5)], axis=1).astype(np.float32)
+        px = np.stack([np.full(gx.size, 0.5), gy.ravel(),
+                       gx.ravel()], axis=1).astype(np.float32)
+        cor = cena_apartamento.MATERIAIS["livro_a"]
+        a = cena_apartamento._textura("livro_a", pz, 5, cor)
+        b = cena_apartamento._textura("livro_a", px, 0, cor)
+        self.assertTrue(np.allclose(a, b),
+                        "as lombadas nao acompanham o plano da estante")
+
+    def test_a_estante_nao_sai_em_neon(self):
+        """
+        Medido no primeiro render da casa: com a matiz sorteada cheia, uma
+        estante inteira virava uma parede de magenta e verde-limao que roubava
+        a sala. Lombada de livro e papel e tecido — varia de VALOR mais do que
+        de cor.
+
+        Mede a distancia entre os canais: cor contida tem canais proximos.
+        """
+        painel = self._plano("livro_a", metros=1.0)
+        faixa = painel.max(axis=2) - painel.min(axis=2)
+        self.assertLess(float(faixa.mean()), 60.0,
+                        "a estante voltou a ser neon")
+        self.assertGreater(float(painel.std()), 15.0,
+                           "a estante virou um bloco de uma cor so")
 
     def test_a_fiada_acompanha_a_parede_e_nao_os_eixos_do_mundo(self):
         """
