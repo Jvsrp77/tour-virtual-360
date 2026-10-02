@@ -839,6 +839,80 @@ def _gravar(img, caminho, q=93):
     buf.tofile(caminho)          # imwrite nao grava em caminho com acento
 
 
+# Meia largura de ombro, igual ao RAIO_CORPO do maquete.html. Repetido aqui de
+# proposito: quem edita uma planta precisa saber por que um corredor de 50 cm
+# nao serve, sem ter de abrir o visor para descobrir.
+RAIO_CORPO = 0.28
+
+# Altura a partir da qual um movel barra o corpo, igual ao visor. Tapete e
+# soleira nao contam — atravessar um tapete nao incomoda ninguem.
+ALTURA_QUE_BARRA = 0.35
+
+
+def comodos_sem_acesso(planta, passo=0.06):
+    """
+    Os comodos aos quais nao se chega A PE, saindo do primeiro ponto livre.
+
+    POR QUE ISTO EXISTE. O conferir() ja recusava camera dentro de movel, e
+    isso funcionava. Mas ele nunca perguntou se da para ANDAR de um comodo ao
+    outro — e a casa de 520 m2 passou em tudo, renderizou tres horas e meia,
+    foi publicada, e so quando alguem caminhou apareceu que nove dos vinte e
+    tres comodos eram inalcancaveis. Um deles, a sala intima de 44,8 m2,
+    estava lacrada: eu havia feito as duas paredes dela sem vao nenhum.
+
+    Os outros oito eram MOVEL TAPANDO PORTA. Uma cadeira de jantar encostada
+    na parede fechava sozinha o acesso a cozinha, ao lavabo e a lavanderia:
+    porta de 80 cm, corpo de 56, cadeira de 46.
+
+    E a mesma familia de defeito dos moveis engolidos — nada quebra, nada
+    acusa, so nao funciona.
+
+    A regra e a do visor, nao uma inventada aqui: barra o que tem mais de
+    `ALTURA_QUE_BARRA` de altura, com folga de `RAIO_CORPO` em volta.
+    """
+    larg, fundo = planta["larg"], planta["fundo"]
+    nx, nz = int(larg / passo), int(fundo / passo)
+    x = ((np.arange(nx) + 0.5) * passo)[:, None]
+    z = ((np.arange(nz) + 0.5) * passo)[None, :]
+
+    livre = ((x > 0.2) & (x < larg - 0.2) & (z > 0.2) & (z < fundo - 0.2))
+    for c in planta["caixas"]:
+        if c[4] - c[1] <= ALTURA_QUE_BARRA:
+            continue
+        livre &= ~((x > c[0] - RAIO_CORPO) & (x < c[3] + RAIO_CORPO)
+                   & (z > c[2] - RAIO_CORPO) & (z < c[5] + RAIO_CORPO))
+
+    # Comeca onde a caminhada comeca: o primeiro ponto de captura em que cabe
+    # um corpo. E a mesma escolha que o pontoDeEntrada() do visor faz.
+    inicio = None
+    for _nome, px, pz in planta["pontos"]:
+        i, j = int(px / passo), int(pz / passo)
+        if 0 <= i < nx and 0 <= j < nz and livre[i, j]:
+            inicio = (i, j)
+            break
+    if inicio is None:
+        return [z[0] for z in planta["zonas"]]
+
+    visto = np.zeros_like(livre)
+    pilha = [inicio]
+    visto[inicio] = True
+    while pilha:
+        i, j = pilha.pop()
+        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            a, b = i + di, j + dj
+            if 0 <= a < nx and 0 <= b < nz and livre[a, b] and not visto[a, b]:
+                visto[a, b] = True
+                pilha.append((a, b))
+
+    sem = []
+    for nome, x0, x1, z0, z1, _parede, _piso in planta["zonas"]:
+        faixa = visto[int(x0 / passo):int(x1 / passo),
+                      int(z0 / passo):int(z1 / passo)]
+        if not faixa.any():
+            sem.append(nome)
+    return sem
+
+
 def conferir(planta):
     """
     Recusa renderizar com ponto de captura ruim.
@@ -854,6 +928,8 @@ def conferir(planta):
         # maquina para sair um imovel de praia com campo na janela.
         problemas.append("vista %r nao existe (ha %s)"
                          % (vista, ", ".join(sorted(VISTAS))))
+    for nome in comodos_sem_acesso(planta):
+        problemas.append("%s: nao da para chegar andando" % nome)
     for nome, x, z in planta["pontos"]:
         pior = float("inf")
         for c in planta["caixas"]:

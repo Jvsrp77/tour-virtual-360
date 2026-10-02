@@ -6306,6 +6306,100 @@ console.log(JSON.stringify({k: e.k, canto: canto, oposto: oposto}));
             self.assertLessEqual(d, 8.0, "seta para um ponto longe demais")
 
 
+class TestAlcanceAPe(unittest.TestCase):
+    """
+    Todo comodo tem de ser alcancavel ANDANDO.
+
+    O QUE ISTO GUARDA. O conferir() recusava camera dentro de movel, e isso
+    funcionava. Mas ninguem nunca perguntou se da para ir de um comodo ao
+    outro — e a casa de 520 m2 passou em tudo, renderizou tres horas e meia,
+    foi publicada, e so quando o dono caminhou apareceu que NOVE dos vinte e
+    tres comodos eram inalcancaveis. So 168 m2 dos 520.
+
+    Um deles, a sala intima de 44,8 m2, estava LACRADA: as duas paredes dela
+    sairam sem vao nenhum. Os outros oito eram movel tapando porta — uma
+    cadeira de jantar encostada na parede fechava sozinha o acesso a cozinha,
+    ao lavabo e a lavanderia.
+
+    E o defeito estava em CINCO das sete plantas, nao so na nova. Bancada de
+    cozinha correndo por cima da propria porta, estante atravessando o vao,
+    bancada de banheiro nascendo na soleira.
+
+    E a mesma familia dos moveis engolidos: nada quebra, nada acusa, so nao
+    funciona.
+    """
+
+    def _planta(self, caixas, pontos=None, larg=6.0, fundo=4.0):
+        return dict(
+            nome="teste", pasta="teste", larg=larg, fundo=fundo,
+            zonas=[("A", 0.0, 3.0, 0.0, fundo, "parede", "piso"),
+                   ("B", 3.0, larg, 0.0, fundo, "parede", "piso")],
+            caixas=caixas, janelas=[], luzes=[(3.0, 2.55, 2.0, 1.0)],
+            pontos=pontos or [("A - 1", 1.5, 2.0), ("B - 1", 4.5, 2.0)])
+
+    def test_toda_planta_tem_todos_os_comodos_alcancaveis(self):
+        """A regra, valendo para as sete. Foi preciso consertar cinco."""
+        for construir in plantas.TODAS:
+            p = construir()
+            self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
+                             "%s: comodo que nao da para alcancar a pe" % p["nome"])
+
+    def test_comodo_lacrado_e_acusado(self):
+        """
+        Parede inteira, sem vao: foi o caso da sala intima de 44,8 m2, que
+        aparecia na maquete, tinha onze pontos de captura e era impossivel de
+        alcancar.
+        """
+        p = self._planta(plantas._px(3.0, [(0.0, 4.0)]))
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p))
+        self.assertTrue(cena_apartamento.conferir(p))
+
+    def test_com_porta_o_comodo_passa(self):
+        """O contraste do teste de cima: a mesma parede, com um vao de 1 m."""
+        p = self._planta(plantas._px(3.0, [(0.0, 1.5), (2.5, 4.0)]))
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [])
+
+    def test_movel_em_cima_da_porta_e_acusado(self):
+        """
+        A causa de oito dos nove comodos presos na casa grande. A porta existe
+        e tem a largura certa; o movel e que esta em cima dela.
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.5, 4.0)])
+        armario = [(3.15, 0.0, 1.2, 3.75, 2.0, 2.8, "madeira")]
+        p = self._planta(paredes + armario)
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p),
+                      "o movel em cima da porta passou batido")
+
+    def test_tapete_nao_barra_ninguem(self):
+        """
+        A regra e a do visor: so barra o que passa de 35 cm. Tapete e soleira
+        nao contam — atravessar um tapete nao incomoda ninguem, e trata-los
+        como parede fecharia a casa inteira.
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.5, 4.0)])
+        tapete = [(3.15, 0.0, 1.2, 3.75, 0.012, 2.8, "tapete")]
+        p = self._planta(paredes + tapete)
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
+                         "o tapete virou parede")
+
+    def test_o_corpo_tem_a_mesma_largura_aqui_e_no_visor(self):
+        """
+        Se a conferencia usar um corpo mais estreito que o do andar.html, ela
+        aprova casa em que o visitante trava — que e pior do que nao conferir,
+        porque da confianca sem dar passagem.
+        """
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        achado = re.search(r"const RAIO_CORPO = ([0-9.]+)", html)
+        self.assertTrue(achado, "o visor nao tem mais RAIO_CORPO")
+        self.assertAlmostEqual(float(achado.group(1)),
+                               cena_apartamento.RAIO_CORPO, places=3)
+        alto = re.search(r"p\[4\] - p\[1\] > ([0-9.]+)", html)
+        self.assertTrue(alto, "o visor nao tem mais o corte de altura")
+        self.assertAlmostEqual(float(alto.group(1)),
+                               cena_apartamento.ALTURA_QUE_BARRA, places=3)
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

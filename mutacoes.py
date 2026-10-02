@@ -1075,6 +1075,27 @@ MUT = [
      '_quadro("x", 5.40 + PAREDE, 1, 6.50, 7.90, 1.15, 2.05)',
      '_quadro("x", 5.40, 1, 6.50, 7.90, 1.15, 2.05)',
      'TestPlantasSinteticas.test_nenhum_movel_fica_escondido_dentro_de_outro'),
+
+    # --------------------------------------------- alcance a pe
+    ('comodo lacrado deixa de ser acusado', 'cena_apartamento.py',
+     '    for nome in comodos_sem_acesso(planta):',
+     '    for nome in []:',
+     'TestAlcanceAPe.test_comodo_lacrado_e_acusado'),
+
+    ('movel deixa de barrar o corpo', 'cena_apartamento.py',
+     'ALTURA_QUE_BARRA = 0.35',
+     'ALTURA_QUE_BARRA = 99.0',
+     'TestAlcanceAPe.test_movel_em_cima_da_porta_e_acusado'),
+
+    ('tapete passa a barrar o corpo', 'cena_apartamento.py',
+     '        if c[4] - c[1] <= ALTURA_QUE_BARRA:',
+     '        if False:',
+     'TestAlcanceAPe.test_tapete_nao_barra_ninguem'),
+
+    ('corpo mais estreito que o do visor', 'cena_apartamento.py',
+     'RAIO_CORPO = 0.28',
+     'RAIO_CORPO = 0.10',
+     'TestAlcanceAPe.test_o_corpo_tem_a_mesma_largura_aqui_e_no_visor'),
 ]
 
 
