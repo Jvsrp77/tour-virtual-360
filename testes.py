@@ -6120,6 +6120,145 @@ class TestPublicarPlanta(unittest.TestCase):
         with self.assertRaises(SystemExit):
             publicar.publicar("mansao_de_marte", saida=lambda *a: None)
 
+class TestSetasDoAndar(PaginaNoNode, unittest.TestCase):
+    """
+    Quantas setas de passo aparecem de uma vez.
+
+    MEDIDO NA TELA, numa casa de 520 m2 com 133 pontos: a sala de estar sozinha
+    tem 24, e de dentro dela se enxergam os do corredor, da copa e da sala de
+    jantar pelas portas. Desenhando todo ponto que cai na tela, o visitante
+    recebia umas quarenta setas sobrepostas, com os rotulos um por cima do
+    outro — ilegivel, e o clique cai na errada.
+
+    Os 133 pontos nao sao o defeito: e deles que vem a caminhada suave. O
+    defeito era desenhar os 133.
+    """
+
+    PAGINA = "andar.html"
+
+    def _func_raiz(self, nome):
+        """Recorta funcao do andar.html, que indenta no zero."""
+        abre = "function %s(" % nome
+        self.assertIn(abre, self.html, "a pagina nao tem mais %s" % nome)
+        corpo = self.html[self.html.index(abre):]
+        return corpo[:corpo.index(chr(10) + "}") + 2]
+
+    def _constante(self, nome):
+        achado = re.search(r"const %s = ([0-9.]+)" % nome, self.html)
+        self.assertTrue(achado, "a pagina nao tem mais %s" % nome)
+        return float(achado.group(1))
+
+    def _cenario(self, pontos_js, extra=""):
+        """
+        Monta o mundo minimo que atualizarSetas() consulta.
+
+        A projecao e linear de proposito: x e z do mundo viram pixels direto,
+        entao a conta de empilhamento fica conferivel na mao.
+        """
+        return """
+const L = 800, A = 600;
+const renderizador = {domElement: {clientWidth: L, clientHeight: A}};
+const camera = {};
+const _proj = {
+  x: 0, y: 0, z: 0, _p: null,
+  copy: function(p){ this._p = {x: p.x, y: p.y, z: p.z}; return this; },
+  project: function(){
+    // 16 px por metro, e nao 50: com 50 qualquer ponto alem de 7 m caia
+    // fora da tela sozinho, e o teste do ALCANCE passava por acidente —
+    // quem o filtrava era a borda, nao a regra.
+    const sx = 400 + this._p.x * 16, sy = 300 + this._p.z * 16;
+    this.x = (sx / L) * 2 - 1;
+    this.y = 1 - (sy / A) * 2;
+    this.z = 0;
+    return this;
+  }
+};
+const posicao = {
+  x: 0, y: 0, z: 0,
+  distanceTo: function(p){
+    const dx = p.x - this.x, dz = p.z - this.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+};
+function fabricar(x, z, nome){
+  return {cena: {nome: nome}, mundo: {x: x, y: 0, z: z},
+          seta: {style: {display: '', left: '', top: ''}}};
+}
+const pontos = %s;
+let ativo = pontos[0], misturado = null;
+%s
+%s
+%s
+atualizarSetas();
+const mostradas = pontos.filter(p => p.seta.style.display === '');
+console.log(JSON.stringify({
+  total: pontos.length,
+  mostradas: mostradas.length,
+  nomes: mostradas.map(p => p.cena.nome),
+  tela: mostradas.map(p => [parseInt(p.seta.style.left), parseInt(p.seta.style.top)]),
+  longe: mostradas.map(p => Math.round(posicao.distanceTo(p.mundo) * 100) / 100)
+}));
+""" % (pontos_js,
+       "const ALTURA_DA_SETA = %s;" % self._constante("ALTURA_DA_SETA"),
+       "const MAX_SETAS = %d; const ALCANCE_DA_SETA = %s; const FOLGA_NA_TELA = %d;"
+       % (self._constante("MAX_SETAS"), self._constante("ALCANCE_DA_SETA"),
+          self._constante("FOLGA_NA_TELA")),
+       self._func_raiz("atualizarSetas") + extra)
+
+    def test_casa_cheia_de_pontos_nao_enche_a_tela_de_setas(self):
+        """
+        Quarenta pontos espalhados no alcance de um passo. Tem de sair no
+        maximo MAX_SETAS, e nenhuma pode cair em cima de outra.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        pontos = ("[" + ",".join(
+            "fabricar(%.2f, %.2f, 'p%d')" % ((i % 8) * 0.8 - 2.8,
+                                             (i // 8) * 0.8 - 1.6, i)
+            for i in range(40)) + "]")
+        saida = self._rodar(self._cenario(pontos), "setas_cheia.js")
+
+        self.assertEqual(saida["total"], 40)
+        # LIMITE FIXO, e nao o da pagina. A primeira versao deste teste lia
+        # MAX_SETAS e FOLGA_NA_TELA do proprio andar.html e comparava com eles
+        # — entao afrouxar a pagina afrouxava o teste junto, e desligar o
+        # recorte inteiro passava verde. Teste que se mede por si mesmo nao
+        # mede nada. Oito e o que ainda da para ler e clicar numa tela.
+        self.assertLessEqual(saida["mostradas"], 8,
+                             "a tela encheu de setas: %d" % saida["mostradas"])
+        self.assertGreater(saida["mostradas"], 0, "nao sobrou seta nenhuma")
+
+        folga = 40          # px; abaixo disso dois rotulos ja se cobrem
+        tela = saida["tela"]
+        for i in range(len(tela)):
+            for j in range(i + 1, len(tela)):
+                perto = (abs(tela[i][0] - tela[j][0]) < folga
+                         and abs(tela[i][1] - tela[j][1]) < folga)
+                self.assertFalse(perto, "duas setas empilhadas em %r e %r"
+                                 % (tela[i], tela[j]))
+
+    def test_a_seta_convida_ao_passo_seguinte_e_nao_ao_outro_lado_da_casa(self):
+        """
+        Ponto longe continua existindo e alcancavel — pelo mapa e andando. O
+        que ele nao pode e virar seta: seta e convite para o PASSO seguinte, e
+        mandaria o visitante atravessar a casa de uma vez.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        pontos = ("[fabricar(0, 0, 'onde estou'), fabricar(1.2, 0, 'vizinho'),"
+                  " fabricar(0, 2.0, 'outro vizinho'),"
+                  " fabricar(0, 14.0, 'do outro lado')]")
+        saida = self._rodar(self._cenario(pontos), "setas_longe.js")
+
+        self.assertIn("vizinho", saida["nomes"])
+        self.assertNotIn("do outro lado", saida["nomes"],
+                         "a seta mandou atravessar a casa")
+        self.assertNotIn("onde estou", saida["nomes"],
+                         "seta para o ponto em que o visitante ja esta")
+        for d in saida["longe"]:
+            self.assertLessEqual(d, 8.0, "seta para um ponto longe demais")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

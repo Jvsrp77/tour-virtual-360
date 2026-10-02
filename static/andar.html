@@ -636,6 +636,21 @@ function recentrar(){ viajarAte(ativo); }
 const _proj = new THREE.Vector3();
 const ALTURA_DA_SETA = 1.1;      // metros abaixo da camera: poisa a seta no chao
 
+// QUANTAS SETAS APARECEM DE UMA VEZ.
+//
+// Medido numa casa de 520 m2 com 133 pontos: a sala de estar sozinha tem 24, e
+// de dentro dela se enxergam os do corredor, da copa e da sala de jantar pelas
+// portas. Desenhando todos os que caem na tela, o visitante recebia umas
+// quarenta setas sobrepostas com os rotulos um por cima do outro — nao da para
+// ler nem para clicar, e a casa parece um amontoado de alfinetes.
+//
+// O Street View mostra um punhado, nao o acervo inteiro: seta e CONVITE PARA O
+// PASSO SEGUINTE, nao indice de tudo o que existe. Ponto distante continua
+// alcancavel pelo mapa e andando.
+const MAX_SETAS = 6;             // quantas, no maximo, ao mesmo tempo
+const ALCANCE_DA_SETA = 7.0;     // metros; alem disso nao e passo, e viagem
+const FOLGA_NA_TELA = 64;        // px entre duas setas, para nao empilharem
+
 function criarSetas(){
   const caixa = $('setas');
   caixa.innerHTML = '';
@@ -662,26 +677,50 @@ function irAoPonto(p){
 function atualizarSetas(){
   const tela = renderizador.domElement;
   const L = tela.clientWidth, A = tela.clientHeight;
+
+  // 1. Esconde todas, e junta so as que estao a um PASSO de distancia. Longe
+  //    nao e passo: a seta mandaria o visitante atravessar a casa de uma vez.
+  const perto = [];
   for (const p of pontos){
     if (!p.seta) continue;
+    p.seta.style.display = 'none';
     // sem seta para onde ja se esta nem para o ponto que ja esta misturado
-    if (p === ativo || p === misturado){ p.seta.style.display = 'none'; continue; }
+    if (p === ativo || p === misturado) continue;
+    const d = posicao.distanceTo(p.mundo);
+    if (d <= ALCANCE_DA_SETA) perto.push({p: p, d: d});
+  }
+  perto.sort((a, b) => a.d - b.d);
 
-    _proj.copy(p.mundo);
+  // 2. Das mais proximas, mostra as que cabem na tela SEM EMPILHAR. Duas setas
+  //    a 20 px uma da outra viram um borrao com dois rotulos ilegiveis, e o
+  //    clique cai na errada.
+  const postas = [];
+  for (const c of perto){
+    if (postas.length >= MAX_SETAS) break;
+
+    _proj.copy(c.p.mundo);
     _proj.y -= ALTURA_DA_SETA;
     _proj.project(camera);
 
     // z > 1 e ponto atras da camera: projetado, ele apareceria espelhado na tela
+    if (_proj.z > 1) continue;
     const x = (_proj.x * 0.5 + 0.5) * L;
     const y = (-_proj.y * 0.5 + 0.5) * A;
-    const fora = _proj.z > 1 || x < 24 || x > L - 24 || y < 24 || y > A - 24;
-    if (fora){
-      p.seta.style.display = 'none';
-    } else {
-      p.seta.style.display = '';
-      p.seta.style.left = Math.round(x) + 'px';
-      p.seta.style.top = Math.round(y) + 'px';
+    if (x < 24 || x > L - 24 || y < 24 || y > A - 24) continue;
+
+    let empilha = false;
+    for (const q of postas){
+      if (Math.abs(q.x - x) < FOLGA_NA_TELA && Math.abs(q.y - y) < FOLGA_NA_TELA){
+        empilha = true;
+        break;
+      }
     }
+    if (empilha) continue;
+
+    c.p.seta.style.display = '';
+    c.p.seta.style.left = Math.round(x) + 'px';
+    c.p.seta.style.top = Math.round(y) + 'px';
+    postas.push({x: x, y: y});
   }
 }
 
