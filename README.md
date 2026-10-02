@@ -5,6 +5,34 @@ navegável. Roda inteiro na máquina local, sem depender de Kuula, CloudPano ou 
 
 **Repositório:** https://github.com/Jvsrp77/tour-virtual-360 *(privado)*
 
+## Como fica
+
+Uma casa sintética de 520 m² em 23 cômodos, gerada por traçado de raios a
+partir de uma planta em metros. Serve de demonstração e de banco de prova: a
+profundidade dela é exata, então dá para medir o borrão da caminhada contra uma
+verdade conhecida.
+
+### A maquete eletrônica
+
+O imóvel inteiro em 3D, com as áreas de cada cômodo e os pontos de captura.
+Sai da mesma geometria que gerou os panoramas, em metros.
+
+![Maquete 3D da casa de 520 m², com os 23 cômodos e suas áreas](docs/maquete-3d.jpg)
+
+### O panorama 360
+
+O que a costura entrega: equirretangular 2:1, aqui em 4096x2048. Esta saiu do
+traçador; de fotos de celular, sai do `stitcher.py` pelo mesmo formato.
+
+![Panorama equirretangular da sala de estar, com o mar pelas janelas](docs/panorama-360.jpg)
+
+### Andar pelo ambiente
+
+A caminhada em primeira pessoa, com as setas para os pontos vizinhos e a planta
+no canto — a mesma planta da maquete, para quem anda não se perder.
+
+![Caminhada em primeira pessoa, com setas de passo e a planta no canto](docs/caminhada.jpg)
+
 ## Tecnologias
 
 ### Backend — Python 3.11
