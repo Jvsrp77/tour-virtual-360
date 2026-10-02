@@ -240,6 +240,23 @@ async function iniciar(){
     malha: null, carregando: false, usoEm: 0
   }));
 
+  // A PLANTA NO MAPINHA.
+  //
+  // Sem ela o mapa desenhava so os pontos, ligados dois a dois — e 133 pontos
+  // sem parede nenhuma viram uma nuvem branca que nao se parece com casa
+  // alguma. Relatado assim: "a maquete parecia uma coisa, e quando fui andar
+  // pelo ambiente parecia outra casa". Era a mesma casa; o mapa e que nao a
+  // mostrava.
+  //
+  // A geometria e a MESMA que a maquete consome, e e publica como o tour.
+  // Falhando a busca, o mapa volta ao que era: imovel de fotos nao tem planta.
+  try {
+    const r = await fetch('/api/imoveis/' + IMOVEL + '/maquete',
+                          {credentials: 'same-origin'});
+    const d = await r.json();
+    if (d && d.ok && d.maquete && d.maquete.larg) geometria = d.maquete;
+  } catch (erro){ geometria = null; }
+
   const pedida = new URLSearchParams(location.search).get('cena');
   const inicial = pontos.find(p => p.cena.id === pedida) || pontos[0];
 
@@ -774,16 +791,51 @@ function tecla(k,v){ teclas[k] = !!v; }
 
 // ------------------------------------------------------------------ mapa
 
+// A planta do imovel, quando ele tem uma. Preenchida em iniciar().
+let geometria = null;
+
+// Acima disto, ligar os pontos dois a dois deixa de ajudar e vira malha: sao
+// N*(N-1)/2 contas por quadro, e 133 pontos dao quase nove mil.
+const MAX_PONTOS_LIGADOS = 40;
+
 function escalaMapa(){
   const cv = $('mapa');
-  const xs = pontos.map(p => p.mundo.x), zs = pontos.map(p => p.mundo.z);
-  const minX = Math.min(...xs, posicao.x), maxX = Math.max(...xs, posicao.x);
-  const minZ = Math.min(...zs, posicao.z), maxZ = Math.max(...zs, posicao.z);
+  let minX, maxX, minZ, maxZ;
+  if (geometria){
+    // os limites sao os da CASA, nao os dos pontos: assim o mapa enquadra o
+    // imovel inteiro e bate com o que a maquete mostra
+    minX = 0; maxX = geometria.larg; minZ = 0; maxZ = geometria.fundo;
+  } else {
+    const xs = pontos.map(p => p.mundo.x), zs = pontos.map(p => p.mundo.z);
+    minX = Math.min(...xs, posicao.x); maxX = Math.max(...xs, posicao.x);
+    minZ = Math.min(...zs, posicao.z); maxZ = Math.max(...zs, posicao.z);
+  }
   const cx = (minX+maxX)/2, cz = (minZ+maxZ)/2;
-  const span = Math.max(6, (maxX-minX)*1.5, (maxZ-minZ)*1.5);
+  const folga = geometria ? 1.08 : 1.5;
+  const span = Math.max(6, (maxX-minX)*folga, (maxZ-minZ)*folga);
   const k = (cv.width - 26) / span;
   return {k, cx, cz,
     tela: (x,z) => [cv.width/2 + (x-cx)*k, cv.height/2 + (z-cz)*k]};
+}
+
+function desenharPlanta(ctx, e){
+  for (const z of geometria.zonas){
+    const [x1,y1] = e.tela(z.x0, z.z0), [x2,y2] = e.tela(z.x1, z.z1);
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = z.piso || '#555';
+    ctx.fillRect(x1, y1, x2-x1, y2-y1);
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(14,16,20,.92)';
+  for (const c of geometria.caixas){
+    if (c.m !== 'parede') continue;
+    const [x1,y1] = e.tela(c.p[0], c.p[2]), [x2,y2] = e.tela(c.p[3], c.p[5]);
+    ctx.fillRect(x1, y1, Math.max(1, x2-x1), Math.max(1, y2-y1));
+  }
+  const [bx,by] = e.tela(0, 0);
+  const [ex,ey] = e.tela(geometria.larg, geometria.fundo);
+  ctx.strokeStyle = 'rgba(14,16,20,.92)'; ctx.lineWidth = 2;
+  ctx.strokeRect(bx, by, ex-bx, ey-by);
 }
 
 function desenharMapa(){
@@ -791,19 +843,25 @@ function desenharMapa(){
   const e = escalaMapa();
   ctx.clearRect(0,0,cv.width,cv.height);
 
-  ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 2;
-  for (let i = 0; i < pontos.length; i++)
-    for (let j = i+1; j < pontos.length; j++){
-      if (pontos[i].mundo.distanceTo(pontos[j].mundo) > 4) continue;
-      const [x1,y1] = e.tela(pontos[i].mundo.x, pontos[i].mundo.z);
-      const [x2,y2] = e.tela(pontos[j].mundo.x, pontos[j].mundo.z);
-      ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-    }
+  if (geometria){
+    desenharPlanta(ctx, e);
+  } else if (pontos.length <= MAX_PONTOS_LIGADOS){
+    ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 2;
+    for (let i = 0; i < pontos.length; i++)
+      for (let j = i+1; j < pontos.length; j++){
+        if (pontos[i].mundo.distanceTo(pontos[j].mundo) > 4) continue;
+        const [x1,y1] = e.tela(pontos[i].mundo.x, pontos[i].mundo.z);
+        const [x2,y2] = e.tela(pontos[j].mundo.x, pontos[j].mundo.z);
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
+  }
 
   pontos.forEach(p => {
     const [x,y] = e.tela(p.mundo.x, p.mundo.z);
-    ctx.beginPath(); ctx.arc(x,y, p === ativo ? 7 : 5, 0, Math.PI*2);
-    ctx.fillStyle = p === ativo ? '#e07b39' : 'rgba(255,255,255,.45)';
+    // ponto miudo sobre a planta: sao 133, e bolinha de 5 px cobriria a casa
+    ctx.beginPath();
+    ctx.arc(x, y, p === ativo ? 5 : (geometria ? 2.2 : 5), 0, Math.PI*2);
+    ctx.fillStyle = p === ativo ? '#e07b39' : 'rgba(255,255,255,.55)';
     ctx.fill();
   });
 

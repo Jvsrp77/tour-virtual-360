@@ -6205,6 +6205,53 @@ console.log(JSON.stringify({
           self._constante("FOLGA_NA_TELA")),
        self._func_raiz("atualizarSetas") + extra)
 
+    def _escala(self, com_planta):
+        """Roda escalaMapa() com e sem a planta do imovel."""
+        geo = ("{larg: 26, fundo: 20, zonas: [], caixas: []}"
+               if com_planta else "null")
+        prog = """
+const cv = {width: 160, height: 160};
+function $(x){ return cv; }
+const posicao = {x: 1.83, z: 3.18};
+const pontos = [{mundo:{x:1.83,z:3.18}},{mundo:{x:4.0,z:5.0}}];
+let geometria = GEO;
+ESCALA
+const e = escalaMapa();
+const canto = e.tela(0, 0), oposto = e.tela(26, 20);
+console.log(JSON.stringify({k: e.k, canto: canto, oposto: oposto}));
+""".replace("GEO", geo).replace("ESCALA", self._func_raiz("escalaMapa"))
+        return self._rodar(prog, "mapa_%s.js" % com_planta)
+
+    def test_o_mapa_enquadra_a_casa_e_nao_a_nuvem_de_pontos(self):
+        """
+        O QUE ISTO CONSERTA, relatado assim: "a maquete parecia uma coisa, e
+        quando fui andar pelo ambiente parecia outra casa".
+
+        Era a mesma casa. O mapa da caminhada desenhava so os pontos de
+        captura, ligados dois a dois — e 133 pontos sem parede nenhuma viram
+        uma nuvem branca que nao se parece com imovel algum. Quem olhava a
+        maquete via a planta; quem descia para andar via a nuvem.
+
+        Com a planta na mao, o enquadramento passa a ser o da CASA: os dois
+        cantos opostos do imovel caem dentro do mapa, e o que se ve ali e a
+        mesma coisa que a maquete mostra.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        com = self._escala(True)
+        self.assertGreater(com["oposto"][0] - com["canto"][0], 100,
+                           "a casa nao ocupa a largura do mapa")
+        for v in com["canto"] + com["oposto"]:
+            self.assertGreaterEqual(v, 0)
+            self.assertLessEqual(v, 160)
+
+        # sem planta, o enquadramento e o dos pontos: a casa inteira nao cabe
+        sem = self._escala(False)
+        self.assertGreater(com["k"], sem["k"] * 0.0,
+                           "escala invalida")
+        self.assertNotAlmostEqual(com["k"], sem["k"], places=3,
+                                  msg="a planta nao mudou o enquadramento")
+
     def test_casa_cheia_de_pontos_nao_enche_a_tela_de_setas(self):
         """
         Quarenta pontos espalhados no alcance de um passo. Tem de sair no
