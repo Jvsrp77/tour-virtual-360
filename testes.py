@@ -249,11 +249,17 @@ class TestTetoDePasseio(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr[:600])
         return json.loads(r.stdout.strip())
 
+    # As duas cenas levam camada de fundo IGUAL de proposito: assim o que
+    # sobra de diferenca entre elas e so o escorrido, que e o que este teste
+    # mede. Sem isso o teto de quem nao tem camada mascara os dois.
+    MESMA_CAMADA = {"reconstruido": 2.0}
+
     def test_cena_medida_pior_anda_menos(self):
         if not self.node:
             self.skipTest("node não encontrado")
-        otima, ruim = self._rodar([{"escorrido": {"fracao": 0.008}},
-                                   {"escorrido": {"fracao": 0.0235}}])
+        otima, ruim = self._rodar(
+            [{"escorrido": {"fracao": 0.008}, "fundo": self.MESMA_CAMADA},
+             {"escorrido": {"fracao": 0.0235}, "fundo": self.MESMA_CAMADA}])
         self.assertGreater(otima, ruim,
                            "cena com mais escorrido tinha de andar MENOS")
 
@@ -266,10 +272,64 @@ class TestTetoDePasseio(unittest.TestCase):
         self.assertGreater(teto, 0.8)
 
     def test_cena_boa_anda_o_maximo(self):
+        """
+        Boa nos DOIS criterios: profundidade limpa e pouca oclusao. So assim
+        vale o passeio inteiro.
+
+        Este teste pedia 2,50 m com a profundidade sozinha, e passava. A tela
+        desmentiu: a casa sintetica tem profundidade EXATA e mesmo assim se
+        desfazia a 2,5 m, porque o que impede de andar e a estante tapar meio
+        comodo. Agora a cena tem de ser boa tambem em oclusao.
+        """
         if not self.node:
             self.skipTest("node não encontrado")
-        (teto,) = self._rodar([{"escorrido": {"fracao": 0.004}}])
+        (teto,) = self._rodar([{"escorrido": {"fracao": 0.004},
+                                "fundo": {"reconstruido": 2.0}}])
         self.assertAlmostEqual(teto, 2.50, places=2)
+
+    def test_comodo_cheio_anda_menos_que_corredor_vazio(self):
+        """
+        A regra nova numa frase: quanto mais a IA teve de inventar, menos se
+        pode andar. Comodo com movel grande e perto reconstroi muito.
+
+        MEDIDO NA TELA, na casa de 520 m2: a 0,78 m do ponto a imagem esta
+        limpa; a 2,5 m ela se desfaz em buraco preto e malha rasgada.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        otimo = {"escorrido": {"fracao": 0.007}}
+        cheio, vazio = self._rodar([dict(otimo, fundo={"reconstruido": 14.0}),
+                                    dict(otimo, fundo={"reconstruido": 4.0})])
+        self.assertLess(cheio, vazio,
+                        "comodo cheio recebeu tanto passeio quanto o vazio")
+        self.assertLess(cheio, 1.0, "comodo cheio anda demais: %.2f m" % cheio)
+
+    def test_profundidade_exata_nao_libera_o_passeio_inteiro(self):
+        """
+        O DEFEITO QUE ISTO CONSERTA, e que era um criterio invertido: quanto
+        MELHOR a profundidade, maior o orcamento — e a casa sintetica, que tem
+        a profundidade perfeita, era a que pior andava.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        # a varanda real da casa: escorrido otimo, 7,74% reconstruido
+        (teto,) = self._rodar([{"escorrido": {"fracao": 0.0079},
+                                "fundo": {"reconstruido": 7.74}}])
+        self.assertLess(teto, 1.0,
+                        "profundidade exata voltou a liberar o passeio inteiro")
+        self.assertGreater(teto, 0.3, "nao sobrou passeio nenhum")
+
+    def test_sem_camada_de_fundo_anda_menos_ainda(self):
+        """
+        Sem camada, o vao nao tem conteudo nenhum e vira preto. Andar o mesmo
+        tanto de uma cena preparada seria premiar quem nao preparou.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        com, sem = self._rodar(
+            [{"escorrido": {"fracao": 0.005}, "fundo": {"reconstruido": 3.0}},
+             {"escorrido": {"fracao": 0.005}}])
+        self.assertLess(sem, com)
 
     def test_cena_sem_medida_nao_ganha_folga_indevida(self):
         """Sem medida nao da para afrouxar; o padrao nao pode passar do cheio."""

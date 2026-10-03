@@ -166,9 +166,19 @@ MUT = [
      "TestTetoDePasseio.test_o_teto_e_mesmo_aplicado_no_passo"),
 
     # se o teto nao cair com escorrido ruim, a cena pior anda tanto quanto a boa
+    ("teto ignora a oclusao da cena", "static/andar.html",
+     "  const r = cena && cena.fundo && cena.fundo.reconstruido;",
+     "  const r = RECONSTRUIDO_OTIMO;",
+     "TestTetoDePasseio.test_comodo_cheio_anda_menos_que_corredor_vazio"),
+
+    ("cena sem camada anda como quem tem", "static/andar.html",
+     "    teto = Math.min(teto, PASSEIO_SEM_FUNDO);",
+     "    teto = teto;",
+     "TestTetoDePasseio.test_sem_camada_de_fundo_anda_menos_ainda"),
+
     ("teto nao cai em cena ruim", "static/andar.html",
-     "  return Math.max(PASSEIO_MINIMO, PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e));",
-     "  return PASSEIO_CHEIO;",
+     "  if (e && e > ESCORRIDO_OTIMO) teto = PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e);",
+     "  if (false) teto = 0;",
      "TestTetoDePasseio.test_cena_medida_pior_anda_menos"),
 
     # sem o freio, 1 tentativa por segundo ainda da 86 mil por dia

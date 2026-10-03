@@ -197,11 +197,40 @@ const ESCORRIDO_OTIMO = 0.010;   // espelha profundidade.ESCORRIDO_OTIMO
 const PASSEIO_CHEIO = 2.50;      // metros, o maximo que o controle oferece
 const PASSEIO_MINIMO = 0.35;     // abaixo disto o passeio nao serve para nada
 
+// QUANTO DA CENA PODE SER INVENTADO SEM QUE O PASSEIO QUEBRE.
+//
+// Medido na tela, na casa de 520 m2: a 0,78 m do ponto a imagem esta limpa; a
+// 2,5 m ela se desfaz em buraco preto e malha rasgada. E a conta antiga
+// liberava os 2,5 m inteiros, porque olhava so o ESCORRIDO — a qualidade da
+// profundidade nas bordas.
+//
+// Isso estava invertido. O imovel sintetico tem profundidade EXATA, vinda da
+// geometria: escorrido otimo, orcamento maximo, e o pior resultado possivel.
+// O que impede de andar nao e a profundidade estar errada; e a estante tapar
+// meio comodo, e atras dela nao existir foto nenhuma.
+//
+// A medida certa so passou a existir com a camada de fundo: `reconstruido` diz
+// quanto da cena a IA teve de inventar, e isso E a oclusao. Comodo cheio
+// reconstroi muito e anda pouco; corredor vazio reconstroi pouco e anda mais.
+const RECONSTRUIDO_OTIMO = 2.0;  // por cento; acima disto o passeio encolhe
+const PASSEIO_SEM_FUNDO = 1.00;  // sem camada, todo vao vira preto
+
 function tetoDePasseio(cena){
+  let teto = PASSEIO_CHEIO;
+
   const e = cena && cena.escorrido && cena.escorrido.fracao;
-  // sem medida nao da para afrouxar: cena antiga anda o padrao conservador
-  if (!e || e <= ESCORRIDO_OTIMO) return PASSEIO_CHEIO;
-  return Math.max(PASSEIO_MINIMO, PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e));
+  if (e && e > ESCORRIDO_OTIMO) teto = PASSEIO_CHEIO * (ESCORRIDO_OTIMO / e);
+
+  const r = cena && cena.fundo && cena.fundo.reconstruido;
+  if (r > 0){
+    // ha camada: o quanto ela precisou inventar diz o quanto da para andar
+    if (r > RECONSTRUIDO_OTIMO)
+      teto = Math.min(teto, PASSEIO_CHEIO * (RECONSTRUIDO_OTIMO / r));
+  } else {
+    // sem camada o vao nao tem conteudo nenhum: anda menos, de proposito
+    teto = Math.min(teto, PASSEIO_SEM_FUNDO);
+  }
+  return Math.max(PASSEIO_MINIMO, teto);
 }
 
 const MAX_MALHAS = 3;            // texturas de panorama pesam; nao da para segurar todas
