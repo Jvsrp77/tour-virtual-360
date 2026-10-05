@@ -765,13 +765,23 @@ MUT = [
     # o numero nao e de gosto: cada ponto alcanca 2,50 m, e alem disso fica um
     # trecho que ponto nenhum cobre
     ("o guia aceita vao maior que o passeio alcanca", "captura.py",
-     "VAO_MAXIMO = 2.50",
-     "VAO_MAXIMO = 9.00",
-     "TestGuiaDeCaptura.test_vao_maior_que_o_alcance_do_passeio_impede_de_caminhar"),
+     "    return 2.0 * min(passeio_da_cena(a, preparada=True),",
+     "    return 9.0 * min(passeio_da_cena(a, preparada=True),",
+     "TestGuiaDeCaptura.test_vao_maior_que_o_alcance_do_passeio_atrapalha_a_caminhada"),
 
     # aviso em captura boa ensina a ignorar avisos, e ai o que importa passa
+    ("guia esquece a camada de fundo", "captura.py",
+     '                 if c.get("profundidade") and not (c.get("fundo") or {}).get("textura")]',
+     '                 if False]',
+     "TestGuiaDeCaptura.test_cena_sem_camada_manda_preparar_e_nao_voltar_ao_imovel"),
+
+    ("guia ignora a oclusao e volta ao numero fixo", "captura.py",
+     "            teto = min(teto, PASSEIO_CHEIO * (RECONSTRUIDO_OTIMO / reconstruido))",
+     "            teto = teto",
+     "TestGuiaDeCaptura.test_o_alcance_do_guia_encolhe_com_a_oclusao"),
+
     ("o guia reclama de captura boa", "captura.py",
-     "        elif metros > VAO_IDEAL:",
+     "        elif metros > cobre * FOLGA_BOA:",
      "        elif metros > 0:",
      "TestGuiaDeCaptura.test_captura_boa_nao_gera_reclamacao"),
 
@@ -789,8 +799,8 @@ MUT = [
 
     # o pior lugar do passeio e o meio do caminho ate o VIZINHO, nao a media
     ("o vao vira media em vez do vizinho mais proximo", "captura.py",
-     "        saida.append((cena, min(outras) if outras else None))",
-     "        saida.append((cena, sum(outras) / len(outras) if outras else None))",
+     "        metros, vizinha = min(outras, key=lambda par: par[0])",
+     "        metros, vizinha = max(outras, key=lambda par: par[0])",
      "TestGuiaDeCaptura.test_o_vao_medido_e_ate_o_vizinho_mais_proximo"),
 
     ("o comodo deixa de sair do nome da cena", "captura.py",

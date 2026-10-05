@@ -4647,7 +4647,16 @@ class TestGuiaDeCaptura(Base):
         self.dona = self.conta("dona-captura")
         self.iid = self.imovel(self.dona, "Apartamento a capturar")
 
-    def _cena(self, nome, x, y, prof=True, escorrido=None):
+    def _cena(self, nome, x, y, prof=True, escorrido=None, fundo=2.0):
+        """
+        Uma cena como o painel a deixa depois de Preparar.
+
+        `fundo` e o quanto da cena a IA reconstruiu, em por cento, e ele entra
+        por padrao de proposito: cena preparada TEM camada, e o guia so pode
+        falar de captura depois que a preparacao esta feita. Passando
+        `fundo=None` sai uma cena sem camada, que e outro problema e tem
+        achado proprio.
+        """
         c = {"id": nome.lower().replace(" ", "-"), "nome": nome,
              "arquivo": "c.jpg", "hotspots": []}
         if x is not None:
@@ -4656,6 +4665,9 @@ class TestGuiaDeCaptura(Base):
             c["profundidade"] = "prof.png"
         if escorrido is not None:
             c["escorrido"] = {"fracao": escorrido}
+        if fundo is not None:
+            c["fundo"] = {"textura": "t.jpg", "profundidade": "f.png",
+                          "reconstruido": fundo}
         return c
 
     def _gravar(self, cenas):
@@ -4686,7 +4698,8 @@ class TestGuiaDeCaptura(Base):
         """
         cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 1.5, 0),
                  self._cena("Sala - C", 6.0, 0)]
-        medidos = dict((c["nome"], round(d, 2)) for c, d in captura.vaos(cenas))
+        medidos = dict((c["nome"], round(d, 2))
+                       for c, d, _viz in captura.vaos(cenas))
         self.assertEqual(medidos["Sala - A"], 1.5)
         self.assertEqual(medidos["Sala - B"], 1.5)
         self.assertEqual(medidos["Sala - C"], 4.5)
@@ -4697,22 +4710,47 @@ class TestGuiaDeCaptura(Base):
         self.assertEqual(len(captura.vaos(cenas)), 1)
 
     def test_ponto_unico_nao_inventa_um_vizinho(self):
-        cena, metros = captura.vaos([self._cena("Sala - A", 0, 0)])[0]
+        cena, metros, vizinha = captura.vaos([self._cena("Sala - A", 0, 0)])[0]
         self.assertIsNone(metros)
+        self.assertIsNone(vizinha, "inventou um vizinho onde nao ha")
 
     # ---------------------------------------------------------- o diagnostico
 
-    def test_vao_maior_que_o_alcance_do_passeio_impede_de_caminhar(self):
+    def test_vao_maior_que_o_alcance_do_passeio_atrapalha_a_caminhada(self):
         """
-        O numero nao e de gosto: cada ponto alcança 2,50 m. Dois pontos mais
-        distantes que isso deixam, no meio, um trecho que ponto nenhum cobre -
-        a caminhada para ali.
+        O numero nao e de gosto, e nao e mais fixo: cada cena tem o SEU
+        alcance, que depende de quanto dela ficou escondido atras dos moveis.
+        O pior lugar do passeio e o meio do caminho, e ele precisa estar ao
+        alcance dos dois pontos — entao o vao coberto e o dobro do menor dos
+        dois alcances.
+
+        E e ATRAPALHA, nao impede: a seta leva o visitante ao ponto vizinho de
+        qualquer distancia. Quem nao atravessa o vao e o passeio LIVRE, que
+        nasce desligado. Chamar isto de impedimento encheria o guia de alarme
+        falso — so na casa de 520 m2 seriam 51 cenas marcadas assim.
         """
-        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 4.0, 0)]
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 9.0, 0)]
         _resumo, achados = captura.diagnosticar({"cenas": cenas})
-        graves = [a for a in achados if a["grau"] == "impede"]
-        self.assertTrue(graves, "vão de 4 m passou como aceitável")
-        self.assertIn("meio", graves[0]["fazer"])
+        sobre_o_vao = [a for a in achados if "alcançam" in a["o_que"]]
+        self.assertTrue(sobre_o_vao, "vão de 9 m passou como aceitável")
+        self.assertEqual(sobre_o_vao[0]["grau"], "atrapalha")
+        self.assertIn("meio", sobre_o_vao[0]["fazer"])
+        self.assertEqual([a for a in achados if a["grau"] == "impede"], [],
+                         "vão grande não impede: a seta leva lá")
+
+    def test_cena_sem_camada_manda_preparar_e_nao_voltar_ao_imovel(self):
+        """
+        Faltar camada de fundo NAO se resolve voltando ao imovel: resolve-se
+        com um botao no painel. Mandar o corretor capturar de novo por causa
+        disso seria custar-lhe uma viagem a toa.
+        """
+        cenas = [self._cena("Sala - A", 0, 0, fundo=None),
+                 self._cena("Sala - B", 1.5, 0, fundo=None)]
+        _resumo, achados = captura.diagnosticar({"cenas": cenas})
+        sobre = [a for a in achados if "camada de fundo" in a["o_que"]]
+        self.assertEqual(len(sobre), 2)
+        self.assertIn("Preparar", sobre[0]["fazer"])
+        self.assertNotIn("capture", sobre[0]["fazer"].lower())
 
     def test_vao_folgado_avisa_sem_impedir(self):
         """
@@ -4720,10 +4758,14 @@ class TestGuiaDeCaptura(Base):
         isso como erro grave faria o corretor ignorar os erros graves de
         verdade.
         """
-        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 2.2, 0)]
+        # 4,2 m: dentro dos 5,00 m que o par cobre, mas acima dos 70% em que
+        # a imagem ja comeca a esticar no meio do caminho. Era 2,2 m quando o
+        # alcance de cada ponto valia 2,50 m fixos.
+        cenas = [self._cena("Sala - A", 0, 0), self._cena("Sala - B", 4.2, 0)]
         _resumo, achados = captura.diagnosticar({"cenas": cenas})
         self.assertEqual([a["grau"] for a in achados if a["cena"]],
                          ["atrapalha", "atrapalha"])
+        self.assertTrue(all("estica" in a["o_que"] for a in achados if a["cena"]))
 
     def test_captura_boa_nao_gera_reclamacao(self):
         """
@@ -4787,6 +4829,25 @@ class TestGuiaDeCaptura(Base):
 
     # ------------------------------------------- o guia e o passeio combinam
 
+    def test_o_alcance_do_guia_encolhe_com_a_oclusao(self):
+        """
+        Conferir as CONSTANTES nao basta: a conta tambem pode sair de
+        sincronia. Conferido com mutacao — tirando o termo da oclusao da
+        formula, o teste das constantes continuava verde.
+
+        A regra e a mesma do visor: quanto mais da cena a IA teve de inventar,
+        menos se pode andar a partir dela.
+        """
+        cheia = self._cena("Sala - A", 0, 0, fundo=14.0)
+        vazia = self._cena("Corredor - A", 0, 0, fundo=2.4)
+        a_cheia = captura.passeio_da_cena(cheia)
+        a_vazia = captura.passeio_da_cena(vazia)
+        self.assertLess(a_cheia, a_vazia,
+                        "comodo cheio recebeu tanto alcance quanto o vazio")
+        self.assertLess(a_cheia, 1.0,
+                        "comodo cheio anda demais: %.2f m" % a_cheia)
+        self.assertGreaterEqual(a_cheia, captura.PASSEIO_MINIMO)
+
     def test_o_limite_do_guia_e_o_alcance_real_do_passeio(self):
         """
         Se alguém mexer no alcance do passeio e esquecer do guia, o guia passa
@@ -4795,9 +4856,15 @@ class TestGuiaDeCaptura(Base):
         """
         html = io.open(os.path.join("static", "andar.html"),
                        encoding="utf-8").read()
-        achado = re.search(r"const PASSEIO_CHEIO = ([\d.]+)", html)
-        self.assertTrue(achado, "sumiu o PASSEIO_CHEIO do andar.html")
-        self.assertEqual(float(achado.group(1)), captura.VAO_MAXIMO)
+        # Uma so nao basta mais. O alcance deixou de ser um numero fixo e
+        # passou a sair de uma CONTA, e o guia tem de fazer a mesma conta: se
+        # qualquer uma destas sair de sincronia, ele manda capturar errado.
+        for nome in ("PASSEIO_CHEIO", "PASSEIO_MINIMO", "PASSEIO_SEM_FUNDO",
+                     "ESCORRIDO_OTIMO", "RECONSTRUIDO_OTIMO"):
+            achado = re.search(r"const %s = ([\d.]+)" % nome, html)
+            self.assertTrue(achado, "sumiu o %s do andar.html" % nome)
+            self.assertEqual(float(achado.group(1)), getattr(captura, nome),
+                             "%s difere entre o visor e o guia" % nome)
 
     # -------------------------------------------------------------- as rotas
 
@@ -4847,11 +4914,14 @@ class TestGuiaDeCaptura(Base):
         ao abri-lo significa nunca saber. O tour já é lido ali para montar o
         cartão, então a conta sai de graça.
         """
-        self._gravar([self._cena("Sala - A", 0, 0), self._cena("Sala - B", 6.0, 0)])
+        # sem profundidade: isso sim impede de caminhar, e e o que a lista
+        # precisa gritar. Vao grande atrapalha, mas a seta ainda leva la.
+        self._gravar([self._cena("Sala - A", 0, 0),
+                      self._cena("Sala - B", 6.0, 0, prof=False)])
         itens = self.dona.get("/api/imoveis").get_json()["imoveis"]
         meu = next(i for i in itens if i["id"] == self.iid)
         self.assertGreater(meu["captura"]["impedem"], 0,
-                           "vão de 6 m passou como imóvel saudável na lista")
+                           "cena sem profundidade passou como saudável na lista")
 
     def test_a_lista_e_o_guia_nunca_discordam(self):
         """
