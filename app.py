@@ -831,7 +831,10 @@ def saude():
     return jsonify({"ok": True, "imoveis": len(os.listdir(PASTA_IMOVEIS))
                     if os.path.isdir(PASTA_IMOVEIS) else 0,
                     "modelos": {"profundidade": profundidade.modelo_disponivel(),
-                                "fundo": fundo.modelo_disponivel()}})
+                                "fundo": fundo.modelo_disponivel()},
+                    # para quem cuida do servidor ver de fora que o aviso de
+                    # contato esta desligado, sem precisar perder um lead antes
+                    "aviso_de_lead": aviso.configurado()})
 
 
 @app.route("/entrar")
@@ -2434,6 +2437,26 @@ def api_registrar_lead():
     except Exception:   # o aviso nunca derruba o cadastro do contato
         traceback.print_exc()
     return jsonify({"ok": True})
+
+
+@api.route("/aviso", methods=["GET"])
+def api_aviso():
+    """
+    Diz se o aviso de contato esta de pe, e o que falta quando nao esta.
+
+    O painel pergunta isto para avisar o corretor ANTES de ele perder um
+    contato. Era o unico lugar do sistema que prometia uma coisa e nao
+    cumpria — e calado.
+    """
+    return jsonify({"ok": True, "configurado": aviso.configurado(),
+                    "falta": aviso.por_que_nao()})
+
+
+@api.route("/aviso/testar", methods=["POST"])
+def api_aviso_testar():
+    """Manda um e-mail de teste e devolve o erro de verdade, se houver."""
+    ok, recado = aviso.testar()
+    return jsonify({"ok": ok, "recado": recado}), (200 if ok else 400)
 
 
 def _achar_lead(tour, lead_id):

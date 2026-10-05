@@ -2473,6 +2473,34 @@ class TestAvisoDeLead(Base):
     pior.
     """
 
+    import contextlib
+
+    @contextlib.contextmanager
+    def _sem_smtp(self):
+        antes = dict(os.environ)
+        for k in list(os.environ):
+            if k.startswith("TOUR_SMTP") or k == "TOUR_AVISO_PARA":
+                del os.environ[k]
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(antes)
+
+    @contextlib.contextmanager
+    def _com_smtp(self, servidor="smtp.exemplo", porta="587"):
+        antes = dict(os.environ)
+        os.environ["TOUR_SMTP_SERVIDOR"] = servidor
+        os.environ["TOUR_SMTP_PORTA"] = porta
+        os.environ["TOUR_SMTP_USUARIO"] = "corretor@exemplo"
+        os.environ["TOUR_SMTP_SENHA"] = "x"
+        os.environ["TOUR_AVISO_PARA"] = "corretor@exemplo"
+        try:
+            yield
+        finally:
+            os.environ.clear()
+            os.environ.update(antes)
+
     def setUp(self):
         self.cliente = self.conta("dona-lead")
         self.iid = self.imovel(self.cliente, "Apartamento 302")
@@ -2527,6 +2555,70 @@ class TestAvisoDeLead(Base):
         self.assertNotIn("TOUR_SMTP_SENHA",
                          io.open("static/admin.html", encoding="utf-8").read())
 
+
+    # ------------------------------------- o aviso deixa de falhar em silencio
+
+    def test_a_rota_diz_que_o_aviso_esta_desligado_e_o_que_falta(self):
+        """
+        O DEFEITO QUE ISTO FECHA, e era o unico do produto em que ele prometia
+        uma coisa e nao cumpria, calado: o visitante deixava o contato, o
+        contato era gravado, e ninguem era avisado. O modulo sabia dizer o que
+        faltava desde que nasceu — `por_que_nao()` existia e SO OS TESTES a
+        chamavam. O aplicativo, nunca.
+        """
+        with self._sem_smtp():
+            r = self.cliente.get("/api/imoveis/%s/aviso" % self.iid)
+            self.assertEqual(r.status_code, 200)
+            j = r.get_json()
+            self.assertFalse(j["configurado"])
+            self.assertIn("TOUR_SMTP_SERVIDOR", j["falta"])
+
+    def test_a_rota_confirma_quando_o_aviso_esta_de_pe(self):
+        with self._com_smtp():
+            j = self.cliente.get("/api/imoveis/%s/aviso" % self.iid).get_json()
+            self.assertTrue(j["configurado"])
+            self.assertEqual(j["falta"], "")
+
+    def test_o_teste_de_envio_devolve_o_erro_de_verdade(self):
+        """
+        "Falhou" nao serve: configurar SMTP erra em silencio — porta trocada,
+        senha de aplicativo em vez da senha da conta, remetente recusado. O
+        erro do servidor e a diferenca entre arrumar em dois minutos e ficar
+        adivinhando.
+        """
+        with self._com_smtp(servidor="127.0.0.1", porta="1"):
+            r = self.cliente.post("/api/imoveis/%s/aviso/testar" % self.iid)
+            self.assertEqual(r.status_code, 400)
+            recado = r.get_json()["recado"]
+            self.assertTrue(recado, "falhou sem dizer por que")
+            self.assertNotEqual(recado.lower(), "falhou")
+
+    def test_o_teste_de_envio_sem_configuracao_diz_o_que_falta(self):
+        with self._sem_smtp():
+            r = self.cliente.post("/api/imoveis/%s/aviso/testar" % self.iid)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("TOUR_SMTP_SERVIDOR", r.get_json()["recado"])
+
+    def test_a_saude_do_servidor_mostra_o_aviso(self):
+        """
+        Para quem cuida do servidor ver de fora que esta desligado, sem
+        precisar perder um contato antes de descobrir.
+        """
+        with self._sem_smtp():
+            self.assertFalse(self.cliente.get("/saude").get_json()["aviso_de_lead"])
+        with self._com_smtp():
+            self.assertTrue(self.cliente.get("/saude").get_json()["aviso_de_lead"])
+
+    def test_visitante_nao_le_a_configuracao_de_envio(self):
+        """
+        A rota diz o que falta no servidor. Isso e informacao de dono, nao de
+        quem visita o tour — e nomes de variavel de ambiente ajudam quem quer
+        atacar.
+        """
+        with self._sem_smtp():
+            visitante = aplicacao.app.test_client()
+            r = visitante.get("/api/imoveis/%s/aviso" % self.iid)
+            self.assertIn(r.status_code, (401, 403, 302))
 
 class TestSenhaEsquecida(Base):
     """

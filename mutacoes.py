@@ -770,6 +770,21 @@ MUT = [
      "TestGuiaDeCaptura.test_vao_maior_que_o_alcance_do_passeio_atrapalha_a_caminhada"),
 
     # aviso em captura boa ensina a ignorar avisos, e ai o que importa passa
+    ("aviso de lead volta a falhar calado", "app.py",
+     '"configurado": aviso.configurado(),',
+     '"configurado": True,',
+     "TestAvisoDeLead.test_a_rota_diz_que_o_aviso_esta_desligado_e_o_que_falta"),
+
+    ("teste de envio engole o erro do servidor", "app.py",
+     'return jsonify({"ok": ok, "recado": recado}), (200 if ok else 400)',
+     'return jsonify({"ok": True, "recado": ""}), 200',
+     "TestAvisoDeLead.test_o_teste_de_envio_devolve_o_erro_de_verdade"),
+
+    ("saude esconde que o aviso esta desligado", "app.py",
+     '"aviso_de_lead": aviso.configurado()',
+     '"aviso_de_lead": True',
+     "TestAvisoDeLead.test_a_saude_do_servidor_mostra_o_aviso"),
+
     ("guia esquece a camada de fundo", "captura.py",
      '                 if c.get("profundidade") and not (c.get("fundo") or {}).get("textura")]',
      '                 if False]',

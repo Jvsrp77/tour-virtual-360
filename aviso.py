@@ -117,6 +117,31 @@ def _enviar_agora(assunto, corpo):
             s.send_message(msg)
 
 
+def testar():
+    """
+    Manda um e-mail de teste e devolve (ok, recado).
+
+    Existe porque configurar SMTP erra em silencio: porta trocada, senha de
+    aplicativo em vez da senha da conta, remetente que o servidor recusa. Sem
+    um botao de teste, o corretor so descobre quando perde um contato de
+    verdade — e ai ja perdeu.
+
+    Devolve o erro REAL do servidor, nao "falhou": e a diferenca entre arrumar
+    em dois minutos e ficar adivinhando.
+    """
+    falta = por_que_nao()
+    if falta:
+        return False, falta
+    try:
+        _enviar_agora("Teste do aviso de contato",
+                      "Se voce recebeu este e-mail, o aviso de contato esta "
+                      "funcionando.\n\nQuando um visitante deixar o contato no "
+                      "tour, um aviso como este chega aqui.")
+    except Exception as erro:
+        return False, "%s: %s" % (type(erro).__name__, erro)
+    return True, "Enviado para %s." % ", ".join(_config()["para"])
+
+
 def avisar(lead, titulo_imovel, link="", esperar=False):
     """
     Dispara o aviso. Devolve True se chegou a tentar.

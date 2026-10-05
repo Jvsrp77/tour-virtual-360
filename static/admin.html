@@ -347,6 +347,15 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <input type="text" id="leadTitulo">
       <label>Aparece após (segundos)</label>
       <input type="number" id="leadSegundos" min="5" max="300">
+
+      <!-- O contato é gravado de qualquer jeito. O que isto avisa é se ALGUÉM
+           fica sabendo: sem SMTP, o lead espera o corretor abrir o painel, e
+           contato que espera um dia é contato perdido. -->
+      <div id="cxAviso" style="margin-top:12px;border-radius:8px;padding:9px 11px;
+           font-size:12.5px;line-height:1.45;display:none"></div>
+      <button id="btTestarAviso" style="width:100%;margin-top:8px;display:none"
+              onclick="testarAviso()">Enviar e-mail de teste</button>
+
       <button style="width:100%;margin-top:12px" onclick="salvarTour()">Salvar</button>
     </div>
 
@@ -538,6 +547,7 @@ async function carregar(){
   $('leadAtivo').checked  = !!(tour.lead && tour.lead.ativo);
   $('leadTitulo').value   = (tour.lead && tour.lead.titulo) || '';
   $('leadSegundos').value = (tour.lead && tour.lead.segundos) || 25;
+  verAviso();
   desenharCenas();
   if (cenaAtual && !tour.cenas.find(c => c.id === cenaAtual)) cenaAtual = null;
   if (!cenaAtual && tour.cenas.length) cenaAtual = (tour.cena_inicial || tour.cenas[0].id);
@@ -1486,6 +1496,57 @@ async function copiarEmbed(){
 function tempo(s){
   if (s < 60) return s + 's';
   return Math.floor(s/60) + 'min ' + String(s % 60).padStart(2,'0') + 's';
+}
+
+// ------------------------------------------------- aviso de contato por e-mail
+//
+// Este bloco existe porque o produto tinha UM lugar em que prometia uma coisa e
+// nao cumpria, calado: o visitante deixava o contato, o contato era gravado, e
+// ninguem era avisado. O modulo ja sabia dizer o que faltava desde que nasceu —
+// o painel e que nunca perguntou.
+
+async function verAviso(){
+  const cx = $('cxAviso'), bt = $('btTestarAviso');
+  try {
+    const j = await (await fetch(API + '/aviso')).json();
+    bt.style.display = '';
+    if (j.configurado){
+      cx.style.display = '';
+      cx.style.background = '#13251a';
+      cx.style.border = '1px solid #2f5c3f';
+      cx.style.color = '#8fcf9f';
+      cx.textContent = 'Aviso por e-mail ligado: cada contato novo chega na hora.';
+      return;
+    }
+    cx.style.display = '';
+    cx.style.background = '#2a2114';
+    cx.style.border = '1px solid #6b4a1e';
+    cx.style.color = '#e0b070';
+    cx.innerHTML = '<b>Os contatos são gravados, mas ninguém é avisado.</b><br>'
+      + 'Eles ficam esperando você abrir este painel — e contato que espera '
+      + 'um dia é contato perdido. Falta configurar o envio no servidor ('
+      + (j.falta || 'configuração do SMTP') + ').';
+  } catch (e){
+    cx.style.display = 'none';
+    bt.style.display = 'none';
+  }
+}
+
+async function testarAviso(){
+  const bt = $('btTestarAviso');
+  bt.disabled = true;
+  const antes = bt.textContent;
+  bt.textContent = 'Enviando...';
+  try {
+    const r = await fetch(API + '/aviso/testar', {method: 'POST'});
+    const j = await r.json();
+    aviso(j.recado, j.ok ? 'ok' : 'erro');
+  } catch (e){
+    aviso('Não consegui falar com o servidor.', 'erro');
+  }
+  bt.textContent = antes;
+  bt.disabled = false;
+  verAviso();
 }
 
 async function verMetricas(){
