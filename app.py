@@ -30,6 +30,7 @@ import numpy as np
 import stitcher
 import video
 import cena_demo
+import cena_apartamento
 import profundidade
 import tarefas
 import aviso
@@ -297,6 +298,9 @@ ROTAS_PUBLICAS = {
     "api.api_embed", "maquete", "api.api_maquete",
     "api.api_baixar_modelo", "api.api_baixar_modelo_mtl",
     "api.api_textura_do_modelo",
+    # o ladrilho de cada material: desenho gerado por codigo, igual para todos
+    # os imoveis, e a maquete publica precisa dele para vestir as caixas
+    "arq_textura_do_material",
 }
 
 # Todas as rotas de conteudo vivem sob um imovel. O Blueprint carrega o id no
@@ -835,6 +839,35 @@ def saude():
                     # para quem cuida do servidor ver de fora que o aviso de
                     # contato esta desligado, sem precisar perder um lead antes
                     "aviso_de_lead": aviso.configurado()})
+
+
+PASTA_TEXTURAS = os.path.join(PASTA_DADOS, "texturas")
+
+
+@app.route("/textura/<material>.png")
+def arq_textura_do_material(material):
+    """
+    O ladrilho de um material, para a maquete 3D vestir.
+
+    Publica como o tour: quem abre o link do imovel ve a maquete, e a maquete
+    precisa destes arquivos. Nao ha nada de ninguem aqui — e desenho gerado por
+    codigo, igual para todos os imoveis.
+
+    Fica em cache no disco: gerar custa alguns milissegundos, mas sao dezenas
+    de pedidos por maquete aberta.
+    """
+    if material not in cena_apartamento.MATERIAIS:
+        return jsonify({"ok": False, "erro": "material desconhecido"}), 404
+    os.makedirs(PASTA_TEXTURAS, exist_ok=True)
+    caminho = os.path.join(PASTA_TEXTURAS, "%s.png" % material)
+    if not os.path.exists(caminho):
+        img = cena_apartamento.amostra_do_material(material)
+        ok, buf = cv2.imencode(".png", img)
+        if not ok:
+            return jsonify({"ok": False, "erro": "falha ao gerar"}), 500
+        buf.tofile(caminho)
+    return send_from_directory(PASTA_TEXTURAS, "%s.png" % material,
+                               max_age=60 * 60 * 24 * 30)
 
 
 @app.route("/entrar")

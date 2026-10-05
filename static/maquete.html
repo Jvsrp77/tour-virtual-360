@@ -396,8 +396,61 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   // ---------------------------------------------------------------- montagem
 
-  function material(cor){
-    return new THREE.MeshLambertMaterial({color: new THREE.Color(cor)});
+  // ------------------------------------------------- textura dos materiais
+  //
+  // POR QUE EXISTE. A maquete era feita de caixas de cor chapada, e o panorama
+  // e feito das texturas do tracador. Mesma casa, duas aparencias — e quem
+  // olhava as duas telas achava que eram imoveis diferentes. Relatado assim:
+  // "o cacto tem uns pontos, a bancada imita pedra, e na maquete nao".
+  //
+  // O servidor serve um LADRILHO de cada material, gerado pela mesma funcao
+  // que desenha o panorama. Aqui ele e carregado uma vez e clonado por caixa,
+  // porque cada caixa repete o desenho conforme o proprio tamanho: um ladrilho
+  // vale 1 metro, entao uma parede de 3 m o repete tres vezes.
+  const TEXTURAS = {};     // nome -> {pronta, fila} ou null quando nao existe
+
+  // Carrega UMA vez por material e avisa quem pediu. Clonar antes do
+  // carregamento foi o primeiro erro aqui: o clone sai com a imagem vazia e
+  // nunca mais se atualiza, e a maquete inteira ficou preta.
+  function carregarLadrilho(nome, quando){
+    if (!nome) return;
+    let reg = TEXTURAS[nome];
+    if (reg === null) return;                    // ja falhou antes
+    if (reg && reg.pronta){ quando(reg.pronta); return; }
+    if (reg){ reg.fila.push(quando); return; }
+
+    reg = TEXTURAS[nome] = {pronta: null, fila: [quando]};
+    new THREE.TextureLoader().load(
+      "/textura/" + encodeURIComponent(nome) + ".png",
+      tex => {
+        if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+        reg.pronta = tex;
+        reg.fila.forEach(f => f(tex));
+        reg.fila = [];
+        // sem chamar desenhar() aqui: ele e um laco de requestAnimationFrame
+        // e uma chamada a mais abriria um SEGUNDO laco, dobrando o trabalho de
+        // cada quadro. O proximo quadro ja mostra a textura.
+      },
+      undefined,
+      () => { TEXTURAS[nome] = null; });          // sem ladrilho: fica a cor
+  }
+
+  function material(cor, nome, larguraM, alturaM){
+    // A cor entra sempre: ela e o que se ve enquanto o ladrilho nao chegou, e
+    // e o que fica se ele nao existir para este material.
+    const m = new THREE.MeshLambertMaterial({color: new THREE.Color(cor)});
+    carregarLadrilho(nome, tex => {
+      const t = tex.clone();
+      t.needsUpdate = true;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      // no minimo meia repeticao: movel pequeno com o ladrilho inteiro dentro
+      // vira mancha, e o olho le mancha como sujeira
+      t.repeat.set(Math.max(0.5, larguraM || 1), Math.max(0.5, alturaM || 1));
+      m.map = t;
+      m.color.setScalar(1);    // a cor multiplica: branco entrega o ladrilho
+      m.needsUpdate = true;
+    });
+    return m;
   }
 
   function caixa(x0, y0, z0, x1, y1, z1, mat){
@@ -507,7 +560,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     // piso de cada comodo, com a cor real do revestimento
     imovel.zonas.forEach(z => {
       const m = caixa(z.x0 + cx, -0.06, z.z0 + cz, z.x1 + cx, 0, z.z1 + cz,
-                      material(z.piso));
+                      material(z.piso, z.piso_m, z.x1 - z.x0, z.z1 - z.z0));
       m.userData.zona = z;
       pisos.push(m);
       grupoObra.add(m);
@@ -526,9 +579,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     imovel.caixas.forEach(c => {
       const p = c.p;
       const eParede = c.m === "parede";
+      const larg = Math.max(p[3] - p[0], p[5] - p[2]);
+      const alt = Math.max(p[4] - p[1], 0.05);
       const mat = eParede
         ? new THREE.MeshLambertMaterial({color: corParede})
-        : material(c.cor);
+        : material(c.cor, c.m, larg, alt);
       const m = caixa(p[0] + cx, p[1], p[2] + cz, p[3] + cx, p[4], p[5] + cz, mat);
       if (eParede){
         m.userData.alturaCheia = p[4] - p[1];

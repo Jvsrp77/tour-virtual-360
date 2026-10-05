@@ -498,6 +498,69 @@ def _textura(material, p, face, cor, dirs=None, casca=False):
     return saida
 
 
+# ---------------------------------------------- amostra de material para a 3D
+#
+# A maquete e feita de caixas de cor chapada, e o panorama e feito das texturas
+# daqui. Mesma casa, duas aparencias — e quem olha as duas telas acha que sao
+# imoveis diferentes.
+#
+# A saida e dar a maquete um LADRILHO de cada material, gerado por esta mesma
+# _textura(). Nao e aproximacao: e o mesmo desenho, so que amostrado num
+# retalho e repetido.
+#
+# O tamanho do retalho, por material, e um multiplo do periodo do desenho — 4
+# tijolos, 5 azulejos, 5 tabuas. Assim a repeticao fecha sem emenda visivel.
+# Material sem periodo (ruido, veio, couro) usa um metro e a emenda some no
+# proprio ruido.
+# Materiais cujo desenho vive no chao, no plano X-Z.
+DEITADOS = ("piso", "porcelanato", "tapete", "pedra")
+
+LADRILHO = {
+    "tijolo": 1.008,          # 4 x 0,252
+    "azulejo": 1.000,         # 5 x 0,20
+    "piso": 0.950,            # 5 x 0,19
+    "porcelanato": 0.900,     # 2 x 0,45
+    "madeira_clara": 0.980,   # 7 x 0,14
+    "laminado": 0.900,        # 2 x 0,45
+    "concreto": 0.880,        # 4 x 0,22
+    "livro_a": 0.992,         # 31 x 0,032
+}
+
+
+def amostra_do_material(material, lado=256):
+    """
+    Um retalho quadrado do material, pronto para ladrilhar na maquete 3D.
+
+    Devolve BGR, como todo o resto deste modulo. `face` vai como 5 (plano de z
+    constante) porque e assim que a maioria das superficies da maquete aparece;
+    materiais que dependem da face mudam pouco entre uma e outra.
+    """
+    if material not in MATERIAIS:
+        raise KeyError(material)
+    metros = LADRILHO.get(material, 1.0)
+    a = np.linspace(0.0, metros, lado, endpoint=False)
+    b = np.linspace(metros, 0.0, lado, endpoint=False)
+    ga, gb = np.meshgrid(a, b)
+    if material in DEITADOS:
+        # Piso e tapete desenham no plano X-Z. Amostrados em pe, com o z preso,
+        # viravam listra: o tapete saiu parecendo tabua corrida.
+        p = np.stack([ga.ravel(), np.zeros(ga.size),
+                      gb.ravel()], axis=1).astype(np.float32)
+    else:
+        # Em pe, mas acima do rodape: comecando no chao, a faixa escura dos
+        # primeiros 10 cm entrava na amostra e se repetia a cada metro de
+        # parede, como se a casa tivesse rodape no meio.
+        p = np.stack([ga.ravel(), (gb + 0.6).ravel(),
+                      np.full(ga.size, 0.5)], axis=1).astype(np.float32)
+    # dirs constante: a maquete nao tem raio, e o brilho do inox viraria
+    # listra se variasse com a linha da amostra
+    dirs = np.full((p.shape[0], 3), 0.0, np.float32)
+    dirs[:, 1] = 0.25
+    dirs[:, 2] = 0.97
+    cor = _textura(material, p, 5, MATERIAIS[material], dirs)
+    return np.clip(cor, 0, 255).astype(np.uint8).reshape(lado, lado, 3)
+
+
 # ------------------------------------------------------------------- traçado
 
 def _direcoes(linha0, linha1, largura, altura):

@@ -6622,6 +6622,120 @@ class TestAlcanceAPe(unittest.TestCase):
                                cena_apartamento.ALTURA_QUE_BARRA, places=3)
 
 
+class TestLadrilhoDaMaquete(Base):
+    """
+    A maquete 3D veste as MESMAS texturas do tracador.
+
+    O QUE ISTO CONSERTA, apontado pelo dono olhando as duas telas: "o cacto
+    tem uns pontos, o tapete tem detalhes, a bancada imita pedra — e quando eu
+    ando na maquete e diferente do 360". Era verdade. O tracador desenha
+    marmore com veio, tijolo com fiada e palha com trama; a maquete pintava
+    tudo de um tom solido. Mesma casa, duas aparencias.
+    """
+
+    def _amostra(self, material):
+        return cena_apartamento.amostra_do_material(material, 96)
+
+    def test_o_ladrilho_tem_o_desenho_e_nao_so_a_cor(self):
+        """
+        Se a amostra sair chapada, a maquete continua igual ao que era e o
+        trabalho todo nao serviu para nada.
+        """
+        chapados = []
+        for m in ("tijolo", "azulejo", "marmore", "piso", "palha",
+                  "madeira_clara", "cortina", "livro_a"):
+            if float(self._amostra(m).std()) < 3.0:
+                chapados.append(m)
+        self.assertEqual(chapados, [], "ladrilhos sem desenho nenhum")
+
+    def test_o_piso_e_amostrado_deitado(self):
+        """
+        Piso e tapete desenham no plano X-Z. Amostrados em pe, com o z preso,
+        viravam listra: o tapete saiu parecendo tabua corrida, e o piso perdeu
+        a junta entre as placas.
+
+        O porcelanato tem rejunte nas DUAS direcoes; amostrado em pe so
+        apareceria numa.
+        """
+        a = self._amostra("porcelanato").mean(axis=2)
+
+        def linhas_de_rejunte(medias):
+            """Quantas faixas sao nitidamente mais escuras que a placa."""
+            meio = float(np.median(medias))
+            return int((medias < meio - 8).sum())
+
+        # Conta a JUNTA, e nao a variacao: medindo so o desvio, o ruido fino do
+        # material satisfazia o teste nas duas direcoes mesmo com a amostra em
+        # pe — conferido com mutacao, e ele passava com o defeito posto.
+        nas_colunas = linhas_de_rejunte(a.mean(axis=0))
+        nas_linhas = linhas_de_rejunte(a.mean(axis=1))
+        self.assertGreater(nas_colunas, 1, "sem rejunte numa das direcoes")
+        self.assertGreater(nas_linhas, 1, "sem rejunte na outra direcao")
+
+    def test_a_parede_nao_leva_o_rodape_no_ladrilho(self):
+        """
+        Comecando no chao, os 10 cm escuros do rodape entravam na amostra — e
+        um ladrilho se repete, entao a casa ficava com rodape no meio da
+        parede, de metro em metro.
+        """
+        a = self._amostra("parede").mean(axis=2)
+        linhas = a.mean(axis=1)
+        self.assertLess(float(linhas.max() - linhas.min()), 12.0,
+                        "a amostra da parede tem uma faixa escura: e o rodape")
+
+    def test_a_rota_entrega_o_ladrilho_a_quem_nao_tem_conta(self):
+        """
+        A maquete e publica, entao o ladrilho tem de ser. E nao ha nada de
+        ninguem nele: e desenho gerado por codigo, igual em todo imovel.
+        """
+        visitante = aplicacao.app.test_client()
+        r = visitante.get("/textura/tijolo.png")
+        self.assertEqual(r.status_code, 200)
+        self.assertGreater(len(r.data), 1000)
+        self.assertIn("image/png", r.headers.get("Content-Type", ""))
+
+    def test_material_que_nao_existe_da_404_e_nao_le_disco(self):
+        """
+        O nome vem da URL. Sem conferir contra MATERIAIS, "../../segredo" seria
+        um caminho de arquivo.
+        """
+        visitante = aplicacao.app.test_client()
+        for nome in ("inexistente", "..%2f..%2fsegredo", "....//etc"):
+            r = visitante.get("/textura/%s.png" % nome)
+            self.assertIn(r.status_code, (404, 308),
+                          "aceitou o material %r" % nome)
+
+    def test_a_planta_publicada_leva_o_nome_do_material(self):
+        """
+        A zona guardava so a COR do piso. Com a cor nao da para achar o
+        ladrilho — a maquete precisa do nome.
+        """
+        geo = publicar.maquete_da_planta(plantas.quarto())
+        for z in geo["zonas"]:
+            self.assertIn(z["piso_m"], cena_apartamento.MATERIAIS)
+            self.assertIn(z["parede_m"], cena_apartamento.MATERIAIS)
+
+    def test_a_maquete_veste_o_ladrilho_so_depois_de_ele_chegar(self):
+        """
+        O PRIMEIRO ERRO DESTA MUDANCA, e ele apagou a maquete inteira: eu
+        clonava a textura na hora de criar o material, antes de o arquivo
+        chegar. O clone sai com a imagem vazia e nunca mais se atualiza — a
+        casa ficou preta.
+
+        Conferencia de texto, assumida como tal: garante que a aplicacao do
+        mapa esta DENTRO do callback de carregamento.
+        """
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        corpo = html[html.index("function material(cor, nome"):]
+        corpo = corpo[:corpo.index(chr(10) + "  }")]
+        self.assertIn("carregarLadrilho(nome, tex =>", corpo,
+                      "o material deixou de esperar o ladrilho chegar")
+        antes = corpo.index("carregarLadrilho")
+        self.assertGreater(corpo.index("m.map = t"), antes,
+                           "o mapa e aplicado fora do callback")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

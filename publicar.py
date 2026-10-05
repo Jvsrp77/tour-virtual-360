@@ -79,6 +79,9 @@ def maquete_da_planta(planta):
             "nome": nome, "x0": x0, "x1": x1, "z0": z0, "z1": z1,
             "m2": round((x1 - x0) * (z1 - z0), 1),
             "piso": _hex_rgb(cor[piso]), "parede": _hex_rgb(cor[parede]),
+            # o NOME do material, e nao so a cor: e com ele que a maquete 3D
+            # busca o ladrilho e veste a mesma textura que o panorama tem
+            "piso_m": piso, "parede_m": parede,
         })
     caixas = [{"p": [c[0], c[1], c[2], c[3], c[4], c[5]],
                "m": c[6], "cor": _hex_rgb(cor[c[6]])}

@@ -770,6 +770,21 @@ MUT = [
      "TestGuiaDeCaptura.test_vao_maior_que_o_alcance_do_passeio_atrapalha_a_caminhada"),
 
     # aviso em captura boa ensina a ignorar avisos, e ai o que importa passa
+    ("ladrilho do piso volta a ser em pe", "cena_apartamento.py",
+     "    if material in DEITADOS:",
+     "    if False:",
+     "TestLadrilhoDaMaquete.test_o_piso_e_amostrado_deitado"),
+
+    ("ladrilho da parede leva o rodape", "cena_apartamento.py",
+     "(gb + 0.6).ravel()",
+     "(gb + 0.0).ravel()",
+     "TestLadrilhoDaMaquete.test_a_parede_nao_leva_o_rodape_no_ladrilho"),
+
+    ("maquete clona a textura antes de carregar", "static/maquete.html",
+     "    carregarLadrilho(nome, tex => {",
+     "    (tex => {",
+     "TestLadrilhoDaMaquete.test_a_maquete_veste_o_ladrilho_so_depois_de_ele_chegar"),
+
     ("aviso de lead volta a falhar calado", "app.py",
      '"configurado": aviso.configurado(),',
      '"configurado": True,',
