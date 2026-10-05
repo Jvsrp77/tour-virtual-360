@@ -112,8 +112,25 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
                     50%{transform:scale(1.07);box-shadow:0 0 0 13px rgba(224,123,57,0)}}
   .dica-vazio{color:#8b929c;max-width:400px;line-height:1.6}
 
+  /* 104px e a mesma folga que o aviso de 'carregando em alta definicao'
+     usa: abaixo disso o painel cai em cima da tira de ambientes e tapa
+     dois comodos — visto na tela */
+  #trena{position:absolute;left:12px;bottom:104px;z-index:20;max-width:300px;
+    background:rgba(14,16,20,.92);border:1px solid #2b303a;border-radius:10px;
+    padding:10px 12px;color:#e6e8ec;font-size:13px;line-height:1.45;display:none}
+  #trena b{color:#e07b39}
+  #trena .nota{color:#9aa2ad;font-size:11.5px;margin-top:6px;display:block}
+  #trena .fechar{float:right;cursor:pointer;color:#9aa2ad;margin-left:10px}
+  .marcaTrena{width:22px;height:22px;border-radius:50%;background:#e07b39;
+    border:2px solid #fff;color:#fff;text-align:center;
+    font:700 12px/19px system-ui,-apple-system,Segoe UI,sans-serif;
+    box-shadow:0 1px 6px rgba(0,0,0,.6)}
+
   @media (max-width: 620px){
-    .cartao{top:10px;left:10px;right:76px;max-width:none;padding:11px 13px}
+    /* no celular a fileira de botoes ja ocupa a largura toda — o cartao desce
+       para baixo dela em vez de ficar escondido atras */
+    .cartao{top:58px;left:10px;right:10px;max-width:none;padding:11px 13px}
+    #btTrena .rot{display:none}
     .cartao h1{font-size:15px}
     .cartao .desc{display:none !important}
     .topo-dir{top:10px;right:10px;gap:6px}
@@ -129,6 +146,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 
 <div class="afinando" id="afinando"><div class="aro"></div>carregando em alta definição</div>
 
+<div id="trena"><span class="fechar" onclick="alternarTrena()">&times;</span>
+  <div id="trenaTexto"></div></div>
 <div class="carregando" id="carregando">
   <div class="aro"></div>
   <div id="txtCarregando">Carregando o tour...</div>
@@ -151,6 +170,8 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
           title="Deslocar-se dentro deste ambiente">Andar aqui</button>
   <button class="bt" id="btMaquete" onclick="verMaquete()" style="display:none"
           title="Ver o imóvel por fora, em 3D">Maquete</button>
+  <button class="bt" id="btTrena" onclick="alternarTrena()" style="display:none"
+          title="Medir distâncias">&#128207;<span class="rot"> Medir</span></button>
   <button class="bt" onclick="telaCheia()" title="Tela cheia">⛶</button>
   <button class="bt" onclick="giroscopio()" id="btGiro" title="Girar com o celular">◎</button>
 </div>
@@ -268,9 +289,20 @@ function montarCenas(){
   if (temEsboco(inicial)) mostrarEsboco();
 
   visor.on('scenechange', id => {
+    // as marcas pertencem a cena que fica para tras: sem tirar de LA, elas
+    // reaparecem quando o visitante volta a esse comodo
+    limparMarcasDaTrena(atual);
     contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar();
+    // a profundidade e de CADA cena: medir com a do ambiente anterior daria
+    // numero com cara de certo e errado por metros
+    medidas = []; raiosDaCena = null; cenaDosRaios = null;
+    atualizarBotaoTrena();
+    if (medindo) prepararTrena();
     if (temEsboco(id)) mostrarEsboco();
   });
+
+  $('pano').addEventListener('click', cliqueDaTrena);
+  atualizarBotaoTrena();
   visor.on('load', () => {
     $('carregando').style.display = 'none';
     $('afinando').style.display = 'none';
@@ -280,6 +312,156 @@ function montarCenas(){
     $('carregando').style.display = 'flex';
     $('carregando').innerHTML = '<div class="dica-vazio">Erro ao carregar a imagem: ' + msg + '</div>';
   });
+}
+
+// ------------------------------------------------------------------- trena
+//
+// POR QUE EXISTE. "Meu sofa cabe nessa parede?" e a pergunta que mais trava
+// uma decisao de compra, e ate aqui o tour nao respondia: a maquete tinha
+// trena, o 360 nao — e e no 360 que o comprador esta quando pensa nisso.
+//
+// A medida nao e nova: sai do MESMO mapa de profundidade que faz a caminhada
+// funcionar. Cada pixel do mapa diz a que distancia esta a superficie naquela
+// direcao; dois cliques dao dois pontos no espaco, e a distancia entre eles e
+// uma subtracao.
+//
+// O QUE ELA NAO E: trena laser. A profundidade de uma foto e ESTIMADA, e erra
+// no contorno dos moveis. Serve para "cabe ou nao cabe", nao para comprar
+// marcenaria — e a tela diz isso.
+
+const GRADE_L = 320, GRADE_A = 160;   // espelha o andar.html
+const ALTURA_CAMERA = 1.5;
+let medindo = false, medidas = [], raiosDaCena = null, cenaDosRaios = null;
+
+function alternarTrena(){
+  medindo = !medindo;
+  medidas = [];
+  limparMarcasDaTrena();
+  $('btTrena').classList.toggle('ativo', medindo);
+  $('trena').style.display = medindo ? 'block' : 'none';
+  if (medindo) prepararTrena();
+}
+
+async function prepararTrena(){
+  const c = tour.cenas.find(x => x.id === atual);
+  if (!c || !c.profundidade){
+    dizTrena('Este ambiente ainda não tem profundidade, então não dá para '
+             + 'medir nele.');
+    return;
+  }
+  if (cenaDosRaios === atual && raiosDaCena){ dizTrena(); return; }
+  dizTrena('Lendo a profundidade deste ambiente…');
+  try {
+    raiosDaCena = await lerRaios(CENAS + c.profundidade);
+    cenaDosRaios = atual;
+    dizTrena();
+  } catch (e){
+    raiosDaCena = null;
+    dizTrena('Não consegui ler a profundidade deste ambiente.');
+  }
+}
+
+// Mesma leitura do andar.html: 16 bits repartidos em R e G, e a calibracao
+// pelo chao, que e o que transforma "perto e longe" em metros.
+function lerRaios(url){
+  return new Promise((ok, falha) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = GRADE_L + 1; cv.height = GRADE_A + 1;
+      const ctx = cv.getContext('2d', {willReadFrequently: true});
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      const px = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      const r = new Float32Array(cv.width * cv.height);
+      for (let i = 0; i < r.length; i++){
+        const d = ((px[i*4] << 8) | px[i*4 + 1]) / 65535;
+        r[i] = 1 / (1.542 * d + 0.125);
+      }
+      // o chao logo abaixo esta a altura do celular: e a regua
+      const am = [];
+      for (let j = GRADE_A - 6; j <= GRADE_A; j++)
+        for (let i = 0; i <= GRADE_L; i += 8) am.push(r[j * (GRADE_L + 1) + i]);
+      am.sort((a, b) => a - b);
+      const chao = am[Math.floor(am.length / 2)];
+      const escala = (chao && isFinite(chao)) ? ALTURA_CAMERA / chao : 1;
+      for (let i = 0; i < r.length; i++) r[i] *= escala;
+      ok(r);
+    };
+    img.onerror = () => falha(new Error('profundidade'));
+    img.src = url;
+  });
+}
+
+// yaw/pitch do Pannellum (graus) -> ponto no espaco, em metros.
+// lat = -pitch porque no mapa a linha de baixo e o chao; lon = yaw porque o
+// centro do equirretangular olha para +z, igual ao tracador.
+function pontoNaDirecao(yawG, pitchG){
+  if (!raiosDaCena) return null;
+  const lat = -pitchG * Math.PI / 180, lon = yawG * Math.PI / 180;
+  const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
+  const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
+  const k = Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
+          + Math.min(GRADE_L, Math.max(0, ((i % (GRADE_L+1)) + GRADE_L+1) % (GRADE_L+1)));
+  const r = raiosDaCena[k];
+  if (!r || !isFinite(r)) return null;
+  const cl = Math.cos(lat);
+  return {x: cl * Math.sin(lon) * r, y: -Math.sin(lat) * r, z: cl * Math.cos(lon) * r,
+          r: r, yaw: yawG, pitch: pitchG};
+}
+
+// `metros` e nao `nBR`: a pagina ja tem um nBR, com outra assinatura, e
+// declarar o segundo derrubou o script inteiro com "Identifier already
+// declared" — a trena e o tour junto.
+function metros(v){
+  return v.toFixed(2).replace('.', ',');
+}
+
+function dizTrena(texto){
+  const cx = $('trenaTexto');
+  if (texto){ cx.innerHTML = texto; return; }
+  if (!medidas.length){
+    cx.innerHTML = 'Clique em <b>dois pontos</b> do ambiente para medir a '
+      + 'distância entre eles.'
+      + '<span class="nota">A profundidade é estimada da foto: serve para '
+      + 'saber se cabe, não para encomendar marcenaria.</span>';
+    return;
+  }
+  if (medidas.length === 1){
+    cx.innerHTML = 'Primeiro ponto: <b>' + metros(medidas[0].r) + ' m</b> de '
+      + 'onde você está.<br>Agora clique no segundo.';
+    return;
+  }
+  const a = medidas[0], b = medidas[1];
+  const d = Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2 + (a.z-b.z)**2);
+  cx.innerHTML = 'Entre os dois pontos: <b>' + metros(d) + ' m</b>'
+    + '<span class="nota">Daqui até eles: ' + metros(a.r) + ' m e '
+    + metros(b.r) + ' m. Clique de novo para medir outra distância.</span>';
+}
+
+function cliqueDaTrena(ev){
+  if (!medindo || !raiosDaCena) return;
+  const c = visor.mouseEventToCoords(ev);     // [pitch, yaw] em graus
+  const p = pontoNaDirecao(c[1], c[0]);
+  if (!p){ dizTrena('Não há profundidade nesse ponto. Tente outro.'); return; }
+  // a terceira clicada comeca OUTRA medida: sem limpar, as marcas velhas
+  // ficam na tela e addHotSpot repete o id 'trena-1'
+  if (medidas.length >= 2){ medidas = []; limparMarcasDaTrena(); }
+  medidas.push(p);
+  // a letra vai DENTRO da marca, nao no balao do Pannellum: o balao so
+  // aparece com o mouse em cima, e ao marcar o segundo ponto o "A" sumia da
+  // tela — ficavam duas bolinhas iguais e ninguem sabia qual era qual
+  visor.addHotSpot({pitch: c[0], yaw: c[1], id: 'trena-' + medidas.length,
+                    cssClass: 'marcaTrena',
+                    createTooltipFunc: (div, letra) => { div.textContent = letra; },
+                    createTooltipArgs: medidas.length === 1 ? 'A' : 'B'});
+  dizTrena();
+}
+
+function limparMarcasDaTrena(cena){
+  for (const id of ['trena-1', 'trena-2']){
+    try { visor.removeHotSpot(id, cena); } catch (e) {}
+  }
 }
 
 function temEsboco(id){
@@ -430,6 +612,12 @@ mostrarEditarSeDona();
 // que gira sem distorcao nenhuma. O visitante nunca ve o caso feio.
 function pontosNavegaveis(){
   return (tour.cenas || []).filter(c => c.profundidade && c.posicao).length;
+}
+
+function atualizarBotaoTrena(){
+  const c = tour.cenas.find(x => x.id === atual);
+  $('btTrena').style.display = (c && c.profundidade) ? '' : 'none';
+  if (medindo) dizTrena();
 }
 
 function atualizarBotaoAndar(){

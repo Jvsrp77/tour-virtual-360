@@ -6736,6 +6736,201 @@ class TestLadrilhoDaMaquete(Base):
                            "o mapa e aplicado fora do callback")
 
 
+class TestTrenaDoTour(unittest.TestCase):
+    """
+    A trena dentro do tour 360.
+
+    POR QUE EXISTE. "Meu sofa cabe nessa parede?" e a pergunta que trava a
+    decisao de compra, e ela nasce com o comprador olhando o AMBIENTE — no 360,
+    nao na maquete. A maquete ja media; o tour, que e onde ele esta, nao.
+
+    A medida sai do mesmo mapa de profundidade que sustenta a caminhada: cada
+    direcao tem um raio, dois cliques dao dois pontos, a distancia e uma
+    subtracao. Por isso o risco nao e errar a conta — e errar a CONVENCAO.
+    Trocar o sinal da latitude, ou a linha pela coluna, continua devolvendo
+    numero bonito, so que errado por metros, e numa tela de imovel ninguem tem
+    como desconfiar.
+
+    Entao a funcao da PROPRIA pagina roda no Node, sobre um mapa de raios
+    inventado em que cada resposta certa e conhecida de antemao. Copiar a conta
+    para dentro do teste nao provaria nada: envelheceria junto com o erro.
+    """
+
+    TRENA = re.compile(r"(const GRADE_L.*?^function limparMarcasDaTrena.*?^\})",
+                       re.S | re.M)
+
+    # tudo o que a trena toca fora dela mesma, dublado: assim o teste exercita
+    # a trena, e nao o Pannellum
+    DUBLES = (
+        "const marcas = new Map();\n"
+        "const visor = {\n"
+        "  addHotSpot: h => {\n"
+        "    if (marcas.has(h.id)) throw new Error('marca repetida: ' + h.id);\n"
+        "    marcas.set(h.id, h.createTooltipArgs);\n"
+        "  },\n"
+        "  removeHotSpot: id => { marcas.delete(id); },\n"
+        "  mouseEventToCoords: ev => ev\n"
+        "};\n"
+        "const _cxs = {};\n"
+        "const $ = id => (_cxs[id] = _cxs[id] ||\n"
+        "  {style: {}, innerHTML: '', classList: {toggle(){}}});\n"
+        "let atual = 'c1';\n"
+        "const tour = {cenas: [{id: 'c1', profundidade: 'p.png'}]};\n"
+        "const CENAS = '/x/';\n")
+
+    ESFERA = ("raiosDaCena = new Float32Array((GRADE_L+1)*(GRADE_A+1))"
+              ".fill(4);\n")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "viewer.html"), encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _rodar(self, programa):
+        """Roda a trena da pagina no Node e devolve o que ela imprimiu."""
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        achado = self.TRENA.search(self.html)
+        self.assertTrue(achado, "nao achei a trena em viewer.html")
+        fonte = self.DUBLES + achado.group(1) + "\n" + programa
+        caminho = os.path.join(_TEMP, "trena.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(fonte)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, (r.stderr or "")[:800])
+        return json.loads(r.stdout.strip())
+
+    def _pontos(self, direcoes):
+        """Os pontos que a pagina devolve, num ambiente esferico de 4 m."""
+        return self._rodar(self.ESFERA + "console.log(JSON.stringify("
+                           + json.dumps(direcoes)
+                           + ".map(c => pontoNaDirecao(c[0], c[1]))));\n")
+
+    def test_a_convencao_de_profundidade_e_a_mesma_do_resto_do_produto(self):
+        """
+        1,542 aparece em TRES lugares: no Python que grava o mapa, na caminhada
+        e agora na trena. Nada os prende um ao outro — mudar um e esquecer os
+        outros deixa a trena medindo numa regua e a caminhada noutra, as duas
+        sem defeito visivel na tela.
+        """
+        conta = "1 / (1.542 * d + 0.125)"
+        with io.open("profundidade.py", encoding="utf-8") as f:
+            py = f.read()
+        self.assertIn("1.0 / (1.542 * disparidade + 0.125)", py)
+        for pagina in ("andar.html", "viewer.html"):
+            with io.open(os.path.join("static", pagina), encoding="utf-8") as f:
+                self.assertIn(conta, f.read(),
+                              "%s saiu da convencao de profundidade" % pagina)
+
+    def test_o_centro_do_panorama_olha_para_a_frente(self):
+        """
+        Yaw 0 com pitch 0 e o meio da foto, e o meio da foto olha para +z — a
+        mesma frente que o tracador usou para gravar o mapa. Virar isso joga
+        toda medida para o lado errado da sala.
+        """
+        p, = self._pontos([[0, 0]])
+        self.assertAlmostEqual(p["x"], 0.0, places=6)
+        self.assertAlmostEqual(p["y"], 0.0, places=6)
+        self.assertAlmostEqual(p["z"], 4.0, places=6)
+
+    def test_olhar_para_baixo_da_um_ponto_abaixo_do_visitante(self):
+        """
+        Pitch negativo e olhar para o CHAO. Com o sinal trocado o chao vira
+        teto: o raio continua certo, a altura inverte, e medir do piso ate a
+        bancada daria a soma no lugar da diferenca.
+        """
+        p, = self._pontos([[0, -90]])
+        self.assertAlmostEqual(p["y"], -4.0, places=5)
+
+    def test_girar_para_a_direita_anda_para_o_lado(self):
+        """
+        Yaw 90 e um quarto de volta: o ponto sai inteiro no x, e nada sobra no
+        z. E a conferencia de que azimute virou coluna, e nao linha.
+        """
+        p, = self._pontos([[90, 0]])
+        self.assertAlmostEqual(p["x"], 4.0, places=5)
+        self.assertAlmostEqual(p["z"], 0.0, places=5)
+
+    def test_a_distancia_entre_dois_pontos_e_a_do_espaco(self):
+        """
+        Dois pontos a 4 m separados por um quarto de volta estao a 4*raiz(2) um
+        do outro — nao a 0, nem a 8. E o numero que o comprador le na tela.
+        """
+        texto, = self._rodar(
+            "medindo = true; cenaDosRaios = atual;\n" + self.ESFERA
+            + "cliqueDaTrena([0, 0]); cliqueDaTrena([-45, 90]);\n"
+            + "console.log(JSON.stringify([_cxs.trenaTexto.innerHTML]));\n")
+        # (0,0,4) e (2.83,-2.83,0): raiz(8+8+16) = 5,657. Os dois pontos
+        # diferem nos TRES eixos de proposito — com eles na mesma altura,
+        # apagar o termo do y da formula nao mudava o resultado e a conta
+        # ficava sem guarda. A virgula e como se escreve metro em portugues.
+        self.assertIn("5,66 m", texto,
+                      "o painel nao mostrou a distancia certa: %r" % texto)
+
+    def test_cada_direcao_le_a_sua_celula_do_mapa(self):
+        """
+        Com o mapa todo igual, trocar i por j passa despercebido: a geometria
+        depois da leitura continua fechando. Aqui cada celula tem um valor so
+        dela, entao a direcao tem de acertar a CELULA.
+        """
+        lidos = self._rodar(
+            "raiosDaCena = new Float32Array((GRADE_L+1)*(GRADE_A+1));\n"
+            "for (let j = 0; j <= GRADE_A; j++)\n"
+            "  for (let i = 0; i <= GRADE_L; i++)\n"
+            "    raiosDaCena[j*(GRADE_L+1)+i] = 1 + i + j/1000;\n"
+            "console.log(JSON.stringify([[0,0],[90,0],[0,-45]]"
+            ".map(c => pontoNaDirecao(c[0], c[1]).r)));\n")
+        self.assertAlmostEqual(lidos[0], 1 + 160 + 80 / 1000.0, places=4)
+        self.assertAlmostEqual(lidos[1], 1 + 240 + 80 / 1000.0, places=4)
+        self.assertAlmostEqual(lidos[2], 1 + 160 + 120 / 1000.0, places=4)
+
+    def test_comecar_outra_medida_tira_as_marcas_da_anterior(self):
+        """
+        A TERCEIRA clicada comeca outra medida. Sem limpar, ficavam quatro
+        bolinhas na tela, duas delas de uma medida que ja nao esta escrita em
+        lugar nenhum — e o visor ainda recebia o id 'trena-1' repetido.
+
+        O duble reclama de id repetido de proposito: e o que o Pannellum faria
+        com a tela.
+        """
+        marcas = self._rodar(
+            "medindo = true; cenaDosRaios = atual;\n" + self.ESFERA
+            + "cliqueDaTrena([-20, 0]); cliqueDaTrena([-20, 40]);\n"
+            + "const duas = [...marcas.values()];\n"
+            + "cliqueDaTrena([-20, 80]);\n"
+            + "console.log(JSON.stringify([duas, [...marcas.values()]]));\n")
+        self.assertEqual(marcas[0], ["A", "B"], "as duas marcas nao apareceram")
+        self.assertEqual(marcas[1], ["A"],
+                         "a medida nova ficou com as marcas da anterior")
+
+    def test_desligar_a_trena_tira_as_marcas_da_tela(self):
+        """
+        Fechar o painel e dizer "ja vi". As bolinhas nao podem continuar
+        plantadas no ambiente depois disso.
+        """
+        resto = self._rodar(
+            "medindo = true; cenaDosRaios = atual;\n" + self.ESFERA
+            + "cliqueDaTrena([-20, 0]); cliqueDaTrena([-20, 40]);\n"
+            + "alternarTrena();\n"
+            + "console.log(JSON.stringify([[...marcas.values()], medindo]));\n")
+        self.assertEqual(resto[0], [], "as marcas ficaram na tela")
+        self.assertFalse(resto[1], "a trena continuou ligada")
+
+    def test_sem_profundidade_o_botao_de_medir_nao_aparece(self):
+        """
+        Cena vinda de foto solta nao tem mapa. O botao nao pode ficar la
+        oferecendo uma medida que a pagina nao sabe fazer.
+
+        Conferencia de texto, assumida como tal.
+        """
+        corpo = self.html[self.html.index("function atualizarBotaoTrena"):]
+        corpo = corpo[:corpo.index("\n}")]
+        self.assertIn("c.profundidade", corpo,
+                      "o botao de medir parou de olhar a profundidade da cena")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
