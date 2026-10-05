@@ -21,3 +21,6 @@ casa_demo_servidor.zip
 render_casa.err
 publicar_casa.err
 data/texturas/
+
+# renders antigos postos de lado antes de re-renderizar (reversivel)
+antigo_fotos_*/
