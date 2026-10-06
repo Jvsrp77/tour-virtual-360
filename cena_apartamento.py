@@ -911,69 +911,114 @@ RAIO_CORPO = 0.28
 # soleira nao contam — atravessar um tapete nao incomoda ninguem.
 ALTURA_QUE_BARRA = 0.35
 
+# Largura minima para uma passagem SERVIR, e nao apenas existir.
+#
+# O QUE ISTO CONSERTA, relatado pelo dono andando na maquete: "nao consigo
+# entrar em uns dois ambientes por causa de movel no meio do caminho" — numa
+# casa que esta conferencia tinha aprovado. Ela respondia "existe caminho?"
+# quando a pergunta e "da para passar?". O corpo tem 0,56 m de largura: um vao
+# de 0,68 m deixa 6 cm de cada lado, o que fecha na geometria e nao abre para
+# ninguem com um teclado na mao.
+#
+# 0,75 m fica logo abaixo da porta de 0,80 m que as plantas desenham: porta
+# limpa passa, porta comida por movel nao.
+FOLGA_DE_PASSAGEM = 0.75
 
-def comodos_sem_acesso(planta, passo=0.06):
+# A casca do imovel nao esta na lista de caixas — no tracador ela e o
+# envelope, nao movel. Mesma espessura que o maquete.html desenha.
+ESPESSURA_DA_CASCA = 0.14
+
+
+def comodos_sem_acesso(planta, passo=0.02, folga=FOLGA_DE_PASSAGEM):
     """
-    Os comodos aos quais nao se chega A PE, saindo do primeiro ponto livre.
+    Os comodos aos quais nao se chega A PE, com folga para andar.
 
     POR QUE ISTO EXISTE. O conferir() ja recusava camera dentro de movel, e
     isso funcionava. Mas ele nunca perguntou se da para ANDAR de um comodo ao
     outro — e a casa de 520 m2 passou em tudo, renderizou tres horas e meia,
     foi publicada, e so quando alguem caminhou apareceu que nove dos vinte e
     tres comodos eram inalcancaveis. Um deles, a sala intima de 44,8 m2,
-    estava lacrada: eu havia feito as duas paredes dela sem vao nenhum.
+    estava lacrado: eu havia feito as duas paredes dela sem vao nenhum.
 
     Os outros oito eram MOVEL TAPANDO PORTA. Uma cadeira de jantar encostada
-    na parede fechava sozinha o acesso a cozinha, ao lavabo e a lavanderia:
-    porta de 80 cm, corpo de 56, cadeira de 46.
+    na parede fechava sozinha o acesso a cozinha, ao lavabo e a lavanderia.
 
-    E a mesma familia de defeito dos moveis engolidos — nada quebra, nada
-    acusa, so nao funciona.
+    DOIS DEFEITOS QUE ESTA VERSAO CONSERTA, os dois achados do mesmo jeito: o
+    dono andando na tela de uma casa que a conferencia tinha aprovado.
 
-    A regra e a do visor, nao uma inventada aqui: barra o que tem mais de
-    `ALTURA_QUE_BARRA` de altura, com folga de `RAIO_CORPO` em volta.
+      1. VAZAMENTO. O alagamento corria numa grade de 6 cm sobre as caixas ja
+         dilatadas pelo corpo. Quando a barreira que sobrava ficava mais fina
+         que uma celula, NENHUMA celula caia dentro dela e o alagamento
+         atravessava o movel como se nao existisse. Na casa de 520 m2, cinco
+         comodos com vao de 0,51 m — menor que o proprio corpo — passaram
+         como alcancaveis.
+
+      2. PERGUNTA ERRADA. Passar raspando nao e passar. A dilatacao agora e
+         pela FOLGA_DE_PASSAGEM e nao pelo RAIO_CORPO, entao o que se aprova
+         e passagem utilizavel, nao apenas aberta.
+
+    O corpo e QUADRADO, nao redondo: o `livre()` do maquete.html compara x e z
+    separadamente, e e a regra dele que vale aqui — nao uma inventada.
     """
+    meia = folga / 2.0
     larg, fundo = planta["larg"], planta["fundo"]
     nx, nz = int(larg / passo), int(fundo / passo)
     x = ((np.arange(nx) + 0.5) * passo)[:, None]
     z = ((np.arange(nz) + 0.5) * passo)[None, :]
 
-    livre = ((x > 0.2) & (x < larg - 0.2) & (z > 0.2) & (z < fundo - 0.2))
+    borda = ESPESSURA_DA_CASCA + meia
+    livre = ((x > borda) & (x < larg - borda)
+             & (z > borda) & (z < fundo - borda))
     for c in planta["caixas"]:
-        if c[4] - c[1] <= ALTURA_QUE_BARRA:
+        # parede barra em qualquer altura; movel so a partir de 35 cm
+        if c[6] != "parede" and c[4] - c[1] <= ALTURA_QUE_BARRA:
             continue
-        livre &= ~((x > c[0] - RAIO_CORPO) & (x < c[3] + RAIO_CORPO)
-                   & (z > c[2] - RAIO_CORPO) & (z < c[5] + RAIO_CORPO))
+        livre &= ~((x > c[0] - meia) & (x < c[3] + meia)
+                   & (z > c[2] - meia) & (z < c[5] + meia))
+
+    # Componentes conexas pelo OpenCV, que ja e dependencia. O alagamento em
+    # Python puro levava minutos nesta grade — e a grade fina e justamente o
+    # que fecha o vazamento, entao baratear voltando a grade grossa traria o
+    # defeito de volta.
+    _n, marcado = cv2.connectedComponents(livre.astype(np.uint8),
+                                          connectivity=4)
 
     # Comeca onde a caminhada comeca: o primeiro ponto de captura em que cabe
     # um corpo. E a mesma escolha que o pontoDeEntrada() do visor faz.
-    inicio = None
+    meu = 0
     for _nome, px, pz in planta["pontos"]:
         i, j = int(px / passo), int(pz / passo)
-        if 0 <= i < nx and 0 <= j < nz and livre[i, j]:
-            inicio = (i, j)
+        if 0 <= i < nx and 0 <= j < nz and marcado[i, j]:
+            meu = int(marcado[i, j])
             break
-    if inicio is None:
-        return [z[0] for z in planta["zonas"]]
-
-    visto = np.zeros_like(livre)
-    pilha = [inicio]
-    visto[inicio] = True
-    while pilha:
-        i, j = pilha.pop()
-        for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            a, b = i + di, j + dj
-            if 0 <= a < nx and 0 <= b < nz and livre[a, b] and not visto[a, b]:
-                visto[a, b] = True
-                pilha.append((a, b))
+    if not meu:
+        return [zona[0] for zona in planta["zonas"]]
 
     sem = []
     for nome, x0, x1, z0, z1, _parede, _piso in planta["zonas"]:
-        faixa = visto[int(x0 / passo):int(x1 / passo),
-                      int(z0 / passo):int(z1 / passo)]
-        if not faixa.any():
+        faixa = marcado[int(x0 / passo):int(x1 / passo),
+                        int(z0 / passo):int(z1 / passo)]
+        if not (faixa == meu).any():
             sem.append(nome)
     return sem
+
+
+def vao_ate(planta, zona, passo=0.02):
+    """
+    A largura do vao mais estreito do trajeto ate `zona`, em metros.
+
+    Serve para a mensagem de erro dizer o TAMANHO do aperto, e nao so que ha
+    um: "Lavanderia: vao de 0,51 m" manda consertar o movel certo, enquanto
+    "Lavanderia inalcancavel" manda procurar.
+    """
+    baixo, alto = 0.0, 2.0
+    for _ in range(14):
+        meio = (baixo + alto) / 2.0
+        if zona in comodos_sem_acesso(planta, passo, folga=meio):
+            alto = meio
+        else:
+            baixo = meio
+    return baixo
 
 
 def conferir(planta):

@@ -6604,6 +6604,120 @@ class TestAlcanceAPe(unittest.TestCase):
         self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
                          "o tapete virou parede")
 
+    def test_vao_aberto_mas_estreito_demais_e_acusado(self):
+        """
+        O DEFEITO QUE O DONO ACHOU ANDANDO NA MAQUETE, depois de esta
+        conferencia ter aprovado a casa: "nao consigo entrar em uns dois
+        ambientes por causa de movel no meio do caminho".
+
+        Um vao de 0,62 m e MAIOR que o corpo (0,56 m) — a geometria passa. Com
+        6 cm de cada lado, ninguem passa de verdade. A conferencia respondia
+        "existe caminho?" quando a pergunta e "da para passar?".
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.5, 4.0)])
+        # a porta tem 1,00 m (z 1,5..2,5); o armario para em z 1,88 e deixa
+        # 0,62 m — MAIOR que o corpo de 0,56 m, menor que a folga exigida
+        armario = [(3.15, 0.0, 1.2, 3.75, 2.0, 1.88, "madeira")]
+        p = self._planta(paredes + armario)
+        self.assertGreater(cena_apartamento.FOLGA_DE_PASSAGEM,
+                           2 * cena_apartamento.RAIO_CORPO,
+                           "a folga exigida tem de ser MAIOR que o corpo, "
+                           "senao nada muda")
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p),
+                      "vao de 0,62 m passou: a conferencia voltou a medir "
+                      "caminho em vez de passagem")
+
+    def test_vao_de_porta_inteira_continua_passando(self):
+        """
+        O contraste do teste de cima, e o que impede a regra de virar
+        paranoia: porta limpa de 0,80 m — a largura que as plantas desenham —
+        tem de continuar valendo.
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.3, 4.0)])
+        p = self._planta(paredes)
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
+                         "porta de 0,80 m foi recusada")
+
+    def test_o_alagamento_nao_atravessa_barreira_fina(self):
+        """
+        O SEGUNDO DEFEITO, e o pior, porque mentia em silencio.
+
+        O alagamento corria numa grade de 6 cm sobre as caixas ja dilatadas
+        pelo corpo. Quando a barreira que sobrava ficava mais fina que uma
+        celula, NENHUMA celula caia dentro dela e o alagamento passava pelo
+        movel como se nao existisse.
+
+        Aqui o vao e de 0,50 m — menor que o proprio corpo, portanto
+        intransponivel de qualquer maneira. Na grade grossa ele passava.
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.5, 4.0)])
+        armario = [(3.15, 0.0, 1.2, 3.75, 2.0, 2.0, "madeira")]
+        p = self._planta(paredes + armario)
+        sem = cena_apartamento.comodos_sem_acesso(p)
+        self.assertIn("B", sem, "vao de 0,50 m — menor que o corpo — passou")
+
+    def test_parede_barra_em_qualquer_altura(self):
+        """
+        O visor barra `eParede || altura > 0.35`. Conferir so pela altura
+        aprovaria uma meia-parede de 30 cm como passagem.
+        """
+        baixa = [(3.0, 0.0, 0.0, 3.12, 0.30, 4.0, "parede")]
+        p = self._planta(baixa)
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p),
+                      "parede baixa deixou de barrar")
+
+    def test_vao_ate_diz_o_tamanho_do_aperto(self):
+        """
+        A mensagem de erro precisa dizer QUANTO aperta, nao so que aperta:
+        "Lavanderia: vao de 0,51 m" manda consertar o movel certo, enquanto
+        "Lavanderia inalcancavel" manda procurar pela casa toda.
+        """
+        paredes = plantas._px(3.0, [(0.0, 1.5), (2.2, 4.0)])
+        p = self._planta(paredes)
+        medido = cena_apartamento.vao_ate(p, "B")
+        self.assertAlmostEqual(medido, 0.70, delta=0.06,
+                               msg="vao_ate errou a largura do vao de 0,70 m")
+
+    def test_passagem_so_na_diagonal_nao_e_passagem(self):
+        """
+        Dois volumes que se encostam pela QUINA deixam um furo de largura zero.
+        Contando a diagonal como vizinhanca, o alagamento atravessa esse furo e
+        aprova um comodo em que ninguem entra — o mesmo erro do vazamento da
+        grade, por outro caminho.
+
+        A folga vai a ZERO de proposito. Com qualquer dilatacao os dois
+        volumes se fecham num tapume continuo e as duas metades ficam
+        separadas de todo jeito — o teste passaria sem nunca chegar ao caso da
+        quina, que e o unico que distingue as duas vizinhancas.
+        """
+        quina = [(0.0, 0.0, 0.0, 3.0, 2.4, 2.0, "madeira"),
+                 (3.0, 0.0, 2.0, 6.0, 2.4, 4.0, "madeira")]
+        p = self._planta(quina, pontos=[("A - 1", 1.5, 3.0)])
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p, folga=0.0),
+                      "o alagamento passou pela quina de dois moveis")
+
+    def test_a_casca_do_imovel_tambem_exige_folga(self):
+        """
+        A parede externa e parede. Uma fresta de 0,56 m entre o fim de uma
+        parede interna e a fachada nao e corredor — e o visitante que tentar
+        passar por ela fica preso contra o vidro.
+
+        Exercita o unico obstaculo que NAO esta na lista de caixas: no tracador
+        a casca e o envelope do imovel, nao movel.
+        """
+        p = self._planta(plantas._px(3.0, [(0.0, 3.30)]))
+        self.assertIn("B", cena_apartamento.comodos_sem_acesso(p),
+                      "fresta de 0,56 m contra a fachada passou como corredor")
+
+    def test_corredor_largo_contra_a_fachada_passa(self):
+        """
+        O contraste do teste de cima: 0,86 m entre a parede e a fachada e
+        corredor de verdade, e nao pode ser recusado.
+        """
+        p = self._planta(plantas._px(3.0, [(0.0, 3.00)]))
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
+                         "corredor de 0,86 m contra a fachada foi recusado")
+
     def test_o_corpo_tem_a_mesma_largura_aqui_e_no_visor(self):
         """
         Se a conferencia usar um corpo mais estreito que o do andar.html, ela

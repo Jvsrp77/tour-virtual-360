@@ -333,7 +333,10 @@ def apartamento():
         (0.30, 0.52, 8.35, 2.35, 0.80, 8.70, "estofado_b"),
         (2.55, 0.00, 8.20, 3.05, 0.55, 8.70, "madeira"),
         (3.35, 0.00, 6.95, 4.28, 2.15, 8.05, "madeira_esc"),
-        (0.30, 0.00, 4.80, 1.55, 0.75, 5.40, "madeira"),
+        # terminava em x 1,55 e avancava 25 cm sobre a porta de 0,90 m
+        # (x 1,30..2,20) que serve banheiro, quarto 1 e area de servico.
+        # Encurtado para parar antes da soleira.
+        (0.30, 0.00, 4.80, 1.25, 0.75, 5.40, "madeira"),
         (0.75, 0.00, 5.45, 1.15, 0.46, 5.85, "madeira_esc"),
 
         (4.62, 0.00, 4.75, 5.55, 0.82, 5.35, "louca"),
@@ -458,10 +461,13 @@ def compacto():
         (6.75, 0.00, 1.37, 7.15, 0.45, 2.43, "madeira_esc"),
         (7.35, 0.00, 1.37, 7.75, 0.45, 2.43, "madeira_esc"),
         # banheiro
-        (4.92, 0.00, 3.30, 6.00, 0.82, 3.85, "louca"),
-        (4.92, 0.82, 3.30, 6.04, 0.88, 3.85, "pedra"),
-        (4.94, 0.88, 3.45, 5.50, 1.02, 3.72, "louca"),
-        (4.92, 1.35, 3.32, 6.02, 2.05, 3.38, "vidro"),
+        # a bancada comecava em z 3,30 e avancava sobre a porta do banheiro
+        # (z 3,70..4,50), deixando 0,64 m de vao. Recuou 16 cm, para caber
+        # entre a parede e a soleira.
+        (4.92, 0.00, 3.14, 6.00, 0.82, 3.69, "louca"),
+        (4.92, 0.82, 3.14, 6.04, 0.88, 3.69, "pedra"),
+        (4.94, 0.88, 3.29, 5.50, 1.02, 3.56, "louca"),
+        (4.92, 1.35, 3.16, 6.02, 2.05, 3.22, "vidro"),
         (6.35, 0.00, 3.30, 6.75, 0.78, 3.95, "louca"),
         (7.30, 0.00, 3.25, 8.88, 0.10, 4.90, "porcelanato"),
         (7.26, 0.10, 3.25, 7.34, 1.95, 4.90, "vidro"),
@@ -542,12 +548,15 @@ def cobertura():
         (5.40, 0.00, 2.90, 6.10, 0.92, 3.10, "pedra"),
         (5.40, 0.92, 0.22, 6.14, 0.98, 3.10, "pedra"),
         (5.42, 0.94, 1.10, 6.08, 1.03, 2.10, "metal"),        # churrasqueira
-        (7.10, 0.00, 1.60, 8.90, 0.74, 3.00, "madeira"),      # mesa
-        (7.10, 0.74, 1.60, 8.90, 0.81, 3.00, "louca"),
-        (7.25, 0.00, 1.25, 7.65, 0.45, 1.60, "madeira_esc"),
-        (8.35, 0.00, 1.25, 8.75, 0.45, 1.60, "madeira_esc"),
-        (7.25, 0.00, 3.00, 7.65, 0.45, 3.35, "madeira_esc"),
-        (8.35, 0.00, 3.00, 8.75, 0.45, 3.35, "madeira_esc"),
+        # a mesa da varanda chegava a x 8,90 e deixava 0,70 m ate a parede da
+        # cozinha, bem em frente a porta de 1,40 m (z 1,55..2,95). Recuou e
+        # encurtou: 1,05 m de passagem de um lado, 0,81 m da churrasqueira.
+        (6.95, 0.00, 1.60, 8.55, 0.74, 3.00, "madeira"),      # mesa
+        (6.95, 0.74, 1.60, 8.55, 0.81, 3.00, "louca"),
+        (7.10, 0.00, 1.25, 7.50, 0.45, 1.60, "madeira_esc"),
+        (8.00, 0.00, 1.25, 8.40, 0.45, 1.60, "madeira_esc"),
+        (7.10, 0.00, 3.00, 7.50, 0.45, 3.35, "madeira_esc"),
+        (8.00, 0.00, 3.00, 8.40, 0.45, 3.35, "madeira_esc"),
         # cozinha
         (9.75, 0.00, 0.22, 10.45, 0.88, 1.35, "madeira"),
         (9.75, 0.88, 0.22, 10.49, 0.94, 1.35, "pedra"),
@@ -557,7 +566,10 @@ def cobertura():
         (11.30, 0.00, 1.80, 12.80, 0.90, 2.90, "pedra"),      # ilha
         # home office
         (0.25, 0.00, 5.30, 0.95, 0.74, 7.90, "madeira"),      # bancada em L
-        (0.95, 0.00, 5.30, 2.85, 0.74, 5.95, "madeira"),
+        # a mesa ficava encostada na soleira e tapava INTEIRA a porta de
+        # 1,10 m (x 1,60..2,70) que liga o living ao home office. Recuou
+        # 1,70 m para o fundo do comodo.
+        (0.95, 0.00, 7.00, 2.85, 0.74, 7.65, "madeira"),
         (1.55, 0.00, 6.10, 1.95, 0.46, 6.50, "madeira_esc"),
         (3.30, 0.00, 5.60, 4.25, 2.10, 6.75, "madeira_esc"),  # armario
         (3.30, 0.00, 7.40, 4.95, 0.42, 9.40, "estofado"),     # sofa cama
@@ -571,8 +583,11 @@ def cobertura():
         (8.60, 0.00, 5.20, 9.48, 2.15, 6.20, "madeira_esc"),
         (5.35, 0.00, 5.25, 6.55, 0.78, 6.05, "estofado"),     # poltrona
         # banheiro
-        (9.75, 0.00, 6.30, 11.25, 0.82, 6.95, "louca"),
-        (9.75, 0.82, 6.30, 11.30, 0.88, 6.95, "pedra"),
+        # a bancada nascia em z 6,30, que e a propria soleira do banheiro:
+        # da porta de 1,10 m sobravam 0,45 m. Correu para o fundo, entre a
+        # banheira e o box.
+        (9.75, 0.00, 7.45, 11.25, 0.82, 8.10, "louca"),
+        (9.75, 0.82, 7.45, 11.30, 0.88, 8.10, "pedra"),
         (9.75, 1.35, 5.28, 11.28, 2.05, 5.34, "vidro"),
         (11.70, 0.00, 6.30, 12.10, 0.78, 7.00, "louca"),
         (12.55, 0.00, 5.20, 13.90, 0.55, 7.40, "louca"),      # banheira
@@ -603,11 +618,15 @@ def cobertura():
         ("Varanda gourmet - mesa", 6.60, 3.85),
         ("Cozinha - ilha", 11.40, 1.10),
         ("Cozinha - junto à bancada", 11.30, 3.95),
-        ("Home office - bancada", 2.35, 6.75),
+        # a bancada recuou para z 7,00..7,65 ao liberar a porta; o ponto
+        # seguiu, senao a camera olhava para onde o movel nao esta mais
+        ("Home office - bancada", 2.35, 6.45),
         ("Home office - sofá-cama", 2.30, 8.80),
         ("Suíte master - entrada", 7.05, 5.95),
         ("Suíte master - junto à janela", 8.40, 7.90),
-        ("Banheiro - bancada", 10.60, 7.55),
+        # idem: a bancada do banheiro foi para z 7,45..8,10, e o ponto
+        # antigo ficou DENTRO dela
+        ("Banheiro - bancada", 10.60, 6.90),
         ("Banheiro - banheira", 11.80, 8.70),
     ]
     return dict(nome="Cobertura com varanda gourmet", pasta="cobertura",
@@ -710,7 +729,10 @@ def mansao():
 
         # --- circulacao: aparador comprido e plantas, rente as paredes
         (2.90, 0.00, 6.75, 5.40, 0.82, 7.05, "madeira_esc"),
-        (11.90, 0.00, 7.80, 13.70, 0.82, 8.10, "madeira_esc"),
+        # o aparador comecava em x 11,90 e comia 40 cm da porta de 1,00 m
+        # da suite master (x 11,30..12,30), deixando 0,58 m. Correu para
+        # leste, onde encosta em parede cheia.
+        (12.40, 0.00, 7.80, 14.20, 0.82, 8.10, "madeira_esc"),
         (0.25, 0.00, 6.80, 0.85, 1.10, 7.40, "planta"),
         (21.20, 0.00, 7.60, 21.80, 1.10, 8.20, "planta"),
 
@@ -1126,7 +1148,12 @@ def casa_grande():
         _cadeira(17.40, 0.70, "z+") + _cadeira(18.30, 0.70, "z+") +
         _cadeira(19.20, 0.70, "z+") + _cadeira(17.40, 3.00, "z-") +
         _cadeira(18.30, 3.00, "z-") + _cadeira(19.20, 3.00, "z-") +
-        _cadeira(16.50, 1.85, "x+") +
+        # SEM cabeceira, de proposito. A mesa de 3,0 m fica numa sala de
+        # 4,8 m: sobram 0,90 m de cada lado, e uma cadeira de 0,46 m em
+        # qualquer das pontas reduz a passagem a 0,44 m. Do lado x- isso
+        # trancava a ala de servico INTEIRA — despensa, lavabo,
+        # deposito, cozinha e lavanderia, que so se alcanca por aqui.
+        # Seis lugares numa mesa de 3,0 m ja e o arranjo normal.
         _quadro("z", 4.20, -1, 17.80, 19.30, 1.25, 2.15) +
         [(16.32, 0.00, 3.55, 18.40, 0.88, 4.05, "madeira_esc"),   # buffet
          (18.10, 2.35, 1.90, 19.10, 2.60, 2.40, "vidro")] +       # lustre
@@ -1140,10 +1167,17 @@ def casa_grande():
 
         # ---------------------------------------------- cozinha
         _bancada(18.20, 7.70, 23.20, 8.25) +
-        _bancada(18.20, 4.35, 19.00, 7.20) +
+        # a bancada da parede oeste corria de z 4,35 a 7,20 — ou seja, por
+        # cima inteira da porta de 2,00 m que liga a copa a cozinha. Porta
+        # emparedada por movel: aparece na planta, nao existe para quem anda.
+        # A cozinha fica com a bancada do sul (5 m) e a ilha, que ja bastam.
         _bancada(20.20, 5.40, 22.60, 6.60) +                       # ilha
         [(18.20, 1.60, 7.95, 23.20, 2.45, 8.25, "laminado"),       # aereos
-         (22.40, 0.00, 4.35, 23.20, 1.95, 5.10, "inox"),           # geladeira
+         # a geladeira ficava em x 22,40..23,20: a esquina onde o corredor
+         # norte da cozinha encontra o corredor leste que vai a lavanderia.
+         # Sozinha ela estreitava os dois para 0,20 m, e trancava deposito
+         # e lavanderia. Foi para a ponta oeste da mesma parede.
+         (18.20, 0.00, 4.35, 19.00, 1.95, 5.10, "inox"),           # geladeira
          (20.60, 0.88, 7.72, 21.80, 0.94, 8.20, "inox"),           # cooktop
          (20.50, 1.95, 7.80, 21.90, 2.30, 8.25, "inox"),           # coifa
          (20.60, 0.00, 6.70, 20.95, 0.72, 7.05, "metal"),
@@ -1158,7 +1192,9 @@ def casa_grande():
         [(22.97, 0.30, 0.20, 23.40, 2.30, 2.05, "laminado"),
          (22.75, 0.78, 2.55, 23.40, 0.88, 3.15, "marmore"),        # cuba
          (23.33, 1.05, 2.60, 23.40, 1.95, 3.10, "vidro"),          # espelho
-         (21.15, 0.00, 3.45, 21.65, 0.78, 4.15, "louca")] +
+         # o vaso nascia a 15 cm da porta do lavabo e comia 25 cm do vao de
+         # 1,00 m. Foi para o fundo do comodo, longe da soleira.
+         (22.60, 0.00, 3.45, 23.10, 0.78, 4.15, "louca")] +
 
         # ---------------------------------------------- deposito / lavanderia
         [(23.50, 0.20, 0.10, 24.00, 2.40, 4.10, "laminado"),
