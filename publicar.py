@@ -32,6 +32,7 @@ import cv2
 import numpy as np
 
 import cena_apartamento
+import ladrilhos
 import plantas
 import profundidade
 
@@ -104,11 +105,32 @@ def preparar_cena(origem_jpg, origem_npy, destino, base, cena_id, aviso):
     A profundidade NAO passa pelo modelo de IA: ela ja e exata, veio do
     tracador. E essa a vantagem do imovel sintetico sobre a foto.
     """
-    panorama = _ler(origem_jpg)
+    cheio = _ler(origem_jpg)
+
+    # Os ladrilhos saem do ORIGINAL, antes de reduzir: e justamente o detalhe
+    # que a reducao jogava fora que eles existem para entregar. O tracador
+    # grava 8192 e o visor recebia 4096 — ja ampliado 1,7x numa tela de 1920.
+    #
+    # So para panorama completo. Em cena parcial as faces do cubo que caem no
+    # que a foto nao cobre sairiam pretas, e preto num tour parece defeito de
+    # carregamento, nao limite de captura.
+    multires = None
+    if cheio.shape[1] >= 2 * ladrilhos.LADO_DO_LADRILHO:
+        pasta_lad = "ladrilhos_%s" % cena_id
+        try:
+            multires = ladrilhos.gerar(cheio, os.path.join(destino, pasta_lad))
+            multires["basePath"] = pasta_lad
+        except Exception as erro:      # ladrilho e melhoria, nao requisito
+            aviso("ladrilhos de %s nao gerados: %s" % (base, erro))
+            multires = None
+
+    panorama = cheio
     alvo = (LARGURA_CENA, LARGURA_CENA // 2)
     if panorama.shape[1] != LARGURA_CENA:
         panorama = cv2.resize(panorama, alvo, interpolation=cv2.INTER_AREA)
     arquivo = "%s.jpg" % base
+    # o equirretangular CONTINUA: a caminhada projeta a foto numa malha e
+    # precisa dela inteira, e ele ainda e a reserva de quem nao tem WebGL
     _gravar_jpg(panorama, os.path.join(destino, arquivo))
 
     mini = cv2.resize(panorama, (LARGURA_MINI, LARGURA_MINI // 2),
@@ -134,6 +156,8 @@ def preparar_cena(origem_jpg, origem_npy, destino, base, cena_id, aviso):
         "hotspots": [], "miniatura": nome_mini,
         "profundidade": nome_prof, "previa_profundidade": nome_prev,
     }
+    if multires:
+        cena["multires"] = multires
     try:
         medida = profundidade.medir_escorrido(panorama, disp)
         if medida:

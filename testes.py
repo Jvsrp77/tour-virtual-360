@@ -45,6 +45,7 @@ import aviso                      # noqa: E402
 import maquete3d                  # noqa: E402
 import modelo3d                   # noqa: E402
 import numpy as np                # noqa: E402
+import ladrilhos
 import plantas
 import publicar                    # noqa: E402
 import cena_apartamento           # noqa: E402
@@ -7043,6 +7044,212 @@ class TestTrenaDoTour(unittest.TestCase):
         corpo = corpo[:corpo.index("\n}")]
         self.assertIn("c.profundidade", corpo,
                       "o botao de medir parou de olhar a profundidade da cena")
+
+
+class TestLadrilhosDoTour(unittest.TestCase):
+    """
+    O panorama cortado em ladrilhos, para o visor baixar so o que esta na tela.
+
+    POR QUE EXISTE. O tracador entrega 8192 e o publicador reduzia para 4096,
+    com um raciocinio que parecia certo — "8k so pesa no 4G" — e uma conclusao
+    que nao era: ninguem olha o panorama inteiro de uma vez. Num campo de 100
+    graus, 72% da imagem esta fora da tela sempre.
+
+    Medido no navegador, na primeira abertura de uma cena: 55 ladrilhos e
+    433 KB, contra 420 KB do equirretangular de 4096 — mesmo trafego, o dobro
+    da resolucao, e a primeira imagem aparece com 67 KB em vez de 420 KB.
+    Medida de nitidez fora do navegador, em recorte de 37 graus: 3,4x mais
+    energia de alta frequencia.
+
+    O QUE PODE DAR ERRADO SEM AVISO: a ORIENTACAO das faces. Um sinal trocado
+    nao quebra nada — espelha o imovel, e a sala do lado direito aparece no
+    esquerdo. Por isso os testes abaixo nao conferem o centro de cada face (o
+    centro fica certo mesmo com a face girada), e sim as COSTURAS: a coluna
+    direita de uma face tem de ser a coluna esquerda da seguinte, porque sao a
+    mesma aresta no espaco.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.eq = cls._panorama(512, 1024)
+
+    @staticmethod
+    def _panorama(alt, larg):
+        """
+        Panorama liso e sem simetria: cada direcao tem uma cor so dela.
+
+        Liso porque a comparacao de costura passa por interpolacao; sem
+        simetria porque um padrao espelhado faria uma face girada passar.
+        """
+        lon = (np.arange(larg) + 0.5) / larg * 2 * np.pi - np.pi
+        lat = np.pi / 2 - (np.arange(alt) + 0.5) / alt * np.pi
+        LO, LA = np.meshgrid(lon, lat)
+        b = 128 + 110 * np.sin(LO)
+        g = 128 + 110 * np.sin(LA)      # distingue cima de baixo
+        r = 128 + 110 * np.sin(LO * 0.5 + LA)
+        return np.dstack([b, g, r]).astype(np.uint8)
+
+    def _face(self, nome, lado=128):
+        return ladrilhos.face_do_equirect(self.eq, nome, lado)
+
+    def test_as_quatro_faces_do_meio_fecham_o_anel(self):
+        """
+        f -> r -> b -> l -> f. A coluna direita de uma e a coluna esquerda da
+        proxima: e a mesma aresta vista de dois lados. Face espelhada ou
+        girada rompe a costura aqui, e so aqui — o centro continuaria certo.
+        """
+        anel = ["f", "r", "b", "l", "f"]
+        for a, b in zip(anel, anel[1:]):
+            da = self._face(a)[:, -1].astype(int)
+            eb = self._face(b)[:, 0].astype(int)
+            erro = float(np.abs(da - eb).mean())
+            self.assertLess(erro, 6.0,
+                            "costura %s->%s aberta (erro medio %.1f)" % (a, b, erro))
+
+    def test_teto_e_chao_encostam_na_frente(self):
+        """
+        A face de cima varre o z crescente para baixo na imagem, entao a ultima
+        linha dela e a aresta da frente. A de baixo e o contrario: a primeira
+        linha. Trocar isso poe o teto de cabeca para baixo — que ninguem
+        percebe olhando um teto branco, e percebe na hora num teto com viga.
+        """
+        topo_f = self._face("f")[0].astype(int)
+        base_u = self._face("u")[-1].astype(int)
+        self.assertLess(float(np.abs(topo_f - base_u).mean()), 6.0,
+                        "a face de cima nao encosta na frente")
+
+        base_f = self._face("f")[-1].astype(int)
+        topo_d = self._face("d")[0].astype(int)
+        self.assertLess(float(np.abs(base_f - topo_d).mean()), 6.0,
+                        "a face de baixo nao encosta na frente")
+
+    def test_cima_e_cima_e_baixo_e_baixo(self):
+        """
+        Espelhar o panorama inteiro na vertical NAO abre costura: todas as
+        faces viram juntas e o anel continua fechando. O imovel sai de ponta
+        cabeca em silencio.
+
+        Aqui o verde cresce com a latitude, entao o centro da face de cima tem
+        de ser claro e o da face de baixo, escuro — sem empate possivel.
+        """
+        cima = int(self._face("u")[64, 64][1])
+        baixo = int(self._face("d")[64, 64][1])
+        self.assertGreater(cima, 200, "a face de cima nao esta olhando para cima")
+        self.assertLess(baixo, 56, "a face de baixo nao esta olhando para baixo")
+        self.assertGreater(cima - baixo, 150, "cima e baixo trocados")
+
+    def test_o_nome_do_ladrilho_diz_linha_e_coluna(self):
+        """
+        Grade quadrada: trocar linha por coluna no nome produz o MESMO conjunto
+        de arquivos, e um teste que so confere existencia passa feliz. Na tela
+        o ambiente sai embaralhado, cada pedaco no lugar do outro.
+
+        Entao compara-se o CONTEUDO: o ladrilho y=0, x=1 e o segundo pedaco da
+        primeira linha da face, e nao o primeiro da segunda.
+        """
+        import cv2                      # so este teste le arquivo gravado
+        eq = self._panorama(256, 512)
+        destino = os.path.join(_TEMP, "lad_nome")
+        cfg = ladrilhos.gerar(eq, destino, lado_ladrilho=64)
+        lado = cfg["cubeResolution"]
+        face = ladrilhos.face_do_equirect(eq, "f", lado)
+        caminho = os.path.join(destino, str(cfg["maxLevel"]), "f0_1.jpg")
+        gravado = cv2.imdecode(np.fromfile(caminho, np.uint8), cv2.IMREAD_COLOR)
+        esperado = face[0:64, 64:128]
+        trocado = face[64:128, 0:64]
+        erro_certo = float(np.abs(gravado.astype(int)
+                                  - esperado.astype(int)).mean())
+        erro_trocado = float(np.abs(gravado.astype(int)
+                                    - trocado.astype(int)).mean())
+        self.assertLess(erro_certo, 6.0,
+                        "f0_1 nao e a coluna 1 da linha 0 (erro %.1f)" % erro_certo)
+        self.assertGreater(erro_trocado, erro_certo * 2,
+                           "linha e coluna indistinguiveis neste panorama: o "
+                           "teste nao provaria nada")
+
+    def test_a_frente_olha_para_o_meio_do_panorama(self):
+        """
+        O centro da face `f` e o centro da foto. E a convencao do tracador, da
+        caminhada e da trena: girar so esta nao quebraria costura nenhuma, e o
+        imovel inteiro sairia virado.
+        """
+        alt, larg = self.eq.shape[:2]
+        esperado = self.eq[alt // 2, larg // 2].astype(int)
+        centro = self._face("f")[64, 64].astype(int)
+        self.assertLess(float(np.abs(esperado - centro).max()), 6.0)
+
+    def test_o_lado_do_cubo_guarda_o_detalhe_do_equirretangular(self):
+        """
+        Largura/4 igualaria a densidade de pixel so na borda da face; o centro,
+        que e onde o olho fica, perderia. Largura/pi e o que o centro pede.
+        """
+        self.assertEqual(ladrilhos.lado_do_cubo(8192), 2600)
+        self.assertEqual(ladrilhos.lado_do_cubo(8192) % 8, 0,
+                         "lado que nao e multiplo de 8 quebra a piramide")
+        self.assertGreater(ladrilhos.lado_do_cubo(8192), 8192 / 4)
+
+    def test_a_piramide_termina_num_ladrilho_so(self):
+        """
+        O nivel 0 e o que aparece primeiro na tela. Se ele ainda precisar de
+        quatro arquivos, a primeira imagem custa quatro idas a rede em vez de
+        uma — que e justamente o que estes ladrilhos vieram evitar.
+        """
+        for largura in (4096, 8192, 16384):
+            lado = ladrilhos.lado_do_cubo(largura)
+            n = ladrilhos.niveis(lado)
+            menor = lado / 2 ** (n - 1)
+            self.assertLessEqual(menor, ladrilhos.LADO_DO_LADRILHO,
+                                 "nivel 0 de %d nao cabe num ladrilho" % largura)
+
+    def test_gerar_escreve_a_piramide_que_o_visor_espera(self):
+        """
+        O Pannellum monta o caminho com `path`: /<nivel>/<face><linha>_<coluna>.
+        Arquivo faltando vira buraco preto no meio do ambiente.
+        """
+        destino = os.path.join(_TEMP, "lad")
+        cfg = ladrilhos.gerar(self._panorama(256, 512), destino,
+                              lado_ladrilho=64)
+        self.assertEqual(cfg["path"], "/%l/%s%y_%x")
+        self.assertEqual(cfg["tileResolution"], 64)
+        lado = cfg["cubeResolution"]
+        for nivel in range(cfg["maxLevel"] + 1):
+            tamanho = int(lado / 2 ** (cfg["maxLevel"] - nivel))
+            quantos = int(math.ceil(float(tamanho) / 64))
+            for face in "frblud":
+                for y in range(quantos):
+                    for x in range(quantos):
+                        caminho = os.path.join(destino, str(nivel),
+                                               "%s%d_%d.jpg" % (face, y, x))
+                        self.assertTrue(os.path.exists(caminho),
+                                        "faltou %s" % caminho)
+
+    def test_cena_sem_ladrilho_continua_abrindo_pelo_equirretangular(self):
+        """
+        Tour antigo e cena parcial nao tem ladrilho. A pagina nao pode depender
+        deles para mostrar alguma coisa — o acervo publicado antes continuaria
+        em pe ou nao.
+
+        Conferencia de texto, assumida como tal.
+        """
+        html = io.open(os.path.join("static", "viewer.html"),
+                       encoding="utf-8").read()
+        trecho = html[html.index("const fonte = c.multires"):]
+        trecho = trecho[:trecho.index("cenas[c.id]")]
+        self.assertIn("type: 'multires'", trecho)
+        self.assertIn("type: 'equirectangular'", trecho,
+                      "a pagina deixou de ter saida para cena sem ladrilho")
+        self.assertIn("panorama: CENAS + c.arquivo", trecho)
+
+    def test_o_equirretangular_continua_sendo_gravado(self):
+        """
+        A caminhada projeta a foto numa malha e precisa dela inteira: trocar o
+        equirretangular pelos ladrilhos apagaria o andar.html sem tocar nele.
+        """
+        fonte = io.open("publicar.py", encoding="utf-8").read()
+        corpo = fonte[fonte.index("def preparar_cena"):]
+        corpo = corpo[:corpo.index(chr(10) + "def ")]
+        self.assertIn("_gravar_jpg(panorama, os.path.join(destino, arquivo))",
+                      corpo, "o publicador parou de gravar o equirretangular")
 
 
 def limpar():
