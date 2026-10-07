@@ -215,7 +215,24 @@ const PASSEIO_MINIMO = 0.35;     // abaixo disto o passeio nao serve para nada
 const RECONSTRUIDO_OTIMO = 2.0;  // por cento; acima disto o passeio encolhe
 const PASSEIO_SEM_FUNDO = 1.00;  // sem camada, todo vao vira preto
 
+// Abaixo disto a foto nao alcanca o piso, e sem piso nao ha como virar metros:
+// a calibracao da caminhada mede o chao. 80 graus de vaov poem a ultima linha
+// a 40 do horizonte, e dai o piso cai a 1,8 m de distancia horizontal — ainda
+// dentro de um comodo. Fica aqui, junto das outras constantes de passeio, e
+// nao la embaixo com a malha: tetoDePasseio a usa, e const em zona morta
+// temporal estoura se a funcao rodar antes da declaracao.
+const VAOV_QUE_ALCANCA_O_CHAO = 80;
+
 function tetoDePasseio(cena){
+  // Cena parcial que nao alcanca o chao nao tem como virar metros: a
+  // calibracao mede o piso, e sem piso a escala fica arbitraria. Sem escala,
+  // passo e colisao nao significam nada — entao nao se anda nessa cena, so se
+  // salta de ponto em ponto pelas setas, que sao fotos de verdade.
+  //
+  // Devolver PASSEIO_MINIMO aqui seria pior do que devolver zero: andaria um
+  // pouco, com numero inventado, e pareceria funcionar.
+  if ((cena && cena.vaov ? cena.vaov : 180) < VAOV_QUE_ALCANCA_O_CHAO) return 0;
+
   let teto = PASSEIO_CHEIO;
 
   const e = cena && cena.escorrido && cena.escorrido.fracao;
@@ -370,7 +387,28 @@ const raio = d => 1 / (1.542 * d + 0.125);
 // ele, as distancias viram metros de verdade e o passo passa a fazer sentido.
 const ALTURA_CAMERA = 1.5;
 
-function calibrarPeloChao(raios){
+// ------------------------------------------------- panorama parcial
+//
+// POR QUE EXISTE. Costurar 360 graus com celular exige que a LENTE nao saia do
+// lugar, e num quarto pequeno isso nao se consegue — nem com o aparelho preso
+// com fita a uma cadeira giratoria. Medido no quarto do dono: a lente orbitava
+// uns 8 cm, 7 de 10 trechos acusaram paralaxe, e o alinhador resolve
+// entortando. Os moveis sairam tortos e nao havia tecnica de gravacao que
+// consertasse, porque o limite e geometrico.
+//
+// Uma foto UNICA da ultra-wide nao tem esse problema: nao ha nada a alinhar.
+// So que ela cobre ~100 graus, e nao 360. Entao a malha deixa de ser sempre
+// uma esfera inteira e passa a ser a CALOTA que a foto realmente cobriu.
+//
+// Com haov 360 e vaov 180 as contas abaixo sao identicas as de antes, entao
+// panorama completo nao muda em nada.
+function aberturaDa(cena){
+  const h = (cena && cena.haov) || 360;
+  const v = (cena && cena.vaov) || 180;
+  return {lon: h * Math.PI / 180, lat: v * Math.PI / 180};
+}
+
+function calibrarPeloChao(raios, latMax){
   const amostras = [];
   for (let j = GRADE_A - 6; j <= GRADE_A; j++)
     for (let i = 0; i <= GRADE_L; i += 8)
@@ -378,7 +416,14 @@ function calibrarPeloChao(raios){
   amostras.sort((a, b) => a - b);
   const chao = amostras[Math.floor(amostras.length / 2)];
   if (!chao || !isFinite(chao)) return 1;
-  return ALTURA_CAMERA / chao;
+  // Na esfera inteira a ultima linha olha para o piso LOGO ABAIXO, e o raio
+  // ali e a propria altura da camera. Numa calota menor ela olha na diagonal,
+  // e o mesmo piso fica mais longe: altura / sen(angulo). Sem este seno a
+  // cena parcial sairia inteira encolhida, e o passo de 1 m andaria 70 cm.
+  const seno = Math.sin(Math.min(Math.PI / 2, (latMax === undefined
+                                               ? Math.PI / 2 : latMax)));
+  if (seno < 0.05) return 1;
+  return (ALTURA_CAMERA / seno) / chao;
 }
 
 async function carregarPonto(p){
@@ -395,11 +440,12 @@ async function carregarPonto(p){
   const direcoes = new Float32Array(nv * 3);
   const raios = new Float32Array(nv);
 
+  const abertura = aberturaDa(p.cena);
   let k = 0;
   for (let j = 0; j <= GRADE_A; j++){
-    const v = j / GRADE_A, lat = (v - 0.5) * Math.PI;
+    const v = j / GRADE_A, lat = (v - 0.5) * abertura.lat;
     for (let i = 0; i <= GRADE_L; i++){
-      const u = i / GRADE_L, lon = (u - 0.5) * 2 * Math.PI;
+      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon;
       // +lat aponta para baixo no equirretangular; no three.js +y e para cima
       direcoes[k*3]   = Math.cos(lat) * Math.sin(lon);
       direcoes[k*3+1] = -Math.sin(lat);
@@ -412,7 +458,7 @@ async function carregarPonto(p){
     }
   }
 
-  const escala = calibrarPeloChao(raios);
+  const escala = calibrarPeloChao(raios, abertura.lat / 2);
   for (let i = 0; i < raios.length; i++) raios[i] *= escala;
 
   const firmes = [], duvidosos = [];
@@ -495,11 +541,12 @@ async function carregarFundo(p){
   const nv = (GRADE_L + 1) * (GRADE_A + 1);
   const pos = new Float32Array(nv * 3), uvs = new Float32Array(nv * 2);
   const raiosF = new Float32Array(nv);
+  const abertura = aberturaDa(p.cena);
   let k = 0;
   for (let j = 0; j <= GRADE_A; j++){
-    const v = j / GRADE_A, lat = (v - 0.5) * Math.PI;
+    const v = j / GRADE_A, lat = (v - 0.5) * abertura.lat;
     for (let i = 0; i <= GRADE_L; i++){
-      const u = i / GRADE_L, lon = (u - 0.5) * 2 * Math.PI;
+      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon;
       const px = Math.min(prof.largura-1, Math.round(u * prof.largura));
       const py = Math.min(prof.altura-1,  Math.round(v * prof.altura));
       raiosF[k] = raio(prof.dados[py * prof.largura + px]) * p.escalaFundo;
@@ -592,10 +639,15 @@ function maisProximo(p){
 // Distancia da superficie naquela direcao, lida do proprio mapa de profundidade.
 function raioNaDirecao(pt, dir){
   if (!pt.raios) return Infinity;
+  const ab = aberturaDa(pt.cena);
   const lat = Math.asin(Math.max(-1, Math.min(1, -dir.y)));
   const lon = Math.atan2(dir.x, dir.z);
-  const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
-  const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
+  // Fora da calota a foto nao viu NADA. Devolver Infinity aqui liberaria o
+  // passo para o que nunca foi fotografado — o visitante atravessaria a borda
+  // da foto e sairia no vazio. Zero barra, que e o unico palpite seguro.
+  if (Math.abs(lon) > ab.lon / 2 || Math.abs(lat) > ab.lat / 2) return 0;
+  const i = Math.round((lon / ab.lon + 0.5) * GRADE_L);
+  const j = Math.round((lat / ab.lat + 0.5) * GRADE_A);
   const k = Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
           + Math.min(GRADE_L, Math.max(0, i));
   return pt.raios[k];

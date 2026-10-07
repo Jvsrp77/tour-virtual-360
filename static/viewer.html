@@ -349,6 +349,17 @@ const GRADE_L = 320, GRADE_A = 160;   // espelha o andar.html
 const ALTURA_CAMERA = 1.5;
 let medindo = false, medidas = [], raiosDaCena = null, cenaDosRaios = null;
 
+// Quanto da esfera a foto cobre. Panorama parcial — uma foto de ultra-wide,
+// sem costura — ocupa a mesma imagem, mas espalhada por ~100 graus em vez de
+// 360. Medir com a conta da esfera inteira daria numero com cara de certo e
+// errado por metros, que e o pior defeito possivel numa trena.
+let aberturaDaCena = {lon: 2 * Math.PI, lat: Math.PI};
+
+function aberturaDe(c){
+  return {lon: ((c && c.haov) || 360) * Math.PI / 180,
+          lat: ((c && c.vaov) || 180) * Math.PI / 180};
+}
+
 function alternarTrena(){
   medindo = !medindo;
   medidas = [];
@@ -369,6 +380,7 @@ async function prepararTrena(){
   dizTrena('Lendo a profundidade deste ambiente…');
   try {
     raiosDaCena = await lerRaios(CENAS + c.profundidade);
+    aberturaDaCena = aberturaDe(c);
     cenaDosRaios = atual;
     dizTrena();
   } catch (e){
@@ -415,8 +427,11 @@ function lerRaios(url){
 function pontoNaDirecao(yawG, pitchG){
   if (!raiosDaCena) return null;
   const lat = -pitchG * Math.PI / 180, lon = yawG * Math.PI / 180;
-  const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
-  const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
+  // fora do que a foto cobre nao ha o que medir
+  if (Math.abs(lon) > aberturaDaCena.lon / 2
+      || Math.abs(lat) > aberturaDaCena.lat / 2) return null;
+  const i = Math.round((lon / aberturaDaCena.lon + 0.5) * GRADE_L);
+  const j = Math.round((lat / aberturaDaCena.lat + 0.5) * GRADE_A);
   const k = Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
           + Math.min(GRADE_L, Math.max(0, ((i % (GRADE_L+1)) + GRADE_L+1) % (GRADE_L+1)));
   const r = raiosDaCena[k];

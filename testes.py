@@ -7252,6 +7252,238 @@ class TestLadrilhosDoTour(unittest.TestCase):
                       corpo, "o publicador parou de gravar o equirretangular")
 
 
+class TestPanoramaParcial(unittest.TestCase):
+    """
+    A caminhada aceitando foto que nao cobre a esfera inteira.
+
+    POR QUE EXISTE. Costurar 360 graus com celular exige que a LENTE nao saia
+    do lugar, e num quarto pequeno isso nao se consegue. Medido no quarto do
+    dono, com o aparelho presp com fita a uma cadeira giratoria e girando a
+    cadeira: a lente orbitava uns 8 cm, 7 de 10 trechos acusaram paralaxe, e o
+    alinhador resolveu entortando. Os moveis sairam tortos, e nao havia tecnica
+    de gravacao que consertasse — o limite e geometrico, nao de capricho.
+
+    Uma foto UNICA de ultra-wide nao tem esse problema, porque nao ha nada a
+    alinhar. So que ela cobre ~100 graus. Daqui em diante a malha e a CALOTA
+    que a foto cobriu, e nao sempre uma esfera.
+
+    O QUE PODE DAR ERRADO SEM AVISO: tratar a calota como esfera nao quebra
+    nada. A foto se espalha por 360 graus, o comodo fica gigante, e o visitante
+    anda "1 metro" que no imovel sao 30 cm. Numero errado com cara de certo.
+    """
+
+    ABERTURA = re.compile(r"(function aberturaDa\(cena\)\{.*?^\})", re.S | re.M)
+    CALIBRA = re.compile(r"(function calibrarPeloChao\(raios, latMax\)\{.*?^\})",
+                         re.S | re.M)
+    RAIO = re.compile(r"(function raioNaDirecao\(pt, dir\)\{.*?^\})", re.S | re.M)
+    TETO = re.compile(r"(const ESCORRIDO_OTIMO.*?^\})", re.S | re.M)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "andar.html"), encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _fonte(self, *padroes):
+        partes = ["const GRADE_L = 320, GRADE_A = 160;",
+                  "const ALTURA_CAMERA = 1.5;"]
+        for p in padroes:
+            achado = p.search(self.html)
+            self.assertTrue(achado, "nao achei %s em andar.html" % p.pattern[:30])
+            partes.append(achado.group(1))
+        return "\n".join(partes) + "\n"
+
+    def _rodar(self, fonte, programa):
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        caminho = os.path.join(_TEMP, "parcial.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(fonte + programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, (r.stderr or "")[:700])
+        return json.loads(r.stdout.strip())
+
+    def test_panorama_completo_nao_muda_em_nada(self):
+        """
+        A trava desta mudanca inteira. O acervo publicado e todo de panorama
+        completo; se a conta nova mexer um milimetro neles, eu quebrei o que
+        funcionava para atender o que ainda nao existe.
+        """
+        fonte = self._fonte(self.ABERTURA, self.RAIO)
+        saida = self._rodar(fonte, """
+const cheio = {};
+const pt = {cena: cheio, raios: new Float32Array(321*161)};
+for (let k = 0; k < pt.raios.length; k++) pt.raios[k] = 1 + (k % 97) / 100;
+const dirs = [[0,0,1],[1,0,0],[-1,0,0],[0,0,-1],[0,-1,0],[0,1,0],
+              [0.5,-0.3,0.81],[-0.7,0.2,-0.68]];
+const ab = aberturaDa(cheio);
+const antigo = d => {
+  const lat = Math.asin(Math.max(-1, Math.min(1, -d[1])));
+  const lon = Math.atan2(d[0], d[2]);
+  const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
+  const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
+  return pt.raios[Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
+                + Math.min(GRADE_L, Math.max(0, i))];
+};
+const iguais = dirs.every(d =>
+  raioNaDirecao(pt, {x: d[0], y: d[1], z: d[2]}) === antigo(d));
+console.log(JSON.stringify([ab.lon, ab.lat, iguais]));
+""")
+        self.assertAlmostEqual(saida[0], 2 * 3.141592653589793, places=9)
+        self.assertAlmostEqual(saida[1], 3.141592653589793, places=9)
+        self.assertTrue(saida[2], "panorama completo deixou de dar o mesmo raio")
+
+    def test_a_foto_parcial_ocupa_so_o_que_cobriu(self):
+        """
+        Numa foto de 100 graus, olhar 50 graus para o lado e a BORDA da imagem.
+        Espalhada como se fosse 360, essa mesma borda cairia a 1/7 do caminho —
+        e o comodo apareceria sete vezes maior do que e.
+        """
+        fonte = self._fonte(self.ABERTURA, self.RAIO)
+        saida = self._rodar(fonte, """
+const cena = {haov: 100, vaov: 80};
+const pt = {cena: cena, raios: new Float32Array(321*161)};
+// cada celula guarda a propria coluna, para dizer ONDE a direcao caiu
+for (let j = 0; j <= GRADE_A; j++)
+  for (let i = 0; i <= GRADE_L; i++) pt.raios[j*(GRADE_L+1)+i] = i;
+const emLon = g => {
+  const r = g * Math.PI / 180;
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+};
+console.log(JSON.stringify([emLon(0), emLon(-50), emLon(50), emLon(25)]));
+""")
+        meio, esquerda, direita, quarto = saida
+        self.assertEqual(meio, 160, "o centro da foto nao caiu no meio")
+        self.assertEqual(esquerda, 0, "a borda esquerda nao e a coluna 0")
+        self.assertEqual(direita, 320, "a borda direita nao e a ultima coluna")
+        self.assertEqual(quarto, 240, "o meio do caminho nao caiu no meio")
+
+    def test_fora_da_foto_o_passo_e_barrado(self):
+        """
+        Atras de quem olha para uma foto de 100 graus nao ha foto nenhuma.
+        Devolver um raio grande ali liberaria o visitante a andar para dentro
+        do que nunca foi fotografado — ele atravessaria a borda e sairia no
+        vazio preto. Zero barra, que e o unico palpite seguro.
+        """
+        fonte = self._fonte(self.ABERTURA, self.RAIO)
+        saida = self._rodar(fonte, """
+const pt = {cena: {haov: 100, vaov: 80}, raios: new Float32Array(321*161)};
+pt.raios.fill(5);
+const emLon = g => {
+  const r = g * Math.PI / 180;
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+};
+const emLat = g => {
+  const r = g * Math.PI / 180;
+  return raioNaDirecao(pt, {x: 0, y: -Math.sin(r), z: Math.cos(r)});
+};
+console.log(JSON.stringify([emLon(49), emLon(51), emLon(180),
+                            emLat(39), emLat(41)]));
+""")
+        dentro, fora, atras, baixo_ok, baixo_fora = saida
+        self.assertEqual(dentro, 5, "49 graus deveria estar dentro de 100")
+        self.assertEqual(fora, 0, "51 graus passou numa foto de 100")
+        self.assertEqual(atras, 0, "a direcao oposta a foto nao foi barrada")
+        self.assertEqual(baixo_ok, 5, "39 graus deveria estar dentro de 80")
+        self.assertEqual(baixo_fora, 0, "41 graus passou numa foto de 80")
+
+    MALHA = re.compile(
+        r"(const abertura = aberturaDa\(p\.cena\);\n  let k = 0;"
+        r".*?direcoes\[k\*3\].*?\n  \})", re.S)
+
+    def test_a_malha_abre_so_o_angulo_que_a_foto_cobriu(self):
+        """
+        O TESTE QUE FALTAVA. As funcoes de consulta ja estavam cobertas, mas a
+        MALHA — que e o que o visitante enxerga — mora dentro de uma funcao
+        async e ficou de fora. Tratar a calota como esfera nao quebra nada:
+        espalha a foto por 360 graus, o comodo fica sete vezes maior do que e,
+        e tudo parece funcionar.
+
+        Aqui a ultima coluna da grade tem de apontar para a BORDA da foto, e
+        nao para 180 graus.
+        """
+        achado = self.MALHA.search(self.html)
+        self.assertTrue(achado, "nao achei a malha em andar.html")
+        fonte = self._fonte(self.ABERTURA) + """
+const raio = d => 1 / (1.542 * d + 0.125);
+const nv = (GRADE_L + 1) * (GRADE_A + 1);
+const posicoes = new Float32Array(nv * 3);
+const uvs = new Float32Array(nv * 2);
+const direcoes = new Float32Array(nv * 3);
+const raios = new Float32Array(nv);
+const prof = {largura: 64, altura: 32, dados: new Float32Array(64 * 32)};
+const p = {cena: {haov: 100, vaov: 80}};
+"""
+        saida = self._rodar(fonte, achado.group(1) + """
+const grau = (a, b, c) => {
+  const k = (b * (GRADE_L + 1) + a) * 3;
+  return [direcoes[k], direcoes[k+1], direcoes[k+2]];
+};
+const ang = d => Math.atan2(d[0], d[2]) * 180 / Math.PI;
+const alt = d => Math.asin(Math.max(-1, Math.min(1, -d[1]))) * 180 / Math.PI;
+const meioJ = GRADE_A / 2;
+console.log(JSON.stringify([
+  ang(grau(GRADE_L, meioJ)), ang(grau(0, meioJ)), ang(grau(GRADE_L/2, meioJ)),
+  alt(grau(GRADE_L/2, GRADE_A)), alt(grau(GRADE_L/2, 0))]));
+""")
+        direita, esquerda, centro, baixo, cima = saida
+        self.assertAlmostEqual(direita, 50.0, places=3,
+                               msg="a ultima coluna nao parou na borda da foto")
+        self.assertAlmostEqual(esquerda, -50.0, places=3)
+        self.assertAlmostEqual(centro, 0.0, places=6)
+        self.assertAlmostEqual(baixo, 40.0, places=3,
+                               msg="a ultima linha nao parou na borda da foto")
+        self.assertAlmostEqual(cima, -40.0, places=3)
+
+    def test_a_calibracao_corrige_o_angulo_do_chao(self):
+        """
+        Na esfera inteira a ultima linha olha para o piso LOGO ABAIXO, e o raio
+        ali e a altura da camera. Numa calota de 90 graus ela olha a 45, e o
+        mesmo piso fica a 1,5/sen(45) = 2,12 m.
+
+        Sem esse seno a cena sairia encolhida na proporcao exata do seno, e o
+        passo de 1 metro andaria 70 cm — com todo o resto parecendo certo.
+        """
+        fonte = self._fonte(self.CALIBRA)
+        saida = self._rodar(fonte, """
+const raios = new Float32Array(321*161);
+raios.fill(3.0);
+const cheio = calibrarPeloChao(raios, Math.PI/2);
+const meio = calibrarPeloChao(raios, Math.PI/4);
+console.log(JSON.stringify([cheio, meio]));
+""")
+        cheio, meio = saida
+        self.assertAlmostEqual(cheio, 1.5 / 3.0, places=6)
+        self.assertAlmostEqual(meio, (1.5 / (2 ** 0.5 / 2)) / 3.0, places=6)
+        self.assertGreater(meio, cheio * 1.4,
+                           "a calota nao recebeu a correcao do seno")
+
+    def test_cena_que_nao_ve_o_chao_nao_anda(self):
+        """
+        Sem piso no enquadramento nao ha como virar metros, e sem metros passo
+        e colisao nao significam nada.
+
+        Devolver o passeio minimo seria PIOR que devolver zero: andaria um
+        pouco, com numero inventado, e pareceria funcionar. Zero manda o
+        visitante usar as setas, que sao fotos de verdade.
+        """
+        fonte = self._fonte(self.TETO)
+        saida = self._rodar(fonte, """
+console.log(JSON.stringify([
+  tetoDePasseio({vaov: 180, fundo: {reconstruido: 1.0}}),
+  tetoDePasseio({vaov: 100, fundo: {reconstruido: 1.0}}),
+  tetoDePasseio({vaov: 75,  fundo: {reconstruido: 1.0}}),
+  tetoDePasseio({fundo: {reconstruido: 1.0}})]));
+""")
+        completo, largo, estreito, sem_campo = saida
+        self.assertGreater(completo, 0)
+        self.assertGreater(largo, 0, "100 graus ve o chao e deveria andar")
+        self.assertEqual(estreito, 0, "cena de 75 graus liberou passeio")
+        self.assertEqual(sem_campo, completo,
+                         "cena sem vaov deixou de ser tratada como completa")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
