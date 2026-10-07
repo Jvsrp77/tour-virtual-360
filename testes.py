@@ -7273,6 +7273,7 @@ class TestPanoramaParcial(unittest.TestCase):
     """
 
     ABERTURA = re.compile(r"(function aberturaDa\(cena\)\{.*?^\})", re.S | re.M)
+    GIRO = re.compile(r"(function giroDa\(cena\)\{.*?^\})", re.S | re.M)
     CALIBRA = re.compile(r"(function calibrarPeloChao\(raios, latMax\)\{.*?^\})",
                          re.S | re.M)
     RAIO = re.compile(r"(function raioNaDirecao\(pt, dir\)\{.*?^\})", re.S | re.M)
@@ -7285,8 +7286,11 @@ class TestPanoramaParcial(unittest.TestCase):
             cls.html = f.read()
 
     def _fonte(self, *padroes):
+        # giroDa entra sempre: e pequena, varias funcoes a chamam, e deixar de
+        # fora so produz ReferenceError disfarcado de teste quebrado
         partes = ["const GRADE_L = 320, GRADE_A = 160;",
-                  "const ALTURA_CAMERA = 1.5;"]
+                  "const ALTURA_CAMERA = 1.5;",
+                  self.GIRO.search(self.html).group(1)]
         for p in padroes:
             achado = p.search(self.html)
             self.assertTrue(achado, "nao achei %s em andar.html" % p.pattern[:30])
@@ -7389,7 +7393,7 @@ console.log(JSON.stringify([emLon(49), emLon(51), emLon(180),
         self.assertEqual(baixo_fora, 0, "41 graus passou numa foto de 80")
 
     MALHA = re.compile(
-        r"(const abertura = aberturaDa\(p\.cena\);\n  let k = 0;"
+        r"(const abertura = aberturaDa\(p\.cena\);\n.*?let k = 0;"
         r".*?direcoes\[k\*3\].*?\n  \})", re.S)
 
     def test_a_malha_abre_so_o_angulo_que_a_foto_cobriu(self):
@@ -7435,6 +7439,93 @@ console.log(JSON.stringify([
         self.assertAlmostEqual(baixo, 40.0, places=3,
                                msg="a ultima linha nao parou na borda da foto")
         self.assertAlmostEqual(cima, -40.0, places=3)
+
+    def test_cada_cena_olha_para_o_lado_que_foi_tirada(self):
+        """
+        O DEFEITO QUE O DONO VIU NA TELA: quatro fotos tiradas de paredes
+        diferentes apareceram empilhadas na MESMA direcao, cada uma na sua
+        posicao, e o quarto saiu em pedacos soltos.
+
+        Faltava o obvio: a malha era sempre montada com o centro da foto
+        apontando para +z, entao nenhuma cena sabia para onde estava virada.
+        Com panorama completo isso passava despercebido, porque o imovel
+        sintetico e renderizado sempre com a mesma orientacao.
+        """
+        achado = self.MALHA.search(self.html)
+        self.assertTrue(achado, "nao achei a malha em andar.html")
+        fonte = self._fonte(self.ABERTURA) + """
+const raio = d => 1 / (1.542 * d + 0.125);
+const nv = (GRADE_L + 1) * (GRADE_A + 1);
+const posicoes = new Float32Array(nv * 3);
+const uvs = new Float32Array(nv * 2);
+const direcoes = new Float32Array(nv * 3);
+const raios = new Float32Array(nv);
+const prof = {largura: 64, altura: 32, dados: new Float32Array(64 * 32)};
+const p = {cena: {haov: 68, vaov: 100, giro: 90}};
+"""
+        saida = self._rodar(fonte, achado.group(1) + """
+const meio = ((GRADE_A/2) * (GRADE_L + 1) + GRADE_L/2) * 3;
+const d = [direcoes[meio], direcoes[meio+1], direcoes[meio+2]];
+console.log(JSON.stringify([Math.atan2(d[0], d[2]) * 180 / Math.PI,
+                            +d[1].toFixed(6)]));
+""")
+        centro, altura = saida
+        self.assertAlmostEqual(centro, 90.0, places=3,
+                               msg="a cena girada 90 graus continuou olhando "
+                                   "para a frente")
+        self.assertAlmostEqual(altura, 0.0, places=6,
+                               msg="o giro mexeu na altura, e deveria girar "
+                                   "so em volta do eixo vertical")
+
+    def test_a_consulta_desfaz_o_giro_antes_de_perguntar_a_foto(self):
+        """
+        A foto nao sabe para onde foi virada: ela so tem colunas. Perguntar a
+        ela com a direcao do MUNDO, sem desfazer o giro, faria a cena girada
+        recusar o proprio centro como "fora da foto" — e o visitante ficaria
+        preso sem motivo visivel.
+        """
+        fonte = self._fonte(self.ABERTURA, self.RAIO)
+        saida = self._rodar(fonte, """
+const pt = {cena: {haov: 68, vaov: 100, giro: 90}, raios: new Float32Array(321*161)};
+for (let j = 0; j <= GRADE_A; j++)
+  for (let i = 0; i <= GRADE_L; i++) pt.raios[j*(GRADE_L+1)+i] = i;
+const emLon = g => {
+  const r = g * Math.PI / 180;
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+};
+console.log(JSON.stringify([emLon(90), emLon(0), emLon(124), emLon(56)]));
+""")
+        centro, frente, borda_dir, borda_esq = saida
+        self.assertEqual(centro, 160,
+                         "o centro da cena girada nao caiu no meio da foto")
+        self.assertEqual(frente, 0,
+                         "+z deveria estar fora de uma foto virada para +x")
+        self.assertEqual(borda_dir, 320, "a borda direita nao acompanhou o giro")
+        self.assertEqual(borda_esq, 0, "a borda esquerda nao acompanhou o giro")
+
+    def test_giro_perto_de_meia_volta_nao_estoura_a_conta(self):
+        """
+        Sem trazer o angulo de volta para [-pi, pi], uma cena girada 170 graus
+        faz a direcao do proprio centro virar -345, que qualquer comparacao
+        considera "fora da foto". A cena inteira ficaria intransitavel, e o
+        defeito so apareceria em quem girasse muito o celular.
+        """
+        fonte = self._fonte(self.ABERTURA, self.RAIO)
+        saida = self._rodar(fonte, """
+const pt = {cena: {haov: 68, vaov: 100, giro: 170}, raios: new Float32Array(321*161)};
+pt.raios.fill(4);
+const emLon = g => {
+  const r = g * Math.PI / 180;
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+};
+console.log(JSON.stringify([emLon(170), emLon(-175), emLon(-160), emLon(0)]));
+""")
+        centro, cruzando, dentro, oposto = saida
+        self.assertEqual(centro, 4, "o centro da cena girada 170 foi recusado")
+        self.assertEqual(cruzando, 4,
+                         "a direcao que cruza a meia-volta foi recusada")
+        self.assertEqual(dentro, 4, "-160 esta a 30 graus do centro e foi recusada")
+        self.assertEqual(oposto, 0, "o lado oposto deveria estar fora")
 
     def test_a_calibracao_corrige_o_angulo_do_chao(self):
         """

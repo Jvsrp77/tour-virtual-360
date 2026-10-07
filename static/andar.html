@@ -408,6 +408,25 @@ function aberturaDa(cena){
   return {lon: h * Math.PI / 180, lat: v * Math.PI / 180};
 }
 
+// Para que lado a cena olha, em graus, dentro do eixo do imovel.
+//
+// O QUE ISTO CONSERTA, visto na tela pelo dono: quatro fotos tiradas de
+// paredes diferentes apareceram empilhadas na MESMA direcao, cada uma na sua
+// posicao — o quarto saiu em pedacos soltos. Faltava o obvio: a malha era
+// sempre montada com o centro da foto apontando para +z, entao nenhuma cena
+// sabia para onde estava virada.
+//
+// Com panorama completo isso passava despercebido, porque o imovel sintetico
+// e renderizado sempre com a mesma orientacao e giro 0 serve para todos. Com
+// foto de verdade nao serve: o zero de cada foto e onde o fotografo estava
+// olhando na hora.
+//
+// Nao confundir com `frente`, que e do IMOVEL e diz onde fica o norte, para a
+// maquete saber a hora do sol. Este e de cada cena.
+function giroDa(cena){
+  return ((cena && cena.giro) || 0) * Math.PI / 180;
+}
+
 function calibrarPeloChao(raios, latMax){
   const amostras = [];
   for (let j = GRADE_A - 6; j <= GRADE_A; j++)
@@ -441,11 +460,12 @@ async function carregarPonto(p){
   const raios = new Float32Array(nv);
 
   const abertura = aberturaDa(p.cena);
+  const giro = giroDa(p.cena);
   let k = 0;
   for (let j = 0; j <= GRADE_A; j++){
     const v = j / GRADE_A, lat = (v - 0.5) * abertura.lat;
     for (let i = 0; i <= GRADE_L; i++){
-      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon;
+      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon + giro;
       // +lat aponta para baixo no equirretangular; no three.js +y e para cima
       direcoes[k*3]   = Math.cos(lat) * Math.sin(lon);
       direcoes[k*3+1] = -Math.sin(lat);
@@ -542,11 +562,12 @@ async function carregarFundo(p){
   const pos = new Float32Array(nv * 3), uvs = new Float32Array(nv * 2);
   const raiosF = new Float32Array(nv);
   const abertura = aberturaDa(p.cena);
+  const giro = giroDa(p.cena);
   let k = 0;
   for (let j = 0; j <= GRADE_A; j++){
     const v = j / GRADE_A, lat = (v - 0.5) * abertura.lat;
     for (let i = 0; i <= GRADE_L; i++){
-      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon;
+      const u = i / GRADE_L, lon = (u - 0.5) * abertura.lon + giro;
       const px = Math.min(prof.largura-1, Math.round(u * prof.largura));
       const py = Math.min(prof.altura-1,  Math.round(v * prof.altura));
       raiosF[k] = raio(prof.dados[py * prof.largura + px]) * p.escalaFundo;
@@ -576,6 +597,10 @@ async function carregarFundo(p){
 }
 
 function limparAntigas(){
+  // Fotos parciais do mesmo ponto formam UMA vista. Descartar qualquer uma
+  // delas abre um buraco preto no meio do comodo — foi assim que a quarta
+  // direcao do quarto do dono sumiu: ela carregava, o limite de tres malhas
+  // chutava alguem, e a vista ficava com um quadrante faltando.
   const vivos = pontos.filter(p => p.malha).sort((a,b) => b.usoEm - a.usoEm);
   vivos.slice(MAX_MALHAS).forEach(p => {
     if (p === ativo || p === misturado) return;
@@ -641,7 +666,11 @@ function raioNaDirecao(pt, dir){
   if (!pt.raios) return Infinity;
   const ab = aberturaDa(pt.cena);
   const lat = Math.asin(Math.max(-1, Math.min(1, -dir.y)));
-  const lon = Math.atan2(dir.x, dir.z);
+  // desfaz o giro para perguntar a FOTO, que nao sabe para onde foi virada.
+  // O atan2 do seno e do cosseno traz o resultado de volta a [-pi, pi]: sem
+  // isso uma cena girada 170 graus acusaria "fora da foto" no proprio centro.
+  const bruto = Math.atan2(dir.x, dir.z) - giroDa(pt.cena);
+  const lon = Math.atan2(Math.sin(bruto), Math.cos(bruto));
   // Fora da calota a foto nao viu NADA. Devolver Infinity aqui liberaria o
   // passo para o que nunca foi fotografado — o visitante atravessaria a borda
   // da foto e sairia no vazio. Zero barra, que e o unico palpite seguro.
