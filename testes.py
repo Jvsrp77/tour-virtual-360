@@ -7575,6 +7575,45 @@ console.log(JSON.stringify([
                          "cena sem vaov deixou de ser tratada como completa")
 
 
+class TestContagemDoAcervo(Base):
+    """
+    O /saude conta IMOVEL, e nao pasta.
+
+    POR QUE ISTO EXISTE. Apagar um imovel nem sempre leva o diretorio junto: a
+    rota de remocao usa shutil.rmtree(..., ignore_errors=True), e o projeto
+    vive dentro do OneDrive, que segura pastas enquanto sincroniza. Sobra o
+    esqueleto — invisivel para o app, porque imovel_existe olha o tour.json.
+
+    So que o /saude contava `len(os.listdir())`. Depois de uma limpeza o
+    acervo tinha 7 imoveis e o /saude anunciava 18. E o numero que alguem le
+    de fora para saber o tamanho do acervo, e ele mentia sem quebrar nada.
+    """
+
+    def test_pasta_vazia_nao_conta_como_imovel(self):
+        """Esqueleto de imovel apagado nao e imovel."""
+        self.conta("dono_acervo")
+        antes = self.app.test_client().get("/saude").get_json()["imoveis"]
+
+        fantasma = os.path.join(aplicacao.PASTA_IMOVEIS, "fantasma00")
+        os.makedirs(os.path.join(fantasma, "scenes"), exist_ok=True)
+        depois = self.app.test_client().get("/saude").get_json()["imoveis"]
+
+        self.assertEqual(depois, antes,
+                         "pasta sem tour.json entrou na contagem do acervo")
+
+    def test_imovel_de_verdade_conta(self):
+        """
+        O contraste, para a regra nao virar "nunca conta nada": imovel com
+        tour.json tem de aparecer.
+        """
+        cli = self.conta("dono_acervo2")
+        antes = self.app.test_client().get("/saude").get_json()["imoveis"]
+        cli.post("/api/imoveis", json={"titulo": "Casa de teste"})
+        depois = self.app.test_client().get("/saude").get_json()["imoveis"]
+        self.assertEqual(depois, antes + 1,
+                         "imovel criado nao apareceu na contagem")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

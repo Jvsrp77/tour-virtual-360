@@ -832,7 +832,13 @@ def pode_ver(imovel_id):
 @app.route("/saude")
 def saude():
     """Usada pelo container e pelo proxy para saber se o processo esta de pe."""
-    return jsonify({"ok": True, "imoveis": len(os.listdir(PASTA_IMOVEIS))
+    # Conta IMOVEL, e nao pasta. Apagar um imovel deixa o diretorio vazio
+    # para tras quando algum arquivo esta travado — o OneDrive segura pastas
+    # enquanto sincroniza, e a propria rota de remocao usa ignore_errors.
+    # Contando pasta, o acervo aparecia com 18 quando tinha 7.
+    return jsonify({"ok": True,
+                    "imoveis": sum(1 for d in os.listdir(PASTA_IMOVEIS)
+                                   if imovel_existe(d))
                     if os.path.isdir(PASTA_IMOVEIS) else 0,
                     "modelos": {"profundidade": profundidade.modelo_disponivel(),
                                 "fundo": fundo.modelo_disponivel()},
