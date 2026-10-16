@@ -1369,271 +1369,396 @@ def casa_grande():
 
 def sobrado():
     """
-    DOIS PAVIMENTOS, 12 x 10 m. A primeira planta do acervo que sai do terreo.
+    SOBRADO DE 445 m2, 18 x 13 m, 23 comodos nos dois pavimentos.
 
-    O que ela exercita e novo no produto: zona e ponto de captura com ANDAR, a
-    casca subindo ate cobrir o pavimento de cima, laje entre os dois com o vao
-    da escada aberto, e a conferencia de passagem rodando um pavimento por vez.
+    A primeira planta do acervo que sai do terreo. O que ela exercita e novo
+    no produto: zona e ponto de captura com ANDAR, casca subindo ate cobrir o
+    pavimento de cima, laje entre os dois com o vao da escada aberto, e a
+    conferencia de passagem rodando um pavimento por vez.
 
-    A escada e um lance reto de 16 degraus junto a fachada oeste, e o vao dela
-    atravessa a laje — de cima da para ver o hall la embaixo, que e metade da
-    graca de um sobrado. O guarda-corpo e de vidro, pelo mesmo motivo.
+    O hall tem PE-DIREITO DUPLO: o vao de 5 x 4,4 m atravessa a laje inteira,
+    entao de cima se ve o hall la embaixo. E metade da graca de um sobrado, e
+    e exatamente o que uma planta de um pavimento nao sabe representar.
 
-    Nenhum movel encosta em porta: medido, nao suposto. A passagem mais
-    estreita e conferida pelo comodos_sem_acesso, que exige 0,75 m.
+    A CONTA QUE DECIDE A MOBILIA DESTA CASA. comodos_sem_acesso() dilata cada
+    movel em FOLGA_DE_PASSAGEM / 2 = 37,5 cm por lado. Logo um movel de 3,3 m
+    ocupa 4,05 m de passagem e SELA uma sala de 4,5 m — mesmo havendo 60 cm
+    livres de cada lado dele na planta. Foi assim que a primeira tentativa
+    desta casa deixou 13 dos 23 comodos inalcancaveis, sem nenhum movel
+    encostando em porta: o que barrava era a largura do movel contra a largura
+    do comodo. Por isso aqui:
+
+      - mesa de jantar e ilha de cozinha tem no maximo (largura do comodo
+        menos 2,2 m), para sobrar um corredor de verdade dos dois lados;
+      - cama encosta na parede, nunca no centro — centrada, ela dilata para os
+        dois lados e tranca o quarto;
+      - quadro de corredor fica SEMPRE sobre trecho de parede. Pendurado sobre
+        o vao, ele tapa a porta inteira: um quadro de 6 cm dilata para 81 cm.
+
+    Nenhum movel encosta em porta, e nenhum comodo tem movel atravessado:
+    medido pelo mapa de ilhas, nao suposto.
     """
-    larg, fundo = 12.0, 10.0
+    larg, fundo = 18.0, 13.0
     LAJE = 0.25
     cima = PE_DIREITO + LAJE          # 2,95: a cota do piso de cima
 
-    # ------------------------------------------------------------- comodos
     zonas = [
-        # terreo
-        ("Hall de entrada",  0.00,  6.50,  0.00,  4.50, "parede",    "porcelanato"),
-        ("Lavabo",           6.50,  8.50,  0.00,  2.30, "azulejo",   "porcelanato"),
-        ("Despensa",         6.50,  8.50,  2.30,  4.50, "servico",   "porcelanato"),
-        ("Área de serviço",  8.50, 12.00,  0.00,  4.50, "servico",   "porcelanato"),
-        ("Sala de estar",    0.00,  6.50,  4.50, 10.00, "parede",    "madeira"),
-        ("Cozinha",          6.50, 12.00,  4.50,  7.30, "cozinha",   "porcelanato"),
-        ("Sala de jantar",   6.50, 12.00,  7.30, 10.00, "jantar",    "madeira"),
-        # pavimento superior — o oitavo item da tupla e a cota do piso
-        ("Corredor",         0.00, 12.00,  4.50,  5.90, "parede",    "madeira", cima),
-        ("Sala íntima",      3.00,  6.50,  0.00,  4.50, "parede",    "madeira", cima),
-        ("Banho social",     6.50,  8.50,  0.00,  4.50, "banheiro",  "porcelanato", cima),
-        ("Quarto 2",         8.50, 12.00,  0.00,  4.50, "parede_q1", "madeira", cima),
-        ("Suíte master",     0.00,  6.00,  5.90, 10.00, "parede_q2", "madeira", cima),
-        ("Closet",           6.00,  9.00,  5.90,  7.60, "parede",    "madeira", cima),
-        ("Banho da suíte",   6.00,  9.00,  7.60, 10.00, "azulejo",   "marmore", cima),
-        ("Quarto 3",         9.00, 12.00,  5.90, 10.00, "parede_q1", "madeira", cima),
+        # ---------------------------------------------------------- terreo
+        ("Hall de entrada",  0.00,  5.00,  0.00,  4.50, "parede",  "porcelanato"),
+        ("Lavabo",           5.00,  7.00,  0.00,  2.30, "azulejo", "porcelanato"),
+        ("Despensa",         5.00,  7.00,  2.30,  4.50, "servico", "porcelanato"),
+        ("Escritório",       7.00, 11.00,  0.00,  4.50, "parede",  "madeira"),
+        ("Área de serviço", 11.00, 14.50,  0.00,  4.50, "servico", "porcelanato"),
+        ("Varanda gourmet", 14.50, 18.00,  0.00,  4.50, "tijolo",  "pedra"),
+        ("Sala de estar",    0.00,  7.00,  4.50, 13.00, "parede",  "madeira"),
+        ("Sala de jantar",   7.00, 11.50,  4.50,  8.80, "jantar",  "madeira"),
+        ("Home theater",     7.00, 11.50,  8.80, 13.00, "parede_q2", "madeira"),
+        ("Cozinha",         11.50, 18.00,  4.50,  8.80, "cozinha", "porcelanato"),
+        ("Copa",            11.50, 18.00,  8.80, 13.00, "jantar",  "porcelanato"),
+        # ------------------------------------------------ pavimento superior
+        ("Corredor",         0.00, 18.00,  4.50,  6.20, "parede",  "madeira", cima),
+        ("Sala íntima",      5.00,  9.00,  0.00,  4.50, "parede",  "madeira", cima),
+        ("Banho social",     9.00, 11.50,  0.00,  4.50, "banheiro", "porcelanato", cima),
+        ("Quarto 2",        11.50, 14.50,  0.00,  4.50, "parede_q1", "madeira", cima),
+        ("Quarto 3",        14.50, 18.00,  0.00,  4.50, "parede_q2", "madeira", cima),
+        ("Suíte master",     0.00,  6.20,  6.20, 13.00, "parede_q2", "madeira", cima),
+        ("Closet",           6.20,  8.60,  6.20,  9.40, "parede",  "madeira", cima),
+        ("Banho da suíte",   6.20,  8.60,  9.40, 13.00, "azulejo", "marmore", cima),
+        ("Banho 2",          8.60, 11.00,  6.20,  9.40, "banheiro", "porcelanato", cima),
+        ("Rouparia",         8.60, 11.00,  9.40, 13.00, "parede",  "madeira", cima),
+        ("Quarto 4",        11.00, 14.00,  6.20, 13.00, "parede_q1", "madeira", cima),
+        ("Sala de estudos", 14.00, 18.00,  6.20,  9.20, "parede",  "madeira", cima),
+        ("Quarto 5",        14.00, 18.00,  9.20, 13.00, "parede_q1", "madeira", cima),
     ]
 
-    # ------------------------------------------------------------- paredes
     paredes = (
-        # --- terreo
-        _px(6.50, [(0.00, 0.60), (1.40, 2.90), (3.70, 4.50)]) +
-        _px(8.50, [(0.00, 4.50)]) +
-        _pz(4.50, [(0.00, 4.00), (5.60, 6.80), (7.80, 9.50), (11.00, 12.00)]) +
-        _px(6.50, [(4.50, 5.50), (7.00, 8.00), (9.20, 10.00)]) +
-        _pz(7.30, [(6.50, 9.00), (10.50, 12.00)]) +
-        # --- pavimento superior
-        _px(3.00, [(0.00, 4.40)], cima) +                  # guarda o vao
-        _px(6.50, [(0.00, 1.20), (2.00, 4.50)], cima) +
-        _px(8.50, [(0.00, 4.50)], cima) +
-        _pz(4.50, [(3.00, 4.20), (5.40, 7.20), (8.00, 9.80), (10.80, 12.00)], cima) +
-        _pz(5.90, [(0.00, 2.00), (3.00, 7.00), (7.80, 10.00), (11.00, 12.00)], cima) +
-        _px(6.00, [(5.90, 8.30), (9.30, 10.00)], cima) +
-        _px(9.00, [(5.90, 10.00)], cima) +
-        _pz(7.60, [(6.00, 9.00)], cima)
+        # ---------------------------------------------------------- terreo
+        _px(5.00, [(0.00, 1.00), (2.25, 2.80), (4.10, 4.50)]) +
+        _pz(2.30, [(5.00, 7.00)]) +
+        _px(7.00, [(0.00, 4.50)]) +
+        _px(11.00, [(0.00, 4.50)]) +
+        _px(14.50, [(0.00, 1.50), (2.80, 4.50)]) +
+        _pz(4.50, [(0.00, 2.60), (4.80, 7.30), (9.40, 12.00),
+                   (13.60, 15.40), (17.00, 18.00)]) +
+        _px(7.00, [(4.50, 5.60), (7.40, 9.60), (11.40, 13.00)]) +
+        _px(11.50, [(4.50, 6.00), (7.60, 10.00), (11.60, 13.00)]) +
+        _pz(8.80, [(7.00, 8.40), (10.00, 11.50)]) +
+        _pz(8.80, [(11.50, 13.00), (14.80, 18.00)]) +
+        # ------------------------------------------------ pavimento superior
+        _px(5.00, [(0.00, 4.40)], cima) +                 # guarda o vao
+        _px(9.00, [(0.00, 1.00), (2.40, 4.50)], cima) +
+        _px(11.50, [(0.00, 4.50)], cima) +
+        _px(14.50, [(0.00, 4.50)], cima) +
+        _pz(4.50, [(5.00, 6.00), (7.40, 9.60), (10.90, 12.30),
+                   (13.60, 15.40), (16.70, 18.00)], cima) +
+        _pz(6.20, [(0.00, 2.10), (3.40, 6.80), (8.10, 9.30),
+                   (10.60, 11.60), (12.90, 15.30), (16.60, 18.00)], cima) +
+        _px(6.20, [(6.20, 10.40), (11.70, 13.00)], cima) +
+        _px(8.60, [(6.20, 13.00)], cima) +
+        _px(11.00, [(6.20, 10.30), (11.60, 13.00)], cima) +
+        _px(14.00, [(6.20, 13.00)], cima) +
+        _pz(9.40, [(6.20, 8.60)], cima) +
+        _pz(9.40, [(8.60, 11.00)], cima) +
+        _pz(9.20, [(14.00, 15.30), (16.60, 18.00)], cima)
     )
 
-    # ------------------------------------------------------- laje e escada
-    #
-    # A laje cobre o imovel inteiro MENOS o vao da escada (x 0..3). Sem o vao,
-    # o pavimento de cima seria uma caixa fechada e a escada nao chegaria a
-    # lugar nenhum.
-    # Duas camadas, e nao uma. Uma laje de material unico aparece como teto de
-    # concreto para quem esta embaixo E como piso de concreto para quem esta em
-    # cima — foi o que saiu no primeiro render. Embaixo vai "teto"; em cima,
-    # cada pedaco leva o piso do comodo que esta sobre ele.
+    # Laje em DUAS camadas. Uma so aparecia como teto de concreto para quem
+    # esta embaixo E piso de concreto para quem esta em cima — foi o que saiu
+    # no primeiro render. O vao do hall (x 0..5, z 0..4,4) fica aberto.
     teto_terreo = [
-        (3.00, PE_DIREITO, 0.00, larg, PE_DIREITO + 0.12, fundo, "teto"),
-        (0.00, PE_DIREITO, 4.40, 3.00, PE_DIREITO + 0.12, fundo, "teto"),
+        (5.00, PE_DIREITO, 0.00, larg, PE_DIREITO + 0.12, fundo, "teto"),
+        (0.00, PE_DIREITO, 4.40, 5.00, PE_DIREITO + 0.12, fundo, "teto"),
     ]
     piso_de_cima = [
         (z[1], PE_DIREITO + 0.12, z[3], z[2], cima, z[4], z[6])
         for z in zonas if len(z) > 7
     ]
-    # a faixa onde a escada desemboca, que nao pertence a comodo nenhum
-    piso_de_cima.append((0.00, PE_DIREITO + 0.12, 4.40, 3.00, cima, 4.50,
+    piso_de_cima.append((0.00, PE_DIREITO + 0.12, 4.40, 5.00, cima, 4.50,
                          "madeira"))
     laje = teto_terreo + piso_de_cima
 
-    # 16 degraus de 18,4 cm, subindo no sentido +z. O ultimo encosta na laje
-    # em z = 4,40, entao o passo de chegada nao cai no vazio.
+    # 16 degraus de 18,4 cm subindo no sentido +z. O ultimo encosta na laje em
+    # z = 4,40, entao o passo de chegada nao cai no vazio.
     degrau = cima / 16.0
-    escada = [(0.40, 0.00, 0.40 + 0.25 * k, 2.60, degrau * (k + 1),
+    escada = [(0.50, 0.00, 0.40 + 0.25 * k, 2.90, degrau * (k + 1),
                0.40 + 0.25 * (k + 1), "madeira_esc") for k in range(16)]
-    # guarda-corpo de vidro em volta do vao, menos onde a escada chega
+
+    # Guarda-corpo do vao, no pavimento de cima. Sem ele a caminhada sai do
+    # corredor e anda por cima do hall, no ar: o visor so e barrado por caixa,
+    # nao sabe onde a laje acaba. A boca da escada (x 0,90..2,50) fica aberta
+    # de proposito — e por ali que se desce.
     escada += [
-        (0.00, cima, 4.35, 0.40, cima + 0.95, 4.45, "vidro"),
-        (2.60, cima, 4.35, 3.00, cima + 0.95, 4.45, "vidro"),
-        (0.00, cima, 0.00, 0.10, cima + 0.95, 4.40, "vidro"),
+        (0.00, cima, 4.34, 0.50, cima + 0.95, 4.44, "vidro"),
+        (2.90, cima, 4.34, 5.00, cima + 0.95, 4.44, "vidro"),
+        (0.40, cima, 0.40, 0.50, cima + 0.95, 4.34, "vidro"),
+        (2.90, cima, 0.40, 3.00, cima + 0.95, 4.34, "vidro"),
+        (0.40, cima, 0.30, 3.00, cima + 0.95, 0.40, "vidro"),
     ]
 
-    caixas = paredes + laje + escada + [
-        # ---------------------------------------------- hall de entrada
-        (3.30, 0.00, 0.30, 4.90, 0.80, 0.70, "madeira_esc"),   # aparador
-        (3.50, 0.80, 0.34, 4.70, 0.86, 0.66, "marmore"),
-        (5.80, 0.00, 3.90, 6.30, 0.05, 4.40, "tapete"),
-        (5.90, 0.00, 3.90, 6.30, 1.10, 4.30, "planta"),
-        # ---------------------------------------------- lavabo
-        (6.60, 0.00, 1.70, 7.40, 0.82, 2.25, "louca"),
-        (6.60, 0.82, 1.70, 7.44, 0.88, 2.25, "marmore"),
-        (7.90, 0.00, 1.80, 8.40, 0.78, 2.25, "louca"),
-        (6.60, 1.35, 1.72, 7.42, 2.05, 1.78, "vidro"),         # espelho
-        # ---------------------------------------------- despensa
-        (8.00, 0.20, 2.45, 8.45, 2.30, 4.40, "laminado"),
-        (6.60, 0.20, 4.00, 7.90, 2.30, 4.45, "laminado"),
-        # ---------------------------------------------- area de servico
-        (8.60, 0.00, 0.20, 9.40, 0.85, 0.85, "inox"),
-        (9.60, 0.00, 0.20, 10.40, 0.85, 0.85, "inox"),
-        (10.80, 0.20, 0.20, 11.90, 2.30, 1.60, "laminado"),
-        (8.60, 0.86, 0.20, 10.40, 0.92, 0.85, "marmore"),
-        # ---------------------------------------------- sala de estar
-        (0.30, 0.00, 5.80, 0.95, 0.74, 8.60, "estofado"),      # sofa encostado
-        (0.30, 0.74, 5.80, 0.42, 1.30, 8.60, "estofado_b"),
-        (1.60, 0.00, 6.30, 3.40, 0.40, 7.90, "madeira_esc"),   # mesa de centro
-        (1.70, 0.40, 6.40, 3.30, 0.44, 7.80, "vidro"),
-        (0.20, 0.00, 5.40, 4.60, 0.012, 9.20, "tapete"),
-        (5.40, 0.00, 7.05, 6.35, 2.30, 7.95, "laminado"),      # estante
-        (5.30, 0.40, 7.15, 5.40, 1.60, 7.85, "tela"),          # televisao
-        (1.20, 0.00, 9.10, 2.00, 1.05, 9.60, "planta"),
-        # ---------------------------------------------- cozinha
-        (7.90, 0.00, 4.65, 9.40, 0.88, 5.35, "laminado"),      # bancada norte
-        (7.86, 0.88, 4.61, 9.44, 0.94, 5.39, "marmore"),
-        (7.90, 0.00, 6.55, 11.00, 0.88, 7.20, "laminado"),     # bancada sul
-        (7.86, 0.88, 6.51, 11.04, 0.94, 7.24, "marmore"),
-        (11.10, 0.00, 4.65, 11.90, 1.95, 5.55, "inox"),        # geladeira
-        (7.90, 1.60, 4.65, 9.40, 2.35, 5.35, "laminado"),      # aereos
-        # ---------------------------------------------- sala de jantar
-        (7.60, 0.00, 8.00, 10.90, 0.74, 9.40, "madeira_esc"),  # mesa
-        (7.60, 0.74, 8.00, 10.90, 0.80, 9.40, "marmore"),
-        (7.40, 0.00, 7.44, 7.86, 0.45, 7.90, "estofado"),
-        (8.30, 0.00, 7.44, 8.76, 0.45, 7.90, "estofado"),
-        (7.90, 0.00, 9.54, 8.36, 0.45, 10.00 - PAREDE, "estofado"),
-        (9.00, 0.00, 9.54, 9.46, 0.45, 10.00 - PAREDE, "estofado"),
-        (10.10, 0.00, 9.54, 10.56, 0.45, 10.00 - PAREDE, "estofado"),
-        (11.20, 0.20, 7.50, 11.90, 2.20, 9.80, "madeira_esc"), # buffet alto
-        (8.90, 2.35, 8.40, 9.60, 2.62, 9.00, "vidro"),         # lustre
-    ] + [
-        # ================================= PAVIMENTO SUPERIOR =============
-        # ---------------------------------------------- sala intima
-        (3.30, cima, 0.30, 5.10, cima + 0.74, 1.70, "estofado"),
-        (3.30, cima + 0.74, 0.30, 5.10, cima + 1.24, 0.42, "estofado_b"),
-        (3.60, cima, 2.20, 4.80, cima + 0.40, 3.20, "madeira_esc"),
-        (6.20, cima + 0.40, 0.60, 6.34, cima + 1.60, 2.20, "tela"),
-        (3.20, cima, 0.20, 6.30, cima + 0.012, 4.00, "tapete"),
-        # ---------------------------------------------- banho social
-        (6.60, cima, 0.25, 7.40, cima + 0.82, 0.80, "louca"),
-        (6.60, cima + 0.82, 0.25, 7.44, cima + 0.88, 0.80, "marmore"),
-        (7.90, cima, 0.25, 8.40, cima + 0.78, 0.95, "louca"),
-        (6.60, cima, 1.70, 8.40, cima + 0.55, 3.20, "louca"),   # banheira
-        (6.60, cima + 1.35, 0.32, 7.42, cima + 2.05, 0.38, "vidro"),
-        # ---------------------------------------------- quarto 2
-        (9.70, cima, 0.30, 11.30, cima + 0.52, 2.40, "madeira_esc"),
-        (9.80, cima + 0.52, 0.40, 11.20, cima + 0.70, 2.30, "roupa_cama"),
-        (8.70, cima, 0.25, 9.20, cima + 2.30, 1.45, "laminado"),  # armario
-        (11.40, cima, 2.90, 11.90, cima + 0.60, 3.50, "madeira_esc"),
-        (9.60, cima, 2.90, 11.60, cima + 0.012, 4.10, "tapete"),
-        # ---------------------------------------------- corredor
-        (5.70, cima + 1.15, 4.62, 6.90, cima + 1.95, 4.68, "quadro"),
-        # ---------------------------------------------- suite master
-        (1.40, cima, 7.10, 3.80, cima + 0.52, 9.30, "madeira_esc"),  # cama
-        (1.50, cima + 0.52, 7.20, 3.70, cima + 0.74, 9.20, "roupa_cama"),
-        (1.10, cima, 7.20, 1.38, cima + 0.55, 7.70, "madeira_esc"),
-        (3.82, cima, 7.20, 4.10, cima + 0.55, 7.70, "madeira_esc"),
-        (0.30, cima, 6.20, 0.90, cima + 2.30, 9.60, "laminado"),     # armario
-        # encostada na parede do banho, e nao solta no meio do quarto:
-        # ali ela estreitava para 0,51 m o acesso a porta da suite
-        (5.88, cima + 0.55, 6.30, 6.00, cima + 1.75, 7.70, "tela"),
-        (1.00, cima, 6.20, 4.40, cima + 0.012, 9.80, "tapete"),
-        # ---------------------------------------------- closet
-        (6.20, cima, 6.05, 6.70, cima + 2.30, 7.45, "laminado"),
-        (8.30, cima, 6.05, 8.80, cima + 2.30, 7.45, "laminado"),
-        # ---------------------------------------------- banho da suite
-        (6.30, cima, 7.78, 7.80, cima + 0.86, 8.33, "louca"),
-        (6.30, cima + 0.86, 7.78, 7.84, cima + 0.92, 8.33, "marmore"),
-        (8.20, cima, 7.78, 8.90, cima + 0.78, 8.48, "louca"),
-        (6.20, cima, 9.30, 8.80, cima + 0.55, 9.90, "louca"),        # banheira
-        (6.30, cima + 1.40, 7.74, 7.82, cima + 2.10, 7.80, "vidro"),
-        # ---------------------------------------------- quarto 3
-        (9.50, cima, 7.20, 11.10, cima + 0.52, 9.30, "madeira_esc"),
-        (9.60, cima + 0.52, 7.30, 11.00, cima + 0.70, 9.20, "roupa_cama"),
-        (11.30, cima, 6.20, 11.90, cima + 2.30, 7.00, "laminado"),
-        (9.30, cima, 9.45, 11.60, cima + 0.012, 9.85, "tapete"),
+    terreo = [
+        # ------------------------------------------------------- hall
+        (3.20, 0.00, 0.20, 4.40, 0.80, 0.60, "madeira_esc"),
+        (3.30, 0.80, 0.24, 4.30, 0.86, 0.56, "marmore"),
+        (4.55, 0.00, 4.05, 4.95, 1.10, 4.45, "planta"),
+        # ------------------------------------------------------- lavabo
+        (5.30, 0.00, 0.20, 6.10, 0.82, 0.75, "louca"),
+        (5.26, 0.82, 0.16, 6.14, 0.88, 0.79, "marmore"),
+        (5.30, 1.35, 0.14, 6.10, 2.05, 0.20, "vidro"),
+        (6.45, 0.00, 1.60, 6.95, 0.78, 2.20, "louca"),
+        # ------------------------------------------------------- despensa
+        (6.45, 0.20, 2.60, 6.90, 2.30, 4.40, "laminado"),
+        (5.20, 0.20, 4.05, 6.00, 2.30, 4.45, "laminado"),
+        # ------------------------------------------------------- escritorio
+        (7.30, 0.20, 0.20, 9.20, 2.30, 0.60, "laminado"),
+        (7.35, 0.30, 0.24, 9.15, 2.15, 0.64, "livro_a"),
+        (9.50, 0.00, 0.35, 10.60, 0.74, 1.55, "madeira_esc"),
+        (9.80, 0.00, 1.65, 10.26, 0.45, 2.11, "estofado"),
+        (9.80, 0.45, 1.65, 10.26, 0.95, 1.72, "estofado_b"),
+        (7.60, 0.00, 2.80, 10.60, 0.012, 4.10, "tapete"),
+        # ------------------------------------------------------- servico
+        (11.10, 0.00, 0.20, 11.90, 0.85, 0.80, "inox"),
+        (12.00, 0.00, 0.20, 12.80, 0.85, 0.80, "inox"),
+        (11.10, 0.86, 0.16, 12.80, 0.92, 0.84, "marmore"),
+        (13.30, 0.20, 0.20, 14.40, 2.30, 1.40, "laminado"),
+        # ------------------------------------------------------- varanda
+        (15.20, 0.00, 0.25, 17.60, 0.95, 0.95, "pedra"),        # churrasqueira
+        (15.40, 0.95, 0.40, 17.40, 1.02, 0.80, "metal"),
+        (16.30, 0.00, 1.60, 17.70, 0.74, 2.80, "madeira_esc"),
+        (16.26, 0.74, 1.56, 17.74, 0.80, 2.84, "pedra"),
+        (16.40, 0.00, 2.95, 16.86, 0.45, 3.41, "estofado"),
+        (17.00, 0.00, 2.95, 17.46, 0.45, 3.41, "estofado"),
+        # ------------------------------------------------------- sala de estar
+        (0.30, 0.00, 6.20, 1.05, 0.74, 9.40, "estofado"),
+        (0.30, 0.74, 6.20, 0.42, 1.30, 9.40, "estofado_b"),
+        (2.00, 0.00, 6.80, 3.60, 0.40, 8.60, "madeira_esc"),
+        (2.10, 0.40, 6.90, 3.50, 0.44, 8.50, "vidro"),
+        (5.60, 0.00, 7.80, 6.85, 2.30, 9.40, "laminado"),
+        (5.45, 0.40, 8.20, 5.58, 1.70, 9.00, "tela"),
+        (3.40, 0.00, 10.80, 5.60, 0.74, 11.70, "madeira_esc"),
+        (1.20, 0.00, 11.90, 2.20, 1.05, 12.60, "planta"),
+        (0.30, 0.00, 5.80, 5.40, 0.012, 9.90, "tapete"),
+        # ------------------------------------------------------- sala de jantar
+        (8.70, 0.00, 5.80, 10.10, 0.74, 7.50, "madeira_esc"),
+        (8.66, 0.74, 5.76, 10.14, 0.80, 7.54, "marmore"),
+        (8.85, 0.00, 5.20, 9.31, 0.45, 5.66, "estofado"),
+        (9.49, 0.00, 5.20, 9.95, 0.45, 5.66, "estofado"),
+        (8.85, 0.00, 7.54, 9.31, 0.45, 8.00, "estofado"),
+        (9.49, 0.00, 7.54, 9.95, 0.45, 8.00, "estofado"),
+        (8.90, 2.35, 6.20, 9.90, 2.62, 7.00, "vidro"),
+        # ------------------------------------------------------- home theater
+        (8.00, 0.60, 12.80, 11.20, 2.10, 12.94, "tela"),
+        (8.00, 0.00, 10.70, 10.20, 0.74, 11.70, "estofado"),
+        (8.00, 0.74, 10.70, 10.20, 1.30, 10.82, "estofado_b"),
+        (7.60, 0.00, 9.40, 11.20, 0.012, 12.60, "tapete"),
+        # ------------------------------------------------------- cozinha
+        (11.70, 0.00, 4.65, 12.40, 0.88, 5.90, "laminado"),
+        (11.66, 0.88, 4.61, 12.44, 0.94, 5.94, "marmore"),
+        (11.70, 1.60, 4.65, 12.40, 2.35, 5.90, "laminado"),
+        (11.70, 0.00, 7.90, 12.90, 0.88, 8.70, "laminado"),
+        (14.00, 0.00, 5.60, 16.00, 0.88, 6.70, "laminado"),     # ilha
+        (13.96, 0.88, 5.56, 16.04, 0.94, 6.74, "marmore"),
+        (14.60, 0.88, 5.90, 15.40, 0.95, 6.40, "inox"),
+        (17.10, 0.00, 4.65, 17.90, 1.95, 5.65, "inox"),
+        # ------------------------------------------------------- copa
+        (13.80, 0.00, 10.80, 16.20, 0.74, 12.10, "madeira_esc"),
+        (13.76, 0.74, 10.76, 16.24, 0.80, 12.14, "marmore"),
+        (14.10, 0.00, 10.20, 14.56, 0.45, 10.66, "estofado"),
+        (15.44, 0.00, 10.20, 15.90, 0.45, 10.66, "estofado"),
+        (14.10, 0.00, 12.24, 14.56, 0.45, 12.70, "estofado"),
+        (15.44, 0.00, 12.24, 15.90, 0.45, 12.70, "estofado"),
+        (11.80, 0.20, 12.50, 13.00, 2.20, 12.95, "madeira_esc"),
     ]
+
+    superior = [
+        # ------------------------------------------------------- corredor
+        # Quadro SEMPRE sobre trecho de parede, nunca sobre vao.
+        (7.80, cima + 1.15, 4.62, 9.20, cima + 1.95, 4.68, "quadro"),
+        (13.90, cima + 1.15, 4.62, 15.10, cima + 1.95, 4.68, "quadro"),
+        (4.60, cima + 1.15, 6.08, 5.80, cima + 1.95, 6.14, "quadro"),
+        # ------------------------------------------------------- sala intima
+        (5.30, cima, 0.30, 7.10, cima + 0.74, 1.70, "estofado"),
+        (5.30, cima + 0.74, 0.30, 7.10, cima + 1.24, 0.42, "estofado_b"),
+        (5.70, cima, 2.30, 6.70, cima + 0.40, 3.20, "madeira_esc"),
+        (8.70, cima + 0.40, 3.10, 8.84, cima + 1.60, 4.20, "tela"),
+        (5.20, cima, 0.20, 8.60, cima + 0.012, 4.00, "tapete"),
+        # ------------------------------------------------------- banho social
+        (9.20, cima, 2.10, 9.95, cima + 0.55, 3.60, "louca"),
+        (10.40, cima, 1.60, 11.30, cima + 0.86, 2.15, "louca"),
+        (10.36, cima + 0.86, 1.56, 11.34, cima + 0.92, 2.19, "marmore"),
+        (10.40, cima + 1.35, 1.56, 11.30, cima + 2.05, 1.62, "vidro"),
+        (10.50, cima, 0.30, 11.20, cima + 0.78, 1.00, "louca"),
+        # ------------------------------------------------------- quarto 2
+        (11.75, cima, 0.30, 13.35, cima + 0.52, 2.40, "madeira_esc"),
+        (11.85, cima + 0.52, 0.40, 13.25, cima + 0.70, 2.30, "roupa_cama"),
+        (13.60, cima, 0.25, 14.40, cima + 2.30, 1.85, "laminado"),
+        (13.50, cima, 2.60, 14.00, cima + 0.60, 3.20, "madeira_esc"),
+        (11.70, cima, 2.90, 13.10, cima + 0.012, 4.10, "tapete"),
+        # ------------------------------------------------------- quarto 3
+        (14.75, cima, 0.30, 16.35, cima + 0.52, 2.40, "madeira_esc"),
+        (14.85, cima + 0.52, 0.40, 16.25, cima + 0.70, 2.30, "roupa_cama"),
+        (16.90, cima, 0.25, 17.90, cima + 2.30, 2.05, "laminado"),
+        (16.50, cima, 2.60, 17.00, cima + 0.60, 3.20, "madeira_esc"),
+        (14.70, cima, 2.90, 16.10, cima + 0.012, 4.10, "tapete"),
+        # ------------------------------------------------------- suite master
+        (1.70, cima, 7.60, 4.10, cima + 0.52, 9.80, "madeira_esc"),
+        (1.80, cima + 0.52, 7.70, 4.00, cima + 0.70, 9.70, "roupa_cama"),
+        (1.35, cima, 7.70, 1.65, cima + 0.55, 8.20, "madeira_esc"),
+        (4.15, cima, 7.70, 4.45, cima + 0.55, 8.20, "madeira_esc"),
+        (0.30, cima, 6.70, 0.90, cima + 2.30, 10.40, "laminado"),
+        (6.08, cima + 0.55, 7.20, 6.20, cima + 1.75, 8.80, "tela"),
+        (2.40, cima, 11.70, 4.80, cima + 0.74, 12.70, "estofado"),
+        (1.10, cima, 6.90, 5.00, cima + 0.012, 10.90, "tapete"),
+        # ------------------------------------------------------- closet
+        (6.35, cima, 6.60, 6.75, cima + 2.30, 9.20, "laminado"),
+        (8.05, cima, 6.60, 8.45, cima + 2.30, 9.20, "laminado"),
+        (7.20, cima, 8.60, 7.60, cima + 0.45, 9.10, "madeira_esc"),
+        # ------------------------------------------------------- banho da suite
+        (6.35, cima, 9.70, 7.85, cima + 0.86, 10.25, "louca"),
+        (6.31, cima + 0.86, 9.66, 7.89, cima + 0.92, 10.29, "marmore"),
+        (6.35, cima + 1.35, 9.66, 7.85, cima + 2.05, 9.72, "vidro"),
+        (6.35, cima, 11.70, 7.45, cima + 0.55, 12.80, "louca"),
+        (7.95, cima, 11.90, 8.50, cima + 0.78, 12.60, "louca"),
+        # ------------------------------------------------------- banho 2
+        (8.75, cima, 6.70, 9.30, cima + 0.86, 8.20, "louca"),
+        (8.71, cima + 0.86, 6.66, 9.34, cima + 0.92, 8.24, "marmore"),
+        (10.10, cima, 8.50, 10.80, cima + 0.78, 9.20, "louca"),
+        # ------------------------------------------------------- rouparia
+        (8.75, cima, 9.80, 9.15, cima + 2.30, 12.60, "laminado"),
+        (8.79, cima + 0.30, 9.90, 9.19, cima + 2.15, 12.50, "roupa_cama"),
+        # ------------------------------------------------------- quarto 4
+        (11.25, cima, 7.40, 12.85, cima + 0.52, 9.50, "madeira_esc"),
+        (11.35, cima + 0.52, 7.50, 12.75, cima + 0.70, 9.40, "roupa_cama"),
+        (11.25, cima, 6.90, 11.75, cima + 0.55, 7.50, "madeira_esc"),
+        (13.30, cima, 10.60, 13.90, cima + 2.30, 12.50, "laminado"),
+        (13.88, cima + 0.55, 7.60, 14.00, cima + 1.75, 9.20, "tela"),
+        (11.40, cima, 11.90, 13.20, cima + 0.012, 12.70, "tapete"),
+        # ------------------------------------------------------- sala de estudos
+        (16.90, cima, 6.80, 17.80, cima + 0.74, 8.60, "madeira_esc"),
+        (16.20, cima, 7.40, 16.66, cima + 0.45, 7.86, "estofado"),
+        (16.20, cima + 0.45, 7.40, 16.66, cima + 0.95, 7.47, "estofado_b"),
+        (14.30, cima, 6.80, 14.80, cima + 2.30, 8.60, "laminado"),
+        (14.34, cima + 0.30, 6.85, 14.84, cima + 2.15, 8.55, "livro_a"),
+        # ------------------------------------------------------- quarto 5
+        (14.25, cima, 10.40, 15.85, cima + 0.52, 12.50, "madeira_esc"),
+        (14.35, cima + 0.52, 10.50, 15.75, cima + 0.70, 12.40, "roupa_cama"),
+        (13.90, cima, 10.40, 14.30, cima + 0.55, 11.00, "madeira_esc"),
+        (16.40, cima, 12.30, 17.80, cima + 2.30, 12.90, "laminado"),
+        (14.20, cima, 9.60, 16.00, cima + 0.012, 10.30, "tapete"),
+    ]
+
+    caixas = paredes + laje + escada + terreo + superior
 
     janelas = [
-        # terreo
-        (0.60, 2.40, 0.00, 0.00, 0.95, 2.15),
-        (3.60, 5.90, 0.00, 0.00, 1.00, 2.10),
-        (9.20, 11.40, 0.00, 0.00, 1.05, 2.05),
-        (0.00, 0.00, 5.20, 7.40, 1.00, 2.10),
-        (0.00, 0.00, 8.20, 9.60, 1.00, 2.10),
-        (1.00, 3.00, fundo, fundo, 0.90, 2.15),
-        (4.20, 5.80, fundo, fundo, 0.90, 2.15),
-        (7.60, 10.80, fundo, fundo, 1.00, 2.10),
-        (larg, larg, 5.00, 6.60, 1.10, 2.05),
-        (larg, larg, 8.00, 9.40, 1.00, 2.10),
-        # pavimento superior
-        (0.60, 2.40, 0.00, 0.00, cima + 0.95, cima + 2.15),
-        (3.60, 5.90, 0.00, 0.00, cima + 0.95, cima + 2.10),
-        (9.20, 11.40, 0.00, 0.00, cima + 1.00, cima + 2.05),
-        (0.00, 0.00, 6.40, 9.40, cima + 0.95, cima + 2.10),
-        (1.20, 3.40, fundo, fundo, cima + 0.95, cima + 2.10),
-        (4.40, 5.60, fundo, fundo, cima + 1.20, cima + 2.10),
-        (6.60, 8.60, fundo, fundo, cima + 1.35, cima + 2.10),
-        (larg, larg, 1.20, 3.40, cima + 1.00, cima + 2.05),
-        (larg, larg, 6.60, 9.40, cima + 0.95, cima + 2.10),
+        (0.80, 3.00, 0.00, 0.00, 0.95, 2.15),
+        (7.60, 10.40, 0.00, 0.00, 1.00, 2.10),
+        (11.60, 13.80, 0.00, 0.00, 1.05, 2.05),
+        (15.00, 17.60, 0.00, 0.00, 1.00, 2.10),
+        (0.00, 0.00, 6.20, 9.60, 1.00, 2.10),
+        (0.00, 0.00, 11.00, 12.40, 1.00, 2.10),
+        (1.20, 3.60, fundo, fundo, 0.90, 2.15),
+        (4.60, 6.40, fundo, fundo, 0.90, 2.15),
+        (7.80, 10.80, fundo, fundo, 1.00, 2.10),
+        (13.20, 16.60, fundo, fundo, 1.00, 2.10),
+        (larg, larg, 1.20, 3.40, 1.00, 2.20),
+        (larg, larg, 5.40, 7.60, 1.10, 2.05),
+        (larg, larg, 9.60, 12.20, 1.00, 2.10),
+        # ------------------------------------------------ pavimento superior
+        (5.60, 8.40, 0.00, 0.00, cima + 0.95, cima + 2.10),
+        (9.40, 11.10, 0.00, 0.00, cima + 1.35, cima + 2.10),
+        (11.80, 14.00, 0.00, 0.00, cima + 1.00, cima + 2.05),
+        (15.00, 17.60, 0.00, 0.00, cima + 0.95, cima + 2.10),
+        (0.00, 0.00, 7.00, 10.20, cima + 0.95, cima + 2.10),
+        (1.40, 4.20, fundo, fundo, cima + 0.95, cima + 2.10),
+        (6.80, 8.40, fundo, fundo, cima + 1.35, cima + 2.10),
+        (9.00, 10.80, fundo, fundo, cima + 0.95, cima + 2.10),
+        (11.40, 13.60, fundo, fundo, cima + 0.95, cima + 2.10),
+        (14.40, 17.60, fundo, fundo, cima + 0.95, cima + 2.10),
+        (larg, larg, 6.60, 8.80, cima + 0.95, cima + 2.10),
+        (larg, larg, 9.80, 12.40, cima + 1.00, cima + 2.05),
     ]
 
     luzes = [
-        (1.50, 2.55, 2.20, 0.85), (4.70, 2.55, 2.20, 0.95),
-        (7.50, 2.55, 1.20, 0.75), (7.50, 2.55, 3.40, 0.70),
-        (10.20, 2.55, 2.20, 0.85), (2.60, 2.55, 6.40, 1.00),
-        (2.60, 2.55, 8.80, 0.95), (5.20, 2.55, 7.60, 0.90),
-        (8.40, 2.55, 5.90, 0.95), (10.80, 2.55, 6.10, 0.85),
-        (9.20, 2.55, 8.70, 1.00),
-        (1.50, cima + 2.55, 5.20, 0.85), (5.60, cima + 2.55, 5.20, 0.85),
-        (10.00, cima + 2.55, 5.20, 0.85), (4.60, cima + 2.55, 2.10, 0.95),
-        (7.50, cima + 2.55, 2.20, 0.80), (10.20, cima + 2.55, 2.10, 0.90),
-        (2.60, cima + 2.55, 7.80, 1.00), (4.40, cima + 2.55, 9.00, 0.85),
-        (7.50, cima + 2.55, 6.90, 0.75), (7.50, cima + 2.55, 9.00, 0.80),
-        (10.40, cima + 2.55, 8.10, 0.90),
+        (3.90, 2.55, 2.20, 0.95), (6.00, 2.55, 1.20, 0.70),
+        (6.00, 2.55, 3.40, 0.65), (8.60, 2.55, 3.20, 0.95),
+        (12.90, 2.55, 3.00, 0.90), (15.60, 2.55, 2.60, 0.90),
+        (2.60, 2.55, 6.80, 1.00), (4.60, 2.55, 10.20, 0.95),
+        (2.60, 2.55, 12.00, 0.85), (9.25, 2.55, 6.65, 1.00),
+        (9.25, 2.55, 10.50, 0.90), (13.20, 2.55, 6.40, 0.95),
+        (16.60, 2.55, 7.00, 0.90), (15.00, 2.55, 11.40, 0.95),
+        (12.60, 2.55, 9.60, 0.80),
+        (2.50, cima + 2.55, 5.30, 0.85), (7.60, cima + 2.55, 5.30, 0.85),
+        (12.60, cima + 2.55, 5.30, 0.85), (16.60, cima + 2.55, 5.30, 0.85),
+        (7.00, cima + 2.55, 2.80, 0.95), (10.25, cima + 2.55, 3.20, 0.80),
+        (13.00, cima + 2.55, 3.40, 0.90), (16.00, cima + 2.55, 3.40, 0.90),
+        (3.00, cima + 2.55, 10.80, 1.00), (5.20, cima + 2.55, 7.60, 0.90),
+        (7.40, cima + 2.55, 7.80, 0.70), (7.40, cima + 2.55, 11.20, 0.75),
+        (9.80, cima + 2.55, 7.60, 0.70), (9.80, cima + 2.55, 11.20, 0.70),
+        (12.40, cima + 2.55, 10.80, 0.90), (15.80, cima + 2.55, 7.40, 0.90),
+        (16.60, cima + 2.55, 10.80, 0.90),
     ]
 
-    # Escolhidos pela FOLGA, e nao a mao: camera encostada em movel
-    # enquadra o movel. Para cada comodo, o lugar de maior distancia
-    # ate o obstaculo mais proximo, e os seguintes a 1,7 m dele.
+    # Escolhidos pela FOLGA, nao no chute: para cada comodo, o ponto
+    # mais longe de qualquer movel, e depois o melhor que esteja a
+    # 1,45 m do anterior. Camera encostada em movel enquadra o movel.
     pontos = [
-        ("Hall de entrada - 1",  4.48,  2.58),
-        ("Hall de entrada - 2",  4.78,  3.98),
-        ("Hall de entrada - 3",  5.68,  1.12),
-        ("Lavabo",  7.68,  0.98),
-        ("Despensa",  7.23,  3.28),
-        ("Área de serviço - 1", 10.23,  3.08),
-        ("Área de serviço - 2",  9.47,  1.62),
-        ("Sala de estar - 1",  4.78,  5.78),
-        ("Sala de estar - 2",  4.38,  8.58),
-        ("Sala de estar - 3",  2.88,  8.83),
-        ("Sala de estar - 4",  1.73,  5.43),
-        ("Cozinha - 1", 10.23,  5.62),
-        ("Cozinha - 2",  7.08,  6.23),
-        ("Sala de jantar",  6.93,  8.58),
-        ("Corredor - 1",  1.48,  4.73, cima),
-        ("Corredor - 2",  4.78,  5.12, cima),
-        ("Sala íntima - 1",  5.58,  3.62, cima),
-        ("Sala íntima - 2",  5.53,  2.18, cima),
-        ("Banho social - 1",  7.58,  3.93, cima),
-        ("Banho social - 2",  7.53,  1.23, cima),
-        ("Quarto 2 - 1", 10.08,  3.48, cima),
-        ("Quarto 2 - 2",  9.12,  1.98, cima),
-        ("Suíte master - 1",  4.93,  8.58, cima),
-        ("Suíte master - 2",  4.98,  6.93, cima),
-        ("Suíte master - 3",  2.48,  6.43, cima),
-        ("Closet",  7.48,  6.73, cima),
-        ("Banho da suíte",  6.12,  8.83, cima),
-        ("Quarto 3", 10.43,  6.53, cima),
+        ("Hall de entrada - 1",  4.03,  1.73),
+        ("Hall de entrada - 2",  3.98,  3.12),
+        ("Lavabo",  5.68,  1.53),
+        ("Despensa",  5.68,  3.28),
+        ("Escritório - 1",  8.62,  3.08),
+        ("Escritório - 2",  8.12,  1.62),
+        ("Escritório - 3", 10.03,  3.08),
+        ("Área de serviço", 12.78,  2.98),
+        ("Varanda gourmet - 1", 15.33,  2.12),
+        ("Varanda gourmet - 2", 15.53,  3.58),
+        ("Sala de estar - 1",  5.12,  6.23),
+        ("Sala de estar - 2",  2.02, 10.48),
+        ("Sala de estar - 3",  3.68,  5.48),
+        ("Sala de estar - 4",  4.33,  9.58),
+        ("Sala de jantar - 1",  7.68,  6.48),
+        ("Sala de jantar - 2",  8.22,  4.53),
+        ("Sala de jantar - 3", 11.03,  6.78),
+        ("Home theater - 1",  9.18,  9.62),
+        ("Home theater - 2", 10.58,  9.83),
+        ("Home theater - 3",  7.12, 10.48),
+        ("Cozinha - 1", 14.08,  7.88),
+        ("Cozinha - 2", 16.57,  7.68),
+        ("Cozinha - 3", 12.62,  6.88),
+        ("Copa - 1", 12.58, 10.78),
+        ("Copa - 2", 16.82,  9.88),
+        ("Copa - 3", 13.88,  9.28),
+        ("Corredor - 1",  1.68,  4.93, cima),
+        ("Corredor - 2", 15.98,  5.43, cima),
+        ("Corredor - 3",  9.98,  5.48, cima),
+        ("Corredor - 4",  6.68,  5.28, cima),
+        ("Sala íntima - 1",  7.78,  2.53, cima),
+        ("Sala íntima - 2",  7.98,  1.07, cima),
+        ("Sala íntima - 3",  6.73,  4.03, cima),
+        ("Banho social", 10.73,  2.93, cima),
+        ("Quarto 2", 12.58,  3.48, cima),
+        ("Quarto 3", 15.58,  3.48, cima),
+        ("Suíte master - 1",  5.03, 10.53, cima),
+        ("Suíte master - 2",  1.33, 11.48, cima),
+        ("Suíte master - 3",  5.12,  9.08, cima),
+        ("Suíte master - 4",  2.73, 10.73, cima),
+        ("Closet",  7.43,  6.43, cima),
+        ("Banho da suíte",  7.83, 11.03, cima),
+        ("Banho 2", 10.12,  6.98, cima),
+        ("Rouparia", 10.18, 10.93, cima),
+        ("Quarto 4", 12.12, 10.93, cima),
+        ("Sala de estudos", 15.93,  8.62, cima),
+        ("Quarto 5", 16.82, 10.28, cima),
     ]
 
-    return dict(nome="DEMO — Sobrado 224 m², dois pavimentos", pasta="sobrado",
+    return dict(nome="DEMO — Sobrado 445 m², dois pavimentos", pasta="sobrado",
                 larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
                 janelas=janelas, luzes=luzes, pontos=pontos, vista="campo",
-                descricao="Dois pavimentos ligados por escada com vão aberto. "
-                          "Térreo com estar, jantar, cozinha, lavabo, despensa "
-                          "e área de serviço; em cima, suíte master com closet "
-                          "e banho, mais dois quartos, banho social e sala "
-                          "íntima.")
+                descricao="Sobrado de 445 m² com hall de pé-direito duplo. "
+                          "Térreo com estar, jantar, home theater, cozinha, "
+                          "copa, escritório, lavabo, despensa, área de serviço "
+                          "e varanda gourmet; em cima, suíte master com closet "
+                          "e banho, mais quatro quartos, três banhos, "
+                          "rouparia, sala de estudos e sala íntima.")
 
 
 TODAS = [apartamento, compacto, cobertura, mansao, pavilhao, quarto,
