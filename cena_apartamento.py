@@ -101,14 +101,32 @@ MATERIAIS = {
 PLANTA = None
 LARG = FUNDO = 0.0
 ZONAS = CAIXAS = JANELAS = LUZES = PONTOS = ()
-_PAREDE_DA_ZONA = _PISO_DA_ZONA = ()
+_PAREDE_DA_ZONA = _PISO_DA_ZONA = _BASE_DA_ZONA = ()
+
+
+# Zona e ponto nasceram sem altura, de quando "imovel" queria dizer "um
+# pavimento". Em vez de reescrever as sete plantas que existem, o andar entra
+# como item OPCIONAL no fim da tupla, e quem nao tem fica no terreo.
+def base_da_zona(zona):
+    """A que altura o piso desta zona fica. Zona sem andar fica no terreo."""
+    return float(zona[7]) if len(zona) > 7 else 0.0
+
+
+def base_do_ponto(ponto):
+    """Idem para o ponto de captura: ('nome', x, z) ou ('nome', x, z, base)."""
+    return float(ponto[3]) if len(ponto) > 3 else 0.0
+
+
+def andares_da(planta):
+    """As alturas de piso que a planta usa, de baixo para cima."""
+    return sorted({base_da_zona(z) for z in planta["zonas"]})
 _LIMITES = ()
 
 
 def usar(planta):
     """Aponta o tracador para uma planta. Devolve ela mesma, para encadear."""
     global PLANTA, LARG, FUNDO, ZONAS, CAIXAS, JANELAS, LUZES, PONTOS
-    global _PAREDE_DA_ZONA, _PISO_DA_ZONA, _LIMITES, VISTA
+    global _PAREDE_DA_ZONA, _PISO_DA_ZONA, _BASE_DA_ZONA, _LIMITES, VISTA
     PLANTA = planta
     VISTA = planta.get("vista", "campo")
     LARG, FUNDO = planta["larg"], planta["fundo"]
@@ -119,8 +137,15 @@ def usar(planta):
     PONTOS = planta["pontos"]
     _PAREDE_DA_ZONA = [z[5] for z in ZONAS]
     _PISO_DA_ZONA = [z[6] for z in ZONAS]
+    _BASE_DA_ZONA = [base_da_zona(z) for z in ZONAS]
+
+    # A casca sobe ate cobrir o pavimento mais alto. Sai das PROPRIAS zonas, e
+    # nao de um campo novo na planta: assim nao da para a casca e os comodos
+    # discordarem. Com um pavimento so, o maximo e zero e a conta devolve
+    # PE_DIREITO — exatamente o que era antes.
+    topo = max(_BASE_DA_ZONA) + PE_DIREITO if _BASE_DA_ZONA else PE_DIREITO
     _LIMITES = ((0, 0.0, "parede"), (0, LARG, "parede"), (1, 0.0, "piso"),
-                (1, PE_DIREITO, "teto"), (2, 0.0, "parede"), (2, FUNDO, "parede"))
+                (1, topo, "teto"), (2, 0.0, "parede"), (2, FUNDO, "parede"))
     return planta
 
 
@@ -767,9 +792,18 @@ def _zona(p):
     comodos a mao errada azuleja o quarto errado. Aconteceu.
     """
     z = np.zeros(p.shape[0], np.int32)
-    for i, (_, x0, x1, z0, z1, _, _) in enumerate(ZONAS):
+    for i, zona in enumerate(ZONAS):
+        x0, x1, z0, z1 = zona[1], zona[2], zona[3], zona[4]
+        base = _BASE_DA_ZONA[i] if _BASE_DA_ZONA else 0.0
         dentro = ((p[:, 0] >= x0 - 0.2) & (p[:, 0] <= x1 + 0.2)
                   & (p[:, 2] >= z0 - 0.2) & (p[:, 2] <= z1 + 0.2))
+        # Com dois pavimentos o mesmo (x, z) cai em DUAS zonas: a sala de baixo
+        # e o quarto de cima. Sem olhar a altura, o piso do quarto sairia com o
+        # material da sala. A faixa vai um pouco abaixo da base para pegar a
+        # propria laje, que e o piso visivel daquele pavimento.
+        if len(ZONAS) and max(_BASE_DA_ZONA or [0.0]) > 0.0:
+            dentro &= ((p[:, 1] >= base - 0.35)
+                       & (p[:, 1] <= base + PE_DIREITO + 0.05))
         z[dentro] = i
     return z
 
@@ -804,10 +838,15 @@ def _iluminar(p, n):
     return np.clip(luz, 0.0, 1.08)      # 1,35 estourava a parede clara em branco
 
 
-def render(x, z, largura=LARGURA):
-    """Devolve (panorama BGR, distancia em metros por pixel)."""
+def render(x, z, largura=LARGURA, base=0.0):
+    """
+    Devolve (panorama BGR, distancia em metros por pixel).
+
+    `base` e a altura do PISO onde a camera esta: zero no terreo, a cota da
+    laje no pavimento de cima. O olho fica OLHO acima dela.
+    """
     altura = largura // 2
-    o = np.array([x, OLHO, z], np.float32)
+    o = np.array([x, base + OLHO, z], np.float32)
     img = np.empty((altura, largura, 3), np.uint8)
     dist_total = np.empty((altura, largura), np.float32)
 
@@ -965,41 +1004,55 @@ def comodos_sem_acesso(planta, passo=0.02, folga=FOLGA_DE_PASSAGEM):
     nx, nz = int(larg / passo), int(fundo / passo)
     x = ((np.arange(nx) + 0.5) * passo)[:, None]
     z = ((np.arange(nz) + 0.5) * passo)[None, :]
-
     borda = ESPESSURA_DA_CASCA + meia
-    livre = ((x > borda) & (x < larg - borda)
-             & (z > borda) & (z < fundo - borda))
-    for c in planta["caixas"]:
-        # parede barra em qualquer altura; movel so a partir de 35 cm
-        if c[6] != "parede" and c[4] - c[1] <= ALTURA_QUE_BARRA:
-            continue
-        livre &= ~((x > c[0] - meia) & (x < c[3] + meia)
-                   & (z > c[2] - meia) & (z < c[5] + meia))
-
-    # Componentes conexas pelo OpenCV, que ja e dependencia. O alagamento em
-    # Python puro levava minutos nesta grade — e a grade fina e justamente o
-    # que fecha o vazamento, entao baratear voltando a grade grossa traria o
-    # defeito de volta.
-    _n, marcado = cv2.connectedComponents(livre.astype(np.uint8),
-                                          connectivity=4)
-
-    # Comeca onde a caminhada comeca: o primeiro ponto de captura em que cabe
-    # um corpo. E a mesma escolha que o pontoDeEntrada() do visor faz.
-    meu = 0
-    for _nome, px, pz in planta["pontos"]:
-        i, j = int(px / passo), int(pz / passo)
-        if 0 <= i < nx and 0 <= j < nz and marcado[i, j]:
-            meu = int(marcado[i, j])
-            break
-    if not meu:
-        return [zona[0] for zona in planta["zonas"]]
 
     sem = []
-    for nome, x0, x1, z0, z1, _parede, _piso in planta["zonas"]:
-        faixa = marcado[int(x0 / passo):int(x1 / passo),
-                        int(z0 / passo):int(z1 / passo)]
-        if not (faixa == meu).any():
-            sem.append(nome)
+    # Um pavimento por vez. Nao se anda da sala para o quarto de cima
+    # atravessando a laje: cada andar tem a sua planta, os seus moveis e o seu
+    # ponto de entrada. O que liga os dois e a escada, e ela nao cabe num
+    # alagamento plano — fica conferida no olho, com folga de sobra.
+    for base in andares_da(planta):
+        livre = ((x > borda) & (x < larg - borda)
+                 & (z > borda) & (z < fundo - borda))
+        for c in planta["caixas"]:
+            # quanto desta caixa cabe DENTRO deste pavimento
+            alto = min(c[4], base + PE_DIREITO) - max(c[1], base)
+            if c[6] == "parede":
+                if alto <= 0.01:
+                    continue            # parede de outro andar
+            elif alto <= ALTURA_QUE_BARRA:
+                continue                # tapete, soleira, laje, movel baixo
+            livre &= ~((x > c[0] - meia) & (x < c[3] + meia)
+                       & (z > c[2] - meia) & (z < c[5] + meia))
+
+        # Componentes conexas pelo OpenCV, que ja e dependencia. O alagamento
+        # em Python puro levava minutos nesta grade — e a grade fina e
+        # justamente o que fecha o vazamento, entao baratear voltando a grade
+        # grossa traria o defeito de volta.
+        _n, marcado = cv2.connectedComponents(livre.astype(np.uint8),
+                                              connectivity=4)
+
+        # Comeca onde a caminhada comeca naquele andar: o primeiro ponto de
+        # captura dali em que cabe um corpo.
+        meu = 0
+        for ponto in planta["pontos"]:
+            if abs(base_do_ponto(ponto) - base) > 0.01:
+                continue
+            i, j = int(ponto[1] / passo), int(ponto[2] / passo)
+            if 0 <= i < nx and 0 <= j < nz and marcado[i, j]:
+                meu = int(marcado[i, j])
+                break
+
+        deste = [zona for zona in planta["zonas"]
+                 if abs(base_da_zona(zona) - base) < 0.01]
+        if not meu:
+            sem.extend(zona[0] for zona in deste)
+            continue
+        for zona in deste:
+            faixa = marcado[int(zona[1] / passo):int(zona[2] / passo),
+                            int(zona[3] / passo):int(zona[4] / passo)]
+            if not (faixa == meu).any():
+                sem.append(zona[0])
     return sem
 
 
@@ -1038,11 +1091,16 @@ def conferir(planta):
                          % (vista, ", ".join(sorted(VISTAS))))
     for nome in comodos_sem_acesso(planta):
         problemas.append("%s: nao da para chegar andando" % nome)
-    for nome, x, z in planta["pontos"]:
+    for ponto in planta["pontos"]:
+        nome, x, z = ponto[0], ponto[1], ponto[2]
+        base = base_do_ponto(ponto)
         pior = float("inf")
         for c in planta["caixas"]:
-            if c[1] > OLHO or c[4] < 0.60:      # movel baixo nao atrapalha a vista
+            # movel de OUTRO andar nao atrapalha a vista deste
+            if c[4] <= base + 0.05 or c[1] >= base + PE_DIREITO:
                 continue
+            if c[1] > base + OLHO or c[4] < base + 0.60:
+                continue                        # movel baixo nao atrapalha
             dx = max(c[0] - x, 0.0, x - c[3])
             dz = max(c[2] - z, 0.0, z - c[5])
             pior = min(pior, (dx * dx + dz * dz) ** 0.5)
@@ -1080,11 +1138,13 @@ def render_planta(planta, largura):
     print("  %s — %.1f x %.1f m, %d cômodos, %d pontos, %dx%d"
           % (planta["nome"], LARG, FUNDO, len(ZONAS), len(PONTOS),
              largura, largura // 2))
-    for i, (nome, x, z) in enumerate(PONTOS):
+    for i, ponto in enumerate(PONTOS):
+        nome, x, z = ponto[0], ponto[1], ponto[2]
+        base = base_do_ponto(ponto)
         if _ja_renderizado(saida, i):
             print("    %2d  %-36s ja estava pronto" % (i, nome))
             continue
-        img, dist = render(x, z, largura)
+        img, dist = render(x, z, largura, base)
         _gravar(img, os.path.join(saida, "ponto_%d.jpg" % i))
         np.save(os.path.join(saida, "dist_%d.npy" % i), disparidade_exata(dist))
         print("    %2d  %-36s (%.2f, %.2f)  ate %.1f m"

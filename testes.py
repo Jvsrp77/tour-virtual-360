@@ -1648,8 +1648,9 @@ class TestPrimeiraPessoa(unittest.TestCase):
             self.skipTest("node não encontrado")
         for construir in plantas.TODAS:
             p = construir()
-            livres = self._livre(p, [[x - p["larg"] / 2, z - p["fundo"] / 2]
-                                     for _, x, z in p["pontos"]])
+            livres = self._livre(p, [[pt[1] - p["larg"] / 2,
+                                      pt[2] - p["fundo"] / 2]
+                                     for pt in p["pontos"]])
             self.assertIn(True, livres,
                           "%s: nenhum ponto de captura tem espaço para andar"
                           % p["nome"])
@@ -2222,7 +2223,8 @@ class TestPlantasSinteticas(unittest.TestCase):
         """Zona fora da casca renderiza parede onde deveria haver cômodo."""
         for construir in plantas.TODAS:
             p = construir()
-            for nome, x0, x1, z0, z1, _, _ in p["zonas"]:
+            for zona in p["zonas"]:
+                nome, x0, x1, z0, z1 = zona[:5]
                 self.assertGreaterEqual(x0, -0.01, nome)
                 self.assertLessEqual(x1, p["larg"] + 0.01, nome)
                 self.assertGreaterEqual(z0, -0.01, nome)
@@ -6161,8 +6163,14 @@ class TestJanelaEmQualquerParede(unittest.TestCase):
         return (d / np.linalg.norm(d, axis=1)[:, None]).astype(np.float32)
 
     def _zona_da_janela(self, planta, j):
-        x0, x1, z0, z1, _y0, _y1 = j
-        for nome, a0, a1, b0, b1, parede, _piso in planta["zonas"]:
+        x0, x1, z0, z1, y0, _y1 = j
+        for zona in planta["zonas"]:
+            nome, a0, a1, b0, b1, parede = zona[:6]
+            base = cena_apartamento.base_da_zona(zona)
+            # janela de outro pavimento nao e deste comodo: sem este corte, a
+            # janela do quarto de cima casava com a sala de baixo
+            if not (base - 0.10 <= y0 <= base + cena_apartamento.PE_DIREITO):
+                continue
             if (x0 >= a0 - 0.2 and x1 <= a1 + 0.2
                     and z0 >= b0 - 0.2 and z1 <= b1 + 0.2):
                 return nome, parede
@@ -7612,6 +7620,134 @@ class TestContagemDoAcervo(Base):
         depois = self.app.test_client().get("/saude").get_json()["imoveis"]
         self.assertEqual(depois, antes + 1,
                          "imovel criado nao apareceu na contagem")
+
+
+class TestDoisPavimentos(unittest.TestCase):
+    """
+    Imovel que sai do terreo.
+
+    POR QUE ISTO EXISTE. Zona e ponto de captura nasceram sem altura, de
+    quando "imovel" queria dizer "um pavimento". O tracador sempre foi 3D — as
+    caixas ja tinham y —, mas a camera ficava presa em OLHO, a casca parava no
+    pe-direito e o comodo era um retangulo sem andar.
+
+    O QUE PODE DAR ERRADO SEM AVISO, e por isso cada teste abaixo existe: com
+    dois pavimentos o MESMO (x, z) cai em duas zonas. Sem olhar a altura, o
+    piso do quarto de cima sai com o material da sala de baixo, a conferencia
+    de passagem atravessa a laje, e a camera do andar de cima filma de dentro
+    do chao. Nada disso quebra; tudo isso sai errado.
+
+    E a trava que importa: planta de um pavimento nao pode mudar em nada. O
+    acervo inteiro e de um andar so.
+    """
+
+    def _planta(self, zonas, caixas, pontos, larg=6.0, fundo=4.0):
+        return dict(nome="teste", pasta="teste", larg=larg, fundo=fundo,
+                    zonas=zonas, caixas=caixas, janelas=[],
+                    luzes=[(3.0, 2.55, 2.0, 1.0)], pontos=pontos)
+
+    def test_planta_de_um_pavimento_nao_muda_em_nada(self):
+        """
+        A trava desta mudanca inteira. Se a conta nova mexer um milimetro nas
+        sete plantas que ja existem, eu quebrei o que funcionava para atender
+        o que ainda nao existe.
+        """
+        for construir in plantas.TODAS:
+            p = construir()
+            andares = cena_apartamento.andares_da(p)
+            if andares == [0.0]:
+                cena_apartamento.usar(p)
+                teto = cena_apartamento._LIMITES[3]
+                self.assertEqual(teto[1], cena_apartamento.PE_DIREITO,
+                                 "%s: a casca deixou de parar no pe-direito"
+                                 % p["pasta"])
+
+    def test_a_casca_sobe_ate_cobrir_o_ultimo_pavimento(self):
+        """
+        Sem isso o teto fica na cota do terreo e o pavimento de cima aparece
+        do lado de fora do imovel — com ceu no lugar do forro.
+        """
+        p = plantas.sobrado()
+        cena_apartamento.usar(p)
+        alto = max(cena_apartamento.andares_da(p))
+        self.assertAlmostEqual(cena_apartamento._LIMITES[3][1],
+                               alto + cena_apartamento.PE_DIREITO, places=6)
+        self.assertGreater(alto, 0, "o sobrado perdeu o pavimento de cima")
+
+    def test_o_mesmo_lugar_no_mapa_e_comodo_diferente_em_cada_andar(self):
+        """
+        O (x, z) da sala e o mesmo (x, z) do quarto de cima. Quem decide e a
+        ALTURA. Sem ela o piso do quarto sai com o material da sala.
+        """
+        cima = cena_apartamento.PE_DIREITO + 0.25
+        zonas = [("Baixo", 0.0, 6.0, 0.0, 4.0, "parede", "piso"),
+                 ("Cima", 0.0, 6.0, 0.0, 4.0, "azulejo", "marmore", cima)]
+        cena_apartamento.usar(self._planta(zonas, [], [("p", 3.0, 2.0)]))
+        meio = np.array([[3.0, 1.5, 2.0], [3.0, cima + 1.5, 2.0]],
+                        dtype=np.float32)
+        achou = cena_apartamento._zona(meio)
+        self.assertEqual(int(achou[0]), 0, "o ponto do terreo foi para cima")
+        self.assertEqual(int(achou[1]), 1, "o ponto de cima foi para o terreo")
+
+    def test_a_camera_sobe_junto_com_o_ponto(self):
+        """
+        Ponto do pavimento de cima renderizado da cota do terreo filma de
+        dentro da laje: sai preto, e parece defeito de render.
+        """
+        fonte = io.open("cena_apartamento.py", encoding="utf-8").read()
+        corpo = fonte[fonte.index("def render(x, z, largura=LARGURA"):]
+        corpo = corpo[:corpo.index("passo = max(")]
+        self.assertIn("base + OLHO", corpo,
+                      "render() voltou a prender a camera no terreo")
+        p = plantas.sobrado()
+        de_cima = [pt for pt in p["pontos"]
+                   if cena_apartamento.base_do_ponto(pt) > 0.01]
+        self.assertTrue(de_cima, "o sobrado nao tem ponto no pavimento de cima")
+
+    def test_nao_se_anda_de_um_andar_ao_outro_atravessando_a_laje(self):
+        """
+        A sala de baixo e o quarto de cima ocupam o mesmo retangulo. Num
+        alagamento plano eles seriam vizinhos, e a conferencia aprovaria um
+        quarto que so se alcanca por escada que nao existe.
+        """
+        cima = cena_apartamento.PE_DIREITO + 0.25
+        zonas = [("Baixo", 0.0, 6.0, 0.0, 4.0, "parede", "piso"),
+                 ("Cima", 0.0, 6.0, 0.0, 4.0, "parede", "piso", cima)]
+        # ponto so no terreo: ninguem chega ao de cima
+        p = self._planta(zonas, [], [("baixo", 3.0, 2.0)])
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), ["Cima"],
+                         "o alagamento atravessou a laje")
+        # com ponto nos dois, cada andar se resolve sozinho
+        p = self._planta(zonas, [], [("baixo", 3.0, 2.0),
+                                     ("cima", 3.0, 2.0, cima)])
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [])
+
+    def test_movel_de_um_andar_nao_estorva_o_outro(self):
+        """
+        Armario no quarto de cima nao pode barrar a passagem da sala de baixo.
+        Sem o recorte por altura, toda a mobilia dos dois andares empilhava no
+        mesmo mapa e a casa inteira ficava intransitavel.
+        """
+        cima = cena_apartamento.PE_DIREITO + 0.25
+        zonas = [("Baixo", 0.0, 6.0, 0.0, 4.0, "parede", "piso"),
+                 ("Cima", 0.0, 6.0, 0.0, 4.0, "parede", "piso", cima)]
+        # uma parede inteira, mas SO no pavimento de cima
+        muro = [(2.9, cima, 0.0, 3.1, cima + 2.0, 4.0, "madeira")]
+        p = self._planta(zonas, muro,
+                         [("baixo", 1.0, 2.0), ("cima", 1.0, 2.0, cima)])
+        sem = cena_apartamento.comodos_sem_acesso(p)
+        self.assertNotIn("Baixo", sem,
+                         "movel do andar de cima barrou o terreo")
+
+    def test_o_sobrado_inteiro_se_percorre_a_pe(self):
+        """
+        A regra de sempre, agora nos dois pavimentos: todo comodo alcancavel
+        andando, com a folga que o visor exige.
+        """
+        p = plantas.sobrado()
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [])
+        self.assertEqual(cena_apartamento.conferir(p), [])
+        self.assertEqual(len(cena_apartamento.andares_da(p)), 2)
 
 
 def limpar():

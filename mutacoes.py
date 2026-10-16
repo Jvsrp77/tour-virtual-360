@@ -1138,8 +1138,8 @@ MUT = [
      'TestAlcanceAPe.test_movel_em_cima_da_porta_e_acusado'),
 
     ('tapete passa a barrar o corpo', 'cena_apartamento.py',
-     '        if c[6] != "parede" and c[4] - c[1] <= ALTURA_QUE_BARRA:',
-     '        if False:',
+     '            elif alto <= ALTURA_QUE_BARRA:',
+     '            elif False:',
      'TestAlcanceAPe.test_tapete_nao_barra_ninguem'),
 
     ('corpo mais estreito que o do visor', 'cena_apartamento.py',

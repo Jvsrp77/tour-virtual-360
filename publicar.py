@@ -75,9 +75,12 @@ def maquete_da_planta(planta):
     """A geometria em metros, do jeito que o visor 3D consome."""
     cor = cena_apartamento.MATERIAIS
     zonas = []
-    for nome, x0, x1, z0, z1, parede, piso in planta["zonas"]:
+    for zona in planta["zonas"]:
+        nome, x0, x1, z0, z1, parede, piso = zona[:7]
+        andar = cena_apartamento.base_da_zona(zona)
         zonas.append({
             "nome": nome, "x0": x0, "x1": x1, "z0": z0, "z1": z1,
+            "andar": andar,
             "m2": round((x1 - x0) * (z1 - z0), 1),
             "piso": _hex_rgb(cor[piso]), "parede": _hex_rgb(cor[parede]),
             # o NOME do material, e nao so a cor: e com ele que a maquete 3D
@@ -94,7 +97,11 @@ def maquete_da_planta(planta):
         "pe": plantas.PE_DIREITO,
         "zonas": zonas, "caixas": caixas,
         "janelas": [list(j) for j in planta["janelas"]],
-        "pontos": [{"nome": n, "x": x, "z": z} for n, x, z in planta["pontos"]],
+        # `andar` vai junto: a maquete precisa saber em que pavimento o ponto
+        # esta, senao empilha os dois no chao
+        "pontos": [{"nome": p[0], "x": p[1], "z": p[2],
+                    "andar": cena_apartamento.base_do_ponto(p)}
+                   for p in planta["pontos"]],
     }
 
 
@@ -224,7 +231,8 @@ def publicar(pasta, titulo=None, descricao=None, endereco="", preco="",
     saida("  imovel %s  <-  %s (%d pontos)" % (imovel, pasta, len(planta["pontos"])))
 
     cenas = []
-    for i, (nome, x, z) in enumerate(planta["pontos"]):
+    for i, ponto in enumerate(planta["pontos"]):
+        nome, x, z = ponto[0], ponto[1], ponto[2]
         cena_id = uuid.uuid4().hex[:10]
         cena = preparar_cena(os.path.join(fotos, "ponto_%d.jpg" % i),
                              os.path.join(fotos, "dist_%d.npy" % i),
