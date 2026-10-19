@@ -173,6 +173,41 @@ VISTAS = {
 VISTA = "campo"          # trocada por usar(), conforme a planta pede
 
 
+# ------------------------------------------------------------------ hora do dia
+# DUAS fontes de luz, e nao uma. Ate aqui _iluminar() devolvia UM escalar
+# branco: ambiente 0,46 mais a soma das lampadas. Com um escalar so nao da
+# para ter manha e noite, porque o que muda entre elas nao e QUANTA luz ha, e
+# QUAL luz manda. De manha a casa e iluminada pelo ceu — frio, entrando pelas
+# janelas, de lado. De noite, pelas lampadas — quentes, vindo do teto. Somadas
+# num numero branco, as duas viram a mesma coisa mais clara ou mais escura, que
+# e exatamente a diferenca que se queria mostrar.
+#
+# Por isso cada hora diz quatro coisas, e nao um brilho:
+#   ambiente  quanto de ceu entra
+#   lampadas  ganho das luminarias da planta
+#   teto      piso de luz do teto, que PRECISA cair junto: o teto quase nao
+#             recebe difusa e vive desse piso, entao mante-lo em 0,72 a noite
+#             deixa a casa com lampada apagada e teto de meio-dia
+#   tom_*     a cor de cada uma das duas fontes, em BGR
+#
+# A janela nao precisa de ajuste proprio: o pixel de ceu tambem passa pelo
+# multiplicador, entao ele escurece e esfria junto com o ambiente — de noite
+# o vao fica escuro sozinho, sem um botao a mais para errar.
+#
+# "tarde" reproduz EXATAMENTE o que a casa era antes desta mudanca: ambiente
+# 0,46, ganho 1, teto 0,72, tom neutro. Isso nao e detalhe de estilo — e o que
+# garante que o acervo inteiro, ja renderizado, continua valendo.
+HORAS = {
+    "manha": dict(ambiente=0.56, lampadas=0.12, teto=0.74,
+                  tom_ceu=(1.07, 1.01, 0.95), tom_luz=(0.88, 0.96, 1.10)),
+    "tarde": dict(ambiente=0.46, lampadas=1.00, teto=0.72,
+                  tom_ceu=(1.00, 1.00, 1.00), tom_luz=(1.00, 1.00, 1.00)),
+    "noite": dict(ambiente=0.10, lampadas=1.30, teto=0.15,
+                  tom_ceu=(1.28, 0.94, 0.68), tom_luz=(0.80, 0.93, 1.15)),
+}
+HORA_PADRAO = "tarde"
+
+
 def _relevo_da_vista(d, abaixo, chao):
     """
     O que separa mar de campo de cidade ABAIXO da linha do horizonte.
@@ -812,9 +847,12 @@ _PAREDE_DA_ZONA = [z[5] for z in ZONAS]
 _PISO_DA_ZONA = [z[6] for z in ZONAS]
 
 
-def _iluminar(p, n):
+def _iluminar(p, n, hora=None):
     """
     Difusa das luzes, com queda pela distancia, sobre um ambiente alto.
+
+    Devolve COR (N, 3) em BGR, e nao um escalar: ceu e lampada tem cores
+    diferentes, e e disso que manha e noite sao feitas. Ver HORAS.
 
     O ambiente e alto de proposito. A primeira versao usava 0,26 e o TETO saia
     quase preto: a luminaria fica 10 cm abaixo dele, entao para qualquer ponto
@@ -826,28 +864,86 @@ def _iluminar(p, n):
     Sem raio de sombra: em 8k o custo nao se paga, e o que da leitura a cena e a
     textura, nao a sombra.
     """
-    luz = np.full(p.shape[0], 0.46, np.float32)
+    h = HORAS.get(hora or HORA_PADRAO, HORAS[HORA_PADRAO])
+    ganho = h["lampadas"]
+    # `total` soma na ORDEM ANTIGA — o ambiente primeiro, as lampadas depois —
+    # e `lamp` guarda so a parte das luminarias, para o tom separar as duas
+    # fontes. Soma de float nao e associativa: acumular as 32 lampadas e so
+    # entao juntar o ambiente erra o ultimo bit, e o acervo ja renderizado
+    # deixa de bater. Multiplicar por ganho 1,0 e exato, entao a tarde cai
+    # exatamente na conta de antes.
+    total = np.full(p.shape[0], h["ambiente"], np.float32)
+    lamp = np.zeros(p.shape[0], np.float32)
     for lx, ly, lz, forca in LUZES:
         v = np.stack([lx - p[:, 0], ly - p[:, 1], lz - p[:, 2]], axis=1)
         dist = np.sqrt((v * v).sum(axis=1)) + 1e-6
         lamb = np.clip((v * n).sum(axis=1) / dist, 0.0, 1.0)
-        luz += 0.62 * forca * lamb / (1.0 + 0.16 * dist ** 1.6)
-    # o teto quase nunca recebe difusa: recebe o ricochete, e pouco mais
+        c = (0.62 * ganho) * forca * lamb / (1.0 + 0.16 * dist ** 1.6)
+        lamp += c
+        total += c
+    # o teto quase nunca recebe difusa: recebe o ricochete, e pouco mais. O
+    # complemento entra pelo AMBIENTE porque ricochete e luz que ja rebateu —
+    # de dia vem do ceu, de noite e quase nada, e e isso que faz o teto
+    # escurecer quando as lampadas sao a unica fonte.
     teto = n[:, 1] < -0.9
-    luz[teto] = np.maximum(luz[teto], 0.72)
-    return np.clip(luz, 0.0, 1.08)      # 1,35 estourava a parede clara em branco
+    total[teto] = np.maximum(total[teto], h["teto"])
+
+    tom_ceu = np.array(h["tom_ceu"], np.float32)
+    tom_luz = np.array(h["tom_luz"], np.float32)
+    if np.array_equal(tom_ceu, tom_luz):
+        # CAMINHO EXATO, e ele existe por um motivo so: com tom neutro esta
+        # conta tem de dar o MESMO bit que a versao sem horas do dia, porque o
+        # acervo inteiro ja esta renderizado com ela. Separar em duas fontes e
+        # somar de volta nao da — `0,46 + (0,72 - s) + lamp` erra 0,72 por um
+        # ulp em float32, e um ulp vira um nivel de cinza depois do x255. Isso
+        # apareceu na primeira tentativa, num pixel de teto do apartamento.
+        return np.clip(total, 0.0, 1.08)[:, None] * tom_ceu
+
+    # o que sobra depois de tirar as lampadas e ambiente mais o complemento
+    # do teto — e ricochete, entao leva a cor do ambiente
+    mistura = (total - lamp)[:, None] * tom_ceu + lamp[:, None] * tom_luz
+    # O LIMITE E DE INTENSIDADE, NAO DE CANAL. Recortar cada canal em 1,08
+    # separadamente apaga justamente o tom: a lampada quente pede vermelho
+    # acima do teto, o teto corta so o vermelho, e onde a luz e forte a cor
+    # volta a ser branca. Era o que fazia o banheiro a noite sair igual ao
+    # banheiro a tarde — comodo pequeno com luminaria perto satura, e a
+    # unica diferenca que restava era a que o recorte comia. Escalando a cor
+    # inteira pelo mesmo fator, a intensidade obedece e a cor sobrevive.
+    fator = np.clip(total, 0.0, 1.08) / np.maximum(total, 1e-6)
+    return mistura * fator[:, None]
 
 
 def render(x, z, largura=LARGURA, base=0.0):
     """
-    Devolve (panorama BGR, distancia em metros por pixel).
+    Devolve (panorama BGR, distancia em metros por pixel) na hora padrao.
 
     `base` e a altura do PISO onde a camera esta: zero no terreo, a cota da
-    laje no pavimento de cima. O olho fica OLHO acima dela.
+    laje no pavimento de cima. O olho fica `base + OLHO`.
+
+    Quem quiser mais de uma hora do dia chama render_horas(): esta aqui existe
+    para os chamadores que so querem um panorama, que sao a maioria.
+    """
+    imgs, dist = render_horas(x, z, largura, base, (HORA_PADRAO,))
+    return imgs[HORA_PADRAO], dist
+
+
+def render_horas(x, z, largura=LARGURA, base=0.0, horas=(HORA_PADRAO,)):
+    """
+    O mesmo panorama em varias horas do dia, de um TRACADO SO.
+
+    Por que vale a pena. O caro aqui e descobrir o que cada raio acerta:
+    _casca() e _todas_as_caixas() rodam por pixel contra a casa inteira. A luz
+    e o passo final, uma multiplicacao. Renderizar manha, tarde e noite como
+    tres renders separados pagaria o tracado tres vezes para jogar fora duas;
+    sombrando a mesma geometria tres vezes, a segunda e a terceira hora saem
+    por uma fracao da primeira.
+
+    A profundidade e UMA so, e e correto que seja: distancia nao muda com a
+    hora do dia, e e dela que sai a caminhada.
     """
     altura = largura // 2
     o = np.array([x, base + OLHO, z], np.float32)
-    img = np.empty((altura, largura, 3), np.uint8)
+    imgs = dict((h, np.empty((altura, largura, 3), np.uint8)) for h in horas)
     dist_total = np.empty((altura, largura), np.float32)
 
     passo = max(1, 2 ** 22 // largura)               # fatias, para caber na memoria
@@ -911,11 +1007,17 @@ def render(x, z, largura=LARGURA, base=0.0):
                 cor[sel] = _textura(mat, p[sel], lado, MATERIAIS[mat],
                                     d[sel])
 
-        cor *= _iluminar(p, n)[:, None]
-        img[y0:y1] = np.clip(cor, 0, 255).astype(np.uint8).reshape(y1 - y0, largura, 3)
+        for nome_hora, alvo in imgs.items():
+            # O TRACADO E UM SO. Sombrear de novo custa uma fracao do que
+            # custa descobrir o que cada raio acertou — por isso tres horas
+            # saem quase pelo preco de uma, e nao pelo triplo.
+            pintado = cor * _iluminar(p, n, nome_hora)
+            alvo[y0:y1] = np.clip(pintado, 0, 255).astype(np.uint8).reshape(
+                y1 - y0, largura, 3)
         dist_total[y0:y1] = t.reshape(y1 - y0, largura)
 
-    return cv2.GaussianBlur(img, (0, 0), 0.5), dist_total
+    return ({k: cv2.GaussianBlur(v, (0, 0), 0.5) for k, v in imgs.items()},
+            dist_total)
 
 
 def disparidade_exata(dist, largura=LARGURA_PROF):
@@ -962,6 +1064,11 @@ ALTURA_QUE_BARRA = 0.35
 # 0,75 m fica logo abaixo da porta de 0,80 m que as plantas desenham: porta
 # limpa passa, porta comida por movel nao.
 FOLGA_DE_PASSAGEM = 0.75
+
+# Piso alcancado que ainda conta como "da para entrar nesse comodo". Absoluto
+# de proposito: ver comodos_sem_acesso(). 0,30 m2 e o que um corpo de
+# RAIO_CORPO ocupa, ja contado com a folga de passagem em volta.
+AREA_PARA_ENTRAR = 0.30
 
 # A casca do imovel nao esta na lista de caixas — no tracador ela e o
 # envelope, nao movel. Mesma espessura que o maquete.html desenha.
@@ -1051,7 +1158,29 @@ def comodos_sem_acesso(planta, passo=0.02, folga=FOLGA_DE_PASSAGEM):
         for zona in deste:
             faixa = marcado[int(zona[1] / passo):int(zona[2] / passo),
                             int(zona[3] / passo):int(zona[4] / passo)]
-            if not (faixa == meu).any():
+            # NAO "alguma celula", e sim "celula que chegue para uma pessoa".
+            #
+            # Isto era `if not (faixa == meu).any()`, e deixava passar comodo
+            # LACRADO. O retangulo da zona encosta na parede, e a boca da
+            # porta poe meia duzia de celulas alcancaveis dentro dele mesmo
+            # quando o comodo inteiro esta fechado por movel. No banheiro da
+            # mansao eram 48 celulas ligadas a casa contra 8.438 lacradas —
+            # 0,02 m2 de lasca aprovando 3,4 m2 inalcancaveis. O imovel foi
+            # publicado assim, e ninguem ia descobrir sem andar ate la.
+            #
+            # O limite tem as DUAS metades, e cada uma consertou um erro meu.
+            # So proporcional (metade do comodo) reprovava banheiro de 1,4 m2
+            # pela fresta atras do vaso, que ninguem usa. So absoluto (0,30
+            # m2) reprovava o demo do quarto, que e um comodo de 3,2 x 3,5 m
+            # tao cheio de movel que o piso livre inteiro dele e 0,32 m2 — ele
+            # e APERTADO, nao inalcancavel, e sao coisas diferentes. Pedindo
+            # o MENOR dos dois, um comodo so reprova quando o que se alcanca
+            # dele e pouco para uma pessoa E pouco para o que ele tem a
+            # oferecer.
+            cel = passo * passo
+            livres = float((faixa > 0).sum()) * cel
+            alcanca = float((faixa == meu).sum()) * cel
+            if alcanca < min(AREA_PARA_ENTRAR, livres / 2.0):
                 sem.append(zona[0])
     return sem
 
@@ -1074,6 +1203,94 @@ def vao_ate(planta, zona, passo=0.02):
     return baixo
 
 
+# Raio maximo que o andar.html libera em volta de um ponto (PASSEIO_CHEIO), e
+# a area abaixo da qual uma ilha e fresta e nao conta — meio metro quadrado
+# atras de um sofa nao e lugar onde alguem fica.
+PASSEIO_CHEIO = 2.50
+ILHA_MINIMA = 1.0
+MARGEM_DO_CAMINHO = 0.12
+
+
+def ilhas_de_caminhada(planta, base, passo=0.05, raio=PASSEIO_CHEIO):
+    """
+    As ilhas por onde o visitante consegue ANDAR naquele pavimento.
+
+    POR QUE ISTO NAO E comodos_sem_acesso(). Aquela funcao responde "da para ir
+    de um comodo ao outro andando", olhando o espaco livre. O visitante nao
+    anda em espaco livre: podeEstar(), no andar.html, so o deixa ficar onde
+    algum PONTO DE CAPTURA alcanca, num raio de ate 2,5 m. Sao perguntas
+    diferentes, e o sobrado de 445 m2 passou na primeira e reprovou na segunda
+    — 12 ilhas separadas no terreo, com o dono preso no hall sem entender por
+    que, depois de a planta ter sido aprovada e renderizada por duas horas.
+
+    O defeito vinha de escolher os pontos pela maior folga de cada comodo:
+    folga maxima fica no MEIO do comodo, e a porta e exatamente onde a folga e
+    minima, entao o posicionamento fugia das passagens.
+
+    Devolve a lista de ilhas, cada uma com (area em m2, nomes dos pontos).
+    """
+    larg, fundo = planta["larg"], planta["fundo"]
+    nx, nz = int(larg / passo), int(fundo / passo)
+    x = ((np.arange(nx) + 0.5) * passo)[:, None]
+    z = ((np.arange(nz) + 0.5) * passo)[None, :]
+    m = MARGEM_DO_CAMINHO
+    livre = ((x > m) & (x < larg - m) & (z > m) & (z < fundo - m))
+    for c in planta["caixas"]:
+        alto = min(c[4], base + PE_DIREITO) - max(c[1], base)
+        if c[6] == "parede":
+            if alto <= 0.01:
+                continue
+        elif alto <= ALTURA_QUE_BARRA:
+            continue
+        livre &= ~((x > c[0] - m) & (x < c[3] + m)
+                   & (z > c[2] - m) & (z < c[5] + m))
+
+    meus = [q for q in planta["pontos"] if abs(base_do_ponto(q) - base) < 0.01]
+    if not meus:
+        return []
+
+    bolhas = np.zeros((nx, nz), bool)
+    for q in meus:
+        bolhas |= ((x - q[1]) ** 2 + (z - q[2]) ** 2) <= raio ** 2
+    _n, marcado = cv2.connectedComponents((bolhas & livre).astype(np.uint8),
+                                          connectivity=4)
+
+    # So conta ilha QUE TEM PONTO DENTRO. O mapa tem bolsoes que nunca foram
+    # para se andar — a fresta atras do sofa, o vao da escada — e eles nao
+    # tem ponto de captura nenhum, entao caem fora sozinhos. A primeira
+    # versao disto recortava o mapa no "piso principal" em vez disso, e
+    # escondia o caso que mais importa: ponto de captura numa regiao
+    # fechada, que ficava silenciosamente de fora em vez de ser denunciado.
+    ilhas = []
+    for r in np.unique(marcado):
+        if not r:
+            continue
+        nomes = [q[0] for q in meus
+                 if marcado[int(q[1] / passo), int(q[2] / passo)] == r]
+        if not nomes:
+            continue
+        area = float((marcado == r).sum()) * passo * passo
+        if area < ILHA_MINIMA:
+            continue
+        ilhas.append((area, nomes))
+    return sorted(ilhas, reverse=True)
+
+
+def caminhada_partida(planta):
+    """Os pedacos de caminhada que nao se ligam, por pavimento."""
+    problemas = []
+    for base in andares_da(planta):
+        ilhas = ilhas_de_caminhada(planta, base)
+        if len(ilhas) <= 1:
+            continue
+        andar = "terreo" if base < 0.01 else "pavimento em %.2f m" % base
+        for area, nomes in ilhas[1:]:
+            problemas.append(
+                "%s: %.0f m2 de caminhada separados do resto (%s)"
+                % (andar, area, ", ".join(nomes[:4]) or "sem ponto"))
+    return problemas
+
+
 def conferir(planta):
     """
     Recusa renderizar com ponto de captura ruim.
@@ -1091,6 +1308,7 @@ def conferir(planta):
                          % (vista, ", ".join(sorted(VISTAS))))
     for nome in comodos_sem_acesso(planta):
         problemas.append("%s: nao da para chegar andando" % nome)
+    problemas.extend(caminhada_partida(planta))
     for ponto in planta["pontos"]:
         nome, x, z = ponto[0], ponto[1], ponto[2]
         base = base_do_ponto(ponto)

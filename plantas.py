@@ -1748,9 +1748,33 @@ def sobrado():
         ("Quarto 4", 12.12, 10.93, cima),
         ("Sala de estudos", 15.93,  8.62, cima),
         ("Quarto 5", 16.82, 10.28, cima),
+        # OS DOIS DE BAIXO SAO DE PASSAGEM, e vao no FIM da lista de proposito.
+        #
+        # Por que existem. A conferencia aprova "da para ir de um comodo ao
+        # outro andando", mas o visitante nao anda em espaco livre: podeEstar()
+        # so o deixa ficar onde algum PONTO alcanca, num raio de 2,5 m. Os
+        # pontos acima foram escolhidos pela maior folga de cada comodo — e
+        # folga maxima fica no MEIO do comodo, enquanto a porta e justamente
+        # onde a folga e minima. O algoritmo fugia das passagens, e o andar de
+        # cima saia partido em tres: corredor (83 m2), suite (26) e quarto 4
+        # com a rouparia (14). Um ponto junto de cada uma das duas portas
+        # costura os tres num so, de 127 m2.
+        #
+        # Por que no FIM. O renderizador grava ponto_%d.jpg pelo INDICE.
+        # Inserir no meio renumeraria todos os seguintes, e os panoramas ja
+        # prontos passariam a ser mostrados no comodo errado, em silencio.
+        ("Suíte master", 2.75, 7.00, cima),
+        ("Quarto 4", 12.25, 6.85, cima),
     ]
 
+    # A caixa da escada, em (x0, z0, x1, z1): o vao do hall mais a chegada no
+    # corredor de cima. E so dentro dela que a caminhada oferece trocar de
+    # pavimento — fora dela, "o ponto de cima esta a tres metros" quer dizer
+    # que ele esta TRES METROS ACIMA, com uma laje no meio.
+    escada = (0.00, 0.00, 5.12, 5.00)
+
     return dict(nome="DEMO — Sobrado 445 m², dois pavimentos", pasta="sobrado",
+                escada=escada,
                 larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
                 janelas=janelas, luzes=luzes, pontos=pontos, vista="campo",
                 descricao="Sobrado de 445 m² com hall de pé-direito duplo. "

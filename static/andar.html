@@ -279,9 +279,20 @@ async function iniciar(){
   const temPlanta = comProfundidade.some(c => c.posicao);
   pontos = comProfundidade.map((c, i) => ({
     cena: c,
+    // O Y E A COTA DO PISO, e durante muito tempo foi zero fixo.
+    //
+    // Enquanto todo imovel tinha um pavimento, zero estava certo. Com o
+    // sobrado, as 49 cenas passaram a viver no mesmo plano: o ponto do
+    // quarto de cima ficava a zero metro de quem estava na sala, virava o
+    // mais proximo, e o visitante via o panorama do andar errado sem sair do
+    // lugar. Na tela isso aparece como preto e escada de vies — nao como
+    // "troquei de andar" —, e e indistinguivel de estar travado.
+    //
+    // `c.andar` vem do publicar.py. Cena antiga nao tem, e cai em zero, que
+    // e exatamente o que ela sempre foi.
     mundo: new THREE.Vector3(
       c.posicao ? c.posicao.x : (temPlanta ? 0 : i * 999),
-      0,
+      c.andar || 0,
       c.posicao ? c.posicao.y : 0),
     malha: null, carregando: false, usoEm: 0
   }));
@@ -652,9 +663,45 @@ function aplicarForcaEm(p){
 
 // ------------------------------------------------------------- movimentacao
 
+// Meio pavimento. Dois pontos dentro disso estao no mesmo piso; fora disso,
+// um esta em cima do outro.
+const MESMO_ANDAR = 1.20;
+
+// Dentro da caixa da escada? Fora dela nao se troca de pavimento.
+//
+// A planta DECLARA essa caixa; nao se tenta adivinhar. A versao que adivinhava
+// — "ponto de outro andar que esteja perto no chao" — liberava o corredor de
+// cima a partir da sala de jantar de baixo, porque um fica literalmente sobre
+// o outro. Perto no chao nao quer dizer ligado.
+//
+// Sem caixa declarada (todo imovel de um pavimento, e os antigos), isto
+// devolve falso e nada muda: nao ha outro andar para ir.
+function naEscada(v){
+  const e = geometria && geometria.escada;
+  if (!e) return false;
+  return v.x >= e[0] && v.x <= e[2] && v.z >= e[1] && v.z <= e[3];
+}
+
+function doMesmoAndar(pt, p){
+  return Math.abs(pt.mundo.y - p.y) < MESMO_ANDAR;
+}
+
+// So os pontos do andar em que se esta — e quando nao houver nenhum (durante
+// a subida, por exemplo), todos, para nunca ficar sem cena.
+//
+// A distancia 3D ja separa os andares sozinha depois que `mundo` ganhou a
+// cota, mas ela nao basta aqui: num canto com poucos pontos por perto, o
+// vizinho de cima pode ficar mais perto que o segundo vizinho do mesmo piso,
+// e dai a mistura funde o panorama da sala com o do quarto de cima. Isso nao
+// fica "um pouco errado": fica preto, porque as duas esferas se cortam.
+function daqui(p){
+  const meus = pontos.filter(pt => doMesmoAndar(pt, p));
+  return meus.length ? meus : pontos;
+}
+
 function maisProximo(p){
   let melhor = null, dist = Infinity;
-  for (const pt of pontos){
+  for (const pt of daqui(p)){
     const d = pt.mundo.distanceTo(p);
     if (d < dist){ dist = d; melhor = pt; }
   }
@@ -814,7 +861,18 @@ function atualizarSetas(){
     // sem seta para onde ja se esta nem para o ponto que ja esta misturado
     if (p === ativo || p === misturado) continue;
     const d = posicao.distanceTo(p.mundo);
-    if (d <= ALCANCE_DA_SETA) perto.push({p: p, d: d});
+    if (d > ALCANCE_DA_SETA) continue;
+    // SETA PARA OUTRO ANDAR SO PERTO DA ESCADA.
+    //
+    // Depois que o ponto ganhou cota, a distancia 3D poe o quarto de cima a
+    // cinco metros de quem esta no hall — perto, de verdade, mas com uma laje
+    // no meio. A seta apontaria para o teto, e o clique atravessaria o piso.
+    // Mudar de andar e pela escada, e so junto dela as duas cotas se
+    // encontram: exigir que a distancia HORIZONTAL seja curta e o que separa
+    // "subir a escada" de "atravessar a laje da cozinha".
+    if (!doMesmoAndar(p, posicao) && !(naEscada(p.mundo) && naEscada(posicao)))
+      continue;
+    perto.push({p: p, d: d});
   }
   perto.sort((a, b) => a.d - b.d);
 
@@ -1024,7 +1082,7 @@ const MISTURA_RAMPA = 2.0;       // em quantos metros o corte entra, para nao da
 const MISTURA_MIN = 0.02;        // abaixo disto nao vale o custo de desenhar
 
 function doisMaisProximos(p){
-  return pontos
+  return daqui(p)
     .filter(pt => pt.malha)      // ponto ainda nao carregado nao entra na mistura
     .map(pt => ({ponto: pt, dist: pt.mundo.distanceTo(p)}))
     .sort((a, b) => a.dist - b.dist)

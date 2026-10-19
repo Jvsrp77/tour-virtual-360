@@ -102,6 +102,15 @@ def maquete_da_planta(planta):
         "pontos": [{"nome": p[0], "x": p[1], "z": p[2],
                     "andar": cena_apartamento.base_do_ponto(p)}
                    for p in planta["pontos"]],
+        # ONDE SE TROCA DE PAVIMENTO, em (x0, z0, x1, z1).
+        #
+        # Precisa ser declarado, e nao adivinhado. A tentativa de deduzir
+        # ("ponto de outro andar que esteja perto no chao") poe o corredor de
+        # cima a tres metros da sala de jantar de baixo, porque um esta
+        # literalmente em cima do outro — e a seta ofereceria atravessar a
+        # laje no meio da casa. Perto NO CHAO nao quer dizer ligado; quem liga
+        # os dois pisos e a escada, e so ela.
+        "escada": list(planta["escada"]) if planta.get("escada") else None,
     }
 
 
@@ -239,7 +248,16 @@ def publicar(pasta, titulo=None, descricao=None, endereco="", preco="",
                              destino, "cena_%s_%02d" % (pasta, i), cena_id,
                              saida)
         cena["nome"] = nome
+        # O "y" daqui e a PROFUNDIDADE da planta, nao altura — a cena sempre
+        # foi plana. `andar` e a cota do piso, e sem ela o sobrado chega na
+        # caminhada com os dois pavimentos empilhados no mesmo plano: um ponto
+        # do quarto de cima fica a zero metro de quem esta na sala, vira o
+        # ponto mais proximo, e o visitante passa a ver o panorama do andar
+        # errado — preto, escada de viés, e a sensacao de estar travado. Foi
+        # o que o dono relatou, e levou tres diagnosticos errados meus ate eu
+        # abrir o navegador e olhar as setas.
         cena["posicao"] = {"x": round(float(x), 3), "y": round(float(z), 3)}
+        cena["andar"] = round(float(cena_apartamento.base_do_ponto(ponto)), 3)
         cenas.append(cena)
         if (i + 1) % 20 == 0 or i + 1 == len(planta["pontos"]):
             saida("    %3d de %d" % (i + 1, len(planta["pontos"])))

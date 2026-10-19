@@ -2206,7 +2206,13 @@ class TestPlantasSinteticas(unittest.TestCase):
             (x - 0.5, 0.0, z - 0.5, x + 0.5, 2.0, z + 0.5, "madeira")]
         problemas = cena_apartamento.conferir(planta)
         self.assertTrue(problemas, "não acusou a câmera dentro do móvel")
-        self.assertIn("DENTRO", problemas[0])
+        # Em QUALQUER um dos recados, e nao no primeiro: um movel grande o
+        # bastante para engolir a camera costuma lacrar o comodo tambem, e o
+        # recado de alcance sai antes. Prender o teste a ordem da lista era
+        # fragilidade minha — o que importa e que a camera dentro do movel
+        # seja acusada, nao em que posicao.
+        self.assertTrue(any("DENTRO" in q for q in problemas),
+                        "nao acusou DENTRO: %s" % problemas)
 
     def test_cada_imovel_tem_dois_pontos_por_comodo(self):
         """
@@ -4633,12 +4639,17 @@ class TestMisturaEntrePontos(PaginaNoNode, unittest.TestCase):
         if not self.node:
             self.skipTest("node nao encontrado")
         programa = (
-            "class V3 { constructor(x,z){ this.x=x; this.z=z; }" + '\n'
-            + "  distanceTo(o){ return Math.hypot(this.x-o.x, this.z-o.z); } }" + '\n'
+            # o y e a cota do piso: sem ela, daqui() nao sabe separar andares
+            "class V3 { constructor(x,z,y){ this.x=x; this.z=z; this.y=y||0; }" + '\n'
+            + "  distanceTo(o){ return Math.hypot(this.x-o.x, this.z-o.z,"
+              " this.y-o.y); } }" + '\n'
             + "const pontos = [" + '\n'
             + "  {nome: 'perto sem malha', mundo: new V3(0.5, 0), malha: null}," + '\n'
             + "  {nome: 'carregado A', mundo: new V3(2, 0), malha: {}}," + '\n'
             + "  {nome: 'carregado B', mundo: new V3(5, 0), malha: {}}];" + '\n'
+            + "const MESMO_ANDAR = %s;" % self._constante("MESMO_ANDAR") + '\n'
+            + self._funcao("doMesmoAndar") + '\n'
+            + self._funcao("daqui") + '\n'
             + self._funcao("doisMaisProximos") + '\n'
             + "const par = doisMaisProximos(new V3(0, 0));" + '\n'
             + "console.log(JSON.stringify(par.map(p => p.ponto.nome)));" + '\n')
@@ -6417,6 +6428,9 @@ function fabricar(x, z, nome){
 }
 const pontos = %s;
 let ativo = pontos[0], misturado = null;
+// Sem caixa de escada declarada, naEscada() devolve falso e a regra de
+// pavimento nao muda nada — que e o caso de todo imovel de um andar so.
+let geometria = null;
 %s
 %s
 %s
@@ -6434,7 +6448,9 @@ console.log(JSON.stringify({
        "const MAX_SETAS = %d; const ALCANCE_DA_SETA = %s; const FOLGA_NA_TELA = %d;"
        % (self._constante("MAX_SETAS"), self._constante("ALCANCE_DA_SETA"),
           self._constante("FOLGA_NA_TELA")),
-       self._func_raiz("atualizarSetas") + extra)
+       "const MESMO_ANDAR = %s;\n" % self._constante("MESMO_ANDAR")
+       + self._func_raiz("doMesmoAndar") + self._func_raiz("naEscada")
+       + self._func_raiz("atualizarSetas") + extra)
 
     def _escala(self, com_planta):
         """Roda escalaMapa() com e sem a planta do imovel."""
@@ -7748,6 +7764,91 @@ class TestDoisPavimentos(unittest.TestCase):
         self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [])
         self.assertEqual(cena_apartamento.conferir(p), [])
         self.assertEqual(len(cena_apartamento.andares_da(p)), 2)
+
+
+class TestCaminhadaEmBolhas(unittest.TestCase):
+    """
+    O visitante nao anda em espaco livre: anda em BOLHAS.
+
+    POR QUE ISTO EXISTE, e custou caro descobrir. comodos_sem_acesso()
+    pergunta "da para ir de um comodo ao outro andando?" e olha o espaco
+    livre. O andar.html pergunta outra coisa: podeEstar() so deixa o visitante
+    ficar onde algum PONTO DE CAPTURA alcanca, num raio de ate 2,5 m.
+
+    O sobrado de 445 m2 passou na primeira pergunta com folga — todos os 24
+    comodos alcancaveis, o mais apertado com 1,02 m — foi renderizado por duas
+    horas, publicado, e o dono abriu a caminhada e ficou PRESO no hall. O
+    terreo estava partido em doze ilhas e o andar de cima em onze. Nenhuma
+    medida que eu tinha acusava isso, porque todas mediam o espaco livre.
+
+    A causa era o posicionamento: os pontos eram escolhidos pela MAIOR FOLGA
+    de cada comodo, e folga maxima fica no meio do comodo enquanto a porta e
+    exatamente onde a folga e minima. O algoritmo fugia das passagens.
+    """
+
+    def _planta(self, pontos, caixas=(), larg=12.0, fundo=4.0):
+        zonas = [("Tudo", 0.0, larg, 0.0, fundo, "parede", "piso")]
+        return dict(nome="teste", pasta="teste", larg=larg, fundo=fundo,
+                    zonas=zonas, caixas=list(caixas), janelas=[],
+                    luzes=[(6.0, 2.55, 2.0, 1.0)], pontos=pontos)
+
+    def test_dois_pontos_longe_nao_formam_uma_caminhada_so(self):
+        """
+        O defeito em miniatura: dois pontos a 9 m um do outro, num salao
+        vazio. Da para ANDAR de um ao outro — nao ha nada no caminho — mas o
+        visitante nao consegue, porque no meio do salao ele nao esta ao
+        alcance de ponto nenhum.
+        """
+        p = self._planta([("A", 1.5, 2.0), ("B", 10.5, 2.0)])
+        self.assertEqual(cena_apartamento.comodos_sem_acesso(p), [],
+                         "o salao vazio deixou de ser percorrivel a pe")
+        ilhas = cena_apartamento.ilhas_de_caminhada(p, 0.0)
+        self.assertEqual(len(ilhas), 2,
+                         "duas bolhas a 9 m deixaram de ser duas ilhas")
+        self.assertTrue(cena_apartamento.caminhada_partida(p),
+                        "caminhada partida passou sem reclamacao")
+
+    def test_um_ponto_no_meio_costura_as_duas(self):
+        """A correcao tem de ser esta, e nao mover os pontos das pontas."""
+        p = self._planta([("A", 1.5, 2.0), ("B", 10.5, 2.0), ("C", 6.0, 2.0)])
+        self.assertEqual(len(cena_apartamento.ilhas_de_caminhada(p, 0.0)), 1)
+        self.assertEqual(cena_apartamento.caminhada_partida(p), [])
+
+    def test_fresta_atras_do_movel_nao_conta_como_ilha(self):
+        """
+        Meio metro quadrado espremido atras de um movel nao e lugar onde
+        alguem fica, e contar isso como ilha faz a medida gritar por nada —
+        foi o que me levou a exagerar o tamanho do problema na primeira vez
+        que medi. ILHA_MINIMA existe por causa disso.
+        """
+        # armario deixando uma fresta de 25 cm contra a parede do fundo
+        armario = [(2.0, 0.0, 0.25, 9.0, 2.0, 3.9, "laminado")]
+        p = self._planta([("A", 1.0, 2.0)], armario)
+        for area, _nomes in cena_apartamento.ilhas_de_caminhada(p, 0.0):
+            self.assertGreaterEqual(area, cena_apartamento.ILHA_MINIMA)
+
+    def test_parede_entre_dois_pontos_proximos_separa_as_bolhas(self):
+        """
+        Bolha e distancia, mas ilha e CAMINHO. Dois pontos a 2 m um do outro
+        com uma parede cega entre eles estao dentro do raio um do outro e
+        mesmo assim nao se visitam. Sem cortar as bolhas pelo espaco livre, a
+        medida aprovaria uma casa onde se atravessa parede.
+        """
+        muro = [(6.0, 0.0, 0.0, 6.12, 2.7, 4.0, "parede")]
+        p = self._planta([("A", 5.0, 2.0), ("B", 7.0, 2.0)], muro)
+        self.assertEqual(len(cena_apartamento.ilhas_de_caminhada(p, 0.0)), 2,
+                         "a bolha atravessou a parede")
+
+    def test_toda_planta_do_acervo_se_caminha_inteira(self):
+        """
+        A trava de verdade. Vale para as oito, e e o que impede de publicar
+        de novo um imovel partido.
+        """
+        for construir in plantas.TODAS:
+            p = construir()
+            partida = cena_apartamento.caminhada_partida(p)
+            self.assertEqual(partida, [],
+                             "%s: %s" % (p["pasta"], "; ".join(partida)))
 
 
 def limpar():
