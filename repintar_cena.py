@@ -66,6 +66,10 @@ def main():
                    help="largura do equirretangular de saida")
     p.add_argument("--lado", type=int, default=1024,
                    help="lado de cada vista entregue ao modelo")
+    p.add_argument("--vistas", type=int, default=0,
+                   help="quantas das 8 direcoes repintar (0 = todas). Comece "
+                        "com 1: uma imagem basta para ver se o visual presta, "
+                        "e a costura so importa depois que ele prestar")
     a = p.parse_args()
 
     base = os.path.join(AQUI, "fotos_" + a.pasta)
@@ -91,12 +95,33 @@ def main():
         print("repintor: IDENTIDADE — %s" % str(erro).splitlines()[0])
         print("  (o caminho roda inteiro; so nao ha repintura)")
 
-    # a profundidade entregue ao modelo e o guia cinza, nao a disparidade crua
+    saida = os.path.join(AQUI, "repintura")
+    os.makedirs(saida, exist_ok=True)
+
+    # A profundidade entregue ao modelo e o guia cinza, nao a disparidade
+    # crua. Cada vista e gravada antes e depois: e nela que se ve se o movel
+    # virou movel, e e ela que vale olhar antes de pagar as outras sete.
+    feitas = [0]
+
     def adaptado(vista, prof, descricao):
-        return pintor(vista, guia_de_profundidade(prof), descricao)
+        guia = guia_de_profundidade(prof)
+        n = feitas[0]
+        feitas[0] += 1
+        nova = pintor(vista, guia, descricao)
+        for rotulo, img in (("vista", vista), ("guia", guia), ("nova", nova)):
+            gravar_imagem(os.path.join(
+                saida, "%s_%d_%s_%d.jpg" % (a.pasta, a.ponto, rotulo, n)), img)
+        return nova
+
+    direcoes = repintar.direcoes_padrao()
+    if a.vistas:
+        direcoes = direcoes[:a.vistas]
+        print("repintando %d de %d direcoes — o resto fica como esta"
+              % (len(direcoes), len(repintar.direcoes_padrao())))
 
     novo, vazio = repintar.repintar(equi, disp, a.descricao,
-                                    repintor=adaptado, lado=a.lado)
+                                    repintor=adaptado, direcoes=direcoes,
+                                    lado=a.lado)
     novo = np.clip(novo, 0, 255).astype(np.uint8)
 
     dif = np.abs(novo.astype(np.int16) - equi.astype(np.int16)).max(axis=2)
@@ -107,13 +132,20 @@ def main():
     print("pior coluna / mediana: %.2fx  (emenda aparece aqui)"
           % (porcol.max() / max(np.median(porcol), 1e-6)))
 
-    saida = os.path.join(AQUI, "repintura")
-    os.makedirs(saida, exist_ok=True)
     antes = os.path.join(saida, "%s_%d_antes.jpg" % (a.pasta, a.ponto))
     depois = os.path.join(saida, "%s_%d_depois.jpg" % (a.pasta, a.ponto))
     gravar_imagem(antes, equi)
     gravar_imagem(depois, novo)
     print("\ngravados:\n  %s\n  %s" % (antes, depois))
+    print("  e, por vista: %s_%d_vista_N (antes), _guia_N, _nova_N (depois)"
+          % (a.pasta, a.ponto))
+    if a.vistas:
+        print("\nAVISO: com %d de %d direcoes a ESFERA fica INCOMPLETA. O"
+              " preto nela e o que" % (len(direcoes),
+                                       len(repintar.direcoes_padrao())))
+        print("nao foi coberto, nao defeito — e por isso que 'sem cobertura'"
+              " acusa milhoes de")
+        print("pixels. O que vale olhar agora e _vista_0 contra _nova_0.")
     return 0
 
 
