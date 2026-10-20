@@ -1497,8 +1497,11 @@ def sobrado():
 
     terreo = [
         # ------------------------------------------------------- hall
-        (3.20, 0.00, 0.20, 4.40, 0.80, 0.60, "madeira_esc"),
-        (3.30, 0.80, 0.24, 4.30, 0.86, 0.56, "marmore"),
+        # O aparador fica longe do PE DA ESCADA. Encostado nela, ele tapava o
+        # unico degrau baixo o bastante para subir — e o pavimento de cima
+        # ficava inalcancavel a pe, sem nada na tela que explicasse por que.
+        (4.00, 0.00, 0.25, 4.95, 0.80, 0.65, "madeira_esc"),
+        (4.08, 0.80, 0.29, 4.87, 0.86, 0.61, "marmore"),
         (4.55, 0.00, 4.05, 4.95, 1.10, 4.45, "planta"),
         # ------------------------------------------------------- lavabo
         (5.30, 0.00, 0.20, 6.10, 0.82, 0.75, "louca"),

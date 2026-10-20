@@ -295,14 +295,20 @@ MUT = [
 
     # colisao que nunca barra deixa atravessar o imovel inteiro
     ("primeira pessoa atravessa parede", "static/maquete.html",
-     "      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",
-     "      if (false && x < b.x1 + RAIO_CORPO",
+     "    return x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",
+     "    return false && x < b.x1 + RAIO_CORPO",
+     "TestPrimeiraPessoa.test_a_parede_barra_o_corpo"),
+
+    # movel do andar de cima volta a barrar quem anda embaixo
+    ("movel de um andar barra o outro", "static/maquete.html",
+     "      if (b.y0 >= piso + ALTURA_CORPO) continue;",
+     "      if (false) continue;",
      "TestPrimeiraPessoa.test_a_parede_barra_o_corpo"),
 
     # de dentro, parede cortada deixa ver o comodo vizinho por cima
     ("visita de dentro com parede cortada", "static/maquete.html",
-     '    $("corte").value = 270;',
-     '    $("corte").value = $("corte").value;',
+     "    semCorte = true;",
+     "    semCorte = false;",
      "TestPrimeiraPessoa.test_de_dentro_as_paredes_ficam_inteiras"),
 
     # olho em altura diferente da do tour: deixa de ser o que a cena 360 viu

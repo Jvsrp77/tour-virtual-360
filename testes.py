@@ -1604,27 +1604,45 @@ class TestPrimeiraPessoa(unittest.TestCase):
         with io.open(os.path.join("static", "maquete.html"), encoding="utf-8") as f:
             cls.html = f.read()
 
-    def _livre(self, planta, pontos):
-        """Roda a `livre` da pagina contra a geometria de uma planta."""
-        corpo = self.html[self.html.index("  function livre(x, z){"):]
-        corpo = corpo[:corpo.index("\n  }") + 4]
-        raio = re.search(r"RAIO_CORPO = ([\d.]+)", self.html).group(1)
+    def _trecho(self, cabeca):
+        """Recorta uma funcao da pagina, da assinatura ate o `}` na coluna 2."""
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
 
+    def _const(self, nome):
+        return re.search(nome + r" = ([\d.]+)", self.html).group(1)
+
+    def _livre(self, planta, pontos, piso=0.0):
+        """
+        Roda a `livre` da pagina contra a geometria de uma planta.
+
+        O SOLIDO AGORA TEM ALTURA, e o arranjo tem de refletir isso. Montar as
+        caixas achatadas, como era antes, faria este teste aprovar exatamente
+        o defeito que a altura conserta: a planta do pavimento de cima
+        barrando quem anda no terreo.
+        """
         solidos, cx, cz = [], -planta["larg"] / 2, -planta["fundo"] / 2
         for c in planta["caixas"]:
-            if c[6] == "parede" or c[4] - c[1] > 0.35:
-                solidos.append({"x0": c[0] + cx, "x1": c[3] + cx,
-                                "z0": c[2] + cz, "z1": c[5] + cz})
-        programa = ("const RAIO_CORPO = " + raio + ";\n"
+            solidos.append({"x0": c[0] + cx, "x1": c[3] + cx,
+                            "z0": c[2] + cz, "z1": c[5] + cz,
+                            "y0": c[1], "y1": c[4], "parede": c[6] == "parede"})
+        im = {"larg": planta["larg"], "fundo": planta["fundo"],
+              "escada": list(planta["escada"]) if planta.get("escada") else None}
+        programa = ("const RAIO_CORPO = " + self._const("RAIO_CORPO") + ";\n"
+                    "const SUBIDA_MAX = " + self._const("SUBIDA_MAX") + ";\n"
+                    "const ALTURA_CORPO = " + self._const("ALTURA_CORPO") + ";\n"
+                    "const DESNIVEL = " + self._const("DESNIVEL") + ";\n"
                     # a colisao por malha e do modelo IMPORTADO;
                     # aqui se exercita a de caixas, sem malha
                     "const malhaImportada = null;\n"
                     "const livreNaMalha = () => true;\n"
                     "const solidos = " + json.dumps(solidos) + ";\n"
                     "const atual = 0;\n"
-                    "const imoveis = [" + json.dumps(
-                        {"larg": planta["larg"], "fundo": planta["fundo"]}) + "];\n"
-                    + corpo + "\n"
+                    "const pessoa = {piso: " + repr(float(piso)) + "};\n"
+                    "const imoveis = [" + json.dumps(im) + "];\n"
+                    + self._trecho("  function tocaNoPlano(b, x, z){") + "\n"
+                    + self._trecho("  function naEscada(x, z){") + "\n"
+                    + self._trecho("  function livre(x, z){") + "\n"
                     "console.log(JSON.stringify(" + json.dumps(pontos)
                     + ".map(p => livre(p[0], p[1]))));\n")
         caminho = os.path.join(_TEMP, "livre.mjs")
@@ -1689,11 +1707,26 @@ class TestPrimeiraPessoa(unittest.TestCase):
         """
         Com a parede cortada em 1,10 m, de dentro se enxerga o cômodo vizinho
         por cima — a visita viraria um raio-X. Entrar devolve a altura cheia.
+
+        O teste olha o EFEITO e não o mecanismo. Ele cobrava
+        `$("corte").value = 270`, que era como isso se fazia enquanto a parede
+        mais alta da casa tinha 2,70 m. A casca do sobrado tem 5,65: pôr o
+        controle no máximo deixava a fachada com 48% da altura, e quem subia
+        via o andar de cima sem parede externa. Amarrado ao mecanismo, o teste
+        passava enquanto o defeito acontecia.
         """
         corpo = self.html[self.html.index("function entrarEmPessoa()"):]
         corpo = corpo[:corpo.index("function sairDePessoa()")]
-        self.assertIn('$("corte").value = 270', corpo)
+        self.assertIn("semCorte = true", corpo, "entrar não desliga o corte")
         self.assertIn("aplicarCorte()", corpo)
+
+        aplicar = self._trecho("  function aplicarCorte(){")
+        self.assertIn("semCorte ? 1", aplicar,
+                      "sem corte não força a parede inteira")
+        # e a parede volta a ser cortada ao sair, senão a maquete fica cega
+        saida = self.html[self.html.index("function sairDePessoa()"):]
+        saida = saida[:saida.index("\n  }") + 4]
+        self.assertIn("semCorte = false", saida, "sair não devolve o corte")
 
     def test_w_anda_para_onde_a_camera_olha(self):
         """
@@ -6755,7 +6788,10 @@ class TestAlcanceAPe(unittest.TestCase):
         self.assertTrue(achado, "o visor nao tem mais RAIO_CORPO")
         self.assertAlmostEqual(float(achado.group(1)),
                                cena_apartamento.RAIO_CORPO, places=3)
-        alto = re.search(r"p\[4\] - p\[1\] > ([0-9.]+)", html)
+        # o corte de altura saiu da montagem e foi para dentro do livre(),
+        # junto com a regra de andar: movel baixo nao barra, mas a laje de 13
+        # cm e CHAO de quem esta em cima e precisa continuar na lista
+        alto = re.search(r"b\.y1 - b\.y0 <= ([0-9.]+)", html)
         self.assertTrue(alto, "o visor nao tem mais o corte de altura")
         self.assertAlmostEqual(float(alto.group(1)),
                                cena_apartamento.ALTURA_QUE_BARRA, places=3)

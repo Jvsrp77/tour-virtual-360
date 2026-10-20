@@ -306,8 +306,13 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
   let cameraOrto = null, emPlanta = false, malhaImportada = null;
   let emPessoa = false, corteAntes = null, solidos = [], teclas = {};
+  let semCorte = false;   // de dentro da casa nao se corta parede
   let manche = {frente: 0, lado: 0}, luzDoSol = null;
-  const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0};
+  // `piso` e a cota em que o PE esta: zero no terreo, a da laje em cima.
+  // Sem ela o corpo flutua numa altura fixa e nao ha como existir segundo
+  // pavimento — nem para andar nele, nem para a colisao saber qual andar
+  // deve barrar.
+  const pessoa = {pos: new THREE.Vector3(), giro: 0, inclinacao: 0, piso: 0};
 
   // A camera orbita em volta do centro da planta. Angulo horizontal, angulo
   // vertical e distancia — guardados aqui porque o usuario mexe nos tres e a
@@ -587,25 +592,46 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       const m = caixa(p[0] + cx, p[1], p[2] + cz, p[3] + cx, p[4], p[5] + cz, mat);
       if (eParede){
         m.userData.alturaCheia = p[4] - p[1];
+        m.userData.baseY = cotaDoPiso(p[1], imovel.zonas);
         paredes.push(m);
         grupoObra.add(m);
       } else {
         grupoMoveis.add(m);
       }
-      // o que barra o corpo a 1,50 m: parede e movel alto. Tapete e mesa baixa
-      // nao entram — atravessar um tapete nao incomoda ninguem.
-      if (eParede || p[4] - p[1] > 0.35){
-        solidos.push({x0: p[0] + cx, x1: p[3] + cx, z0: p[2] + cz, z1: p[5] + cz});
-      }
+      // O SOLIDO LEVA ALTURA, e isso nao e detalhe.
+      //
+      // Ate aqui era so um retangulo no plano, e com um pavimento estava
+      // certo. No sobrado, a planta INTEIRA do andar de cima passou a barrar
+      // quem anda no terreo: cada parede e cada armario de cima virava parede
+      // invisivel embaixo, e a casa ficava intransitavel. Foi assim que o
+      // dono ficou preso no hall — e o pior e que nao ha nada para ver na
+      // tela, porque o que barra esta tres metros acima da cabeca dele.
+      //
+      // Sem o filtro por altura aqui tambem nao haveria degrau: a escada e
+      // uma pilha de caixas, e pisar nela depende de saber onde ela termina.
+      //
+      // E entra TODA caixa, inclusive a baixa. O filtro de "movel de mais de
+      // 35 cm" existia aqui e foi para dentro do livre(), porque ele responde
+      // so metade da pergunta: tapete nao barra, mas a LAJE do pavimento de
+      // cima tem 13 cm e e o chao de quem anda la em cima. Deixando-a de
+      // fora, o andar de cima nao tinha piso — quem subisse a escada
+      // despencava para o terreo no primeiro passo.
+      solidos.push({x0: p[0] + cx, x1: p[3] + cx, z0: p[2] + cz, z1: p[5] + cz,
+                    y0: p[1], y1: p[4], parede: eParede});
     });
 
     // as quatro paredes externas nao estao na lista: no tracador elas sao a
     // casca do imovel, nao caixas
     const E = 0.14;
+    // A CASCA SOBE ATE O ULTIMO PAVIMENTO. Parada no pe-direito do terreo,
+    // quem chegasse ao andar de cima o veria sem parede externa nenhuma —
+    // uma laje solta no ar, com ceu em volta.
+    const topo = Math.max(0, ...imovel.zonas.map(q => q.andar || 0)) + PE;
     [[0, 0, L, E], [0, F - E, L, E], [0, 0, E, F], [L - E, 0, E, F]].forEach(w => {
-      const m = caixa(w[0] + cx, 0, w[1] + cz, w[0] + w[2] + cx, PE, w[1] + w[3] + cz,
+      const m = caixa(w[0] + cx, 0, w[1] + cz, w[0] + w[2] + cx, topo, w[1] + w[3] + cz,
                       new THREE.MeshLambertMaterial({color: corParede}));
-      m.userData.alturaCheia = PE;
+      m.userData.alturaCheia = topo;
+      m.userData.baseY = 0;
       paredes.push(m);
       grupoObra.add(m);
     });
@@ -621,6 +647,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
                       vidro);
       m.userData.janela = true;
       m.userData.alturaCheia = j[5];
+      m.userData.baseY = cotaDoPiso(j[4], imovel.zonas);
       paredes.push(m);
       grupoObra.add(m);
     });
@@ -653,17 +680,36 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
   // ------------------------------------------------------------- interacao
 
+  // A cota do piso a que um elemento pertence: zero no terreo, a da laje em
+  // cima. O corte de parede e POR PAVIMENTO — cortar 1,10 m quer dizer 1,10 m
+  // acima do piso daquela parede, nao 1,10 m acima do chao do terreo.
+  // As zonas entram por PARAMETRO, e nao por `imoveis[atual]`: isto roda
+  // dentro de montar(imovel), e amarrar a cota ao indice global faria a
+  // resposta depender da ordem em que as coisas acontecem — com o andar
+  // saindo zero em silencio, que e o defeito que isto conserta.
+  function cotaDoPiso(y, zonas){
+    let melhor = 0;
+    for (const q of (zonas || [])){
+      const c = q.andar || 0;
+      if (c <= y + 0.01 && c > melhor) melhor = c;
+    }
+    return melhor;
+  }
+
   function aplicarCorte(){
     const altura = $("corte").value / 100;
     $("corteTxt").textContent = nBR(altura, 2) + " m";
     paredes.forEach(m => {
       const cheia = m.userData.alturaCheia || 1;
-      const base = m.userData.janela ? 0 : 0;
-      const k = Math.min(1, altura / cheia);
+      // REASSENTA NO PISO DELA, e nao no chao. Com um pavimento os dois eram
+      // a mesma coisa; com dois, assentar tudo em zero derruba as paredes do
+      // andar de cima para dentro do terreo — na tela, o segundo andar
+      // simplesmente aparece sem parede nenhuma.
+      const base = m.userData.baseY || 0;
+      const k = semCorte ? 1 : Math.min(1, altura / cheia);
       m.scale.y = Math.max(k, 0.001);
-      // escalar em torno do centro sobe a peca: reassenta no chao
       m.position.y = base + (m.geometry.parameters.height * m.scale.y) / 2;
-      m.visible = altura > 0.02;
+      m.visible = semCorte || altura > 0.02;
     });
   }
 
@@ -770,6 +816,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           const im = imoveis[atual];
           const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
           if (livre(x, z)){
+            pessoa.piso = 0;
             pessoa.pos.set(x, OLHO, z);
             mostrarOnde();
           } else {
@@ -978,14 +1025,20 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       avisarTrena("Não achei lugar livre para entrar neste imóvel.");
       return;
     }
-    pessoa.pos.set(p.x, OLHO, p.z);
+    pessoa.piso = p.andar || 0;
+    pessoa.pos.set(p.x, pessoa.piso + OLHO, p.z);
     seguirOChao();
     pessoa.giro = 0;
     pessoa.inclinacao = 0;
     emPessoa = true;
     ocioso = false;
     corteAntes = $("corte").value;
-    $("corte").value = 270;          // de dentro, parede cortada vaza o vizinho
+    // De dentro, parede cortada vaza o vizinho. Antes isto era feito pondo o
+    // controle no maximo (2,70 m), o que bastava enquanto a parede mais alta
+    // da casa tinha 2,70. A casca do sobrado tem 5,65: no maximo do controle
+    // ela ficava com 48% da altura, e quem subia via o andar de cima sem
+    // fachada. A bandeira diz "sem corte", que e o que se queria dizer.
+    semCorte = true;
     aplicarCorte();
     $("corte").disabled = true;
     $("chPlanta").disabled = true;
@@ -1008,6 +1061,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     $("chPlanta").disabled = false;
     document.querySelector(".corpo").classList.remove("visitando");
     redimensionar();
+    semCorte = false;
     if (corteAntes !== null){ $("corte").value = corteAntes; corteAntes = null; }
     aplicarCorte();
     aplicarChaves();
@@ -1037,6 +1091,44 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // Colisao: as caixas do imovel viram retangulos no plano, e o corpo e um
   // circulo. Testa-se um eixo de cada vez — assim, ao esbarrar na parede de
   // lado, ainda se desliza ao longo dela em vez de travar.
+  // O que um passo vence sem virar escalada, e ate onde o corpo alcanca.
+  const SUBIDA_MAX = 0.45;      // degrau; acima disto e obstaculo
+  const ALTURA_CORPO = 1.80;    // o que passa por cima da cabeca nao barra
+  const DESNIVEL = 0.02;        // soleira; fora da escada so se vence isto
+
+  // SUBIR SO NA ESCADA. Liberar 45 cm em qualquer lugar transforma a casa num
+  // parquinho: sobe-se na mesa de centro, de la no sofa, do sofa no balcao, e
+  // o visitante anda flutuando sobre a mobilia — e despenca ao sair dela. Foi
+  // o que saiu na primeira versao disto, e de dentro parece movel bugado.
+  // A planta DECLARA a caixa da escada; onde ela nao esta, movel barra.
+  function naEscada(x, z){
+    const im = imoveis[atual];
+    const e = im && im.escada;
+    if (!e) return false;
+    const px = x + im.larg / 2, pz = z + im.fundo / 2;
+    return px >= e[0] && px <= e[2] && pz >= e[1] && pz <= e[3];
+  }
+
+  function tocaNoPlano(b, x, z){
+    return x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO
+        && z > b.z0 - RAIO_CORPO && z < b.z1 + RAIO_CORPO;
+  }
+
+  // Onde o pe pousa em (x, z): o topo mais alto que ainda se sobe daqui.
+  //
+  // E assim que a escada funciona sem codigo de escada: cada degrau e uma
+  // caixa 18 cm mais alta que a anterior, entao o pe sobe de uma em uma e,
+  // no fim, esta na cota da laje. O mesmo mecanismo faz descer.
+  function alturaDoPiso(x, z){
+    const sobe = naEscada(x, z) ? SUBIDA_MAX : DESNIVEL;
+    let topo = 0;
+    for (const b of solidos){
+      if (!tocaNoPlano(b, x, z)) continue;
+      if (b.y1 <= pessoa.piso + sobe && b.y1 > topo) topo = b.y1;
+    }
+    return topo;
+  }
+
   function livre(x, z){
     // Modelo importado nao tem caixas: a geometria e malha. Ali a pergunta
     // vira "ha triangulo entre onde estou e onde quero pisar?", respondida com
@@ -1044,9 +1136,22 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     // cabeca passaria por cima da bancada.
     if (malhaImportada) return livreNaMalha(x, z);
 
+    const piso = pessoa.piso;
+    const sobe = naEscada(x, z) ? SUBIDA_MAX : DESNIVEL;
     for (const b of solidos){
-      if (x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO
-          && z > b.z0 - RAIO_CORPO && z < b.z1 + RAIO_CORPO) return false;
+      if (!tocaNoPlano(b, x, z)) continue;
+      // ALTO DEMAIS PARA SUBIR e BAIXO O BASTANTE PARA ATRAPALHAR.
+      //
+      // As duas condicoes juntas sao o que separa os pavimentos: a laje do
+      // teto comeca a 2,70 m, acima da cabeca de quem esta no terreo, entao
+      // ela nao barra; as paredes do andar de cima comecam a 2,95 m, idem. E
+      // o degrau de 18 cm nao barra porque se sobe nele. Antes disto, a casa
+      // de cima inteira era parede invisivel na casa de baixo.
+      // tapete, soleira e laje fina nao barram ninguem
+      if (!b.parede && b.y1 - b.y0 <= 0.35) continue;
+      if (b.y1 <= piso + sobe) continue;            // da para pisar em cima
+      if (b.y0 >= piso + ALTURA_CORPO) continue;    // passa por cima da cabeca
+      return false;
     }
     const im = imoveis[atual];
     const meiaL = im.larg / 2 - 0.2, meiaF = im.fundo / 2 - 0.2;
@@ -1113,6 +1218,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
     if (livre(pessoa.pos.x + dx, pessoa.pos.z)) pessoa.pos.x += dx;
     if (livre(pessoa.pos.x, pessoa.pos.z + dz)) pessoa.pos.z += dz;
+    // o pe acompanha o que esta embaixo: degrau, laje, ou o chao
+    if (!malhaImportada){
+      pessoa.piso = alturaDoPiso(pessoa.pos.x, pessoa.pos.z);
+      pessoa.pos.y = pessoa.piso + OLHO;
+    }
     seguirOChao();
     mostrarOnde();
   }
@@ -1120,7 +1230,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   function mostrarOnde(){
     const im = imoveis[atual];
     const x = pessoa.pos.x + im.larg / 2, z = pessoa.pos.z + im.fundo / 2;
-    const zona = im.zonas.find(q => x >= q.x0 && x <= q.x1 && z >= q.z0 && z <= q.z1);
+    // o andar entra na busca: com dois pavimentos, o MESMO (x, z) e dois
+    // comodos, e sem a cota o rotulo mostra o de baixo estando em cima
+    const zona = im.zonas.find(q => x >= q.x0 && x <= q.x1
+                                 && z >= q.z0 && z <= q.z1
+                                 && Math.abs((q.andar || 0) - pessoa.piso) < 1.2);
     const onde = $("ondeEstou");
     if (onde) onde.textContent = zona ? zona.nome : "passagem";
   }
