@@ -7887,6 +7887,117 @@ class TestCaminhadaEmBolhas(unittest.TestCase):
                              "%s: %s" % (p["pasta"], "; ".join(partida)))
 
 
+class TestAndarNaMaquete(unittest.TestCase):
+    """
+    Andar dentro da maquete: a altura do olho e a ida ao comodo clicado.
+
+    Os dois nasceram do mesmo relato — "queria algo para melhorar o andar
+    pelo imovel" — e sao do tipo que nao aparece em revisao de codigo, so
+    andando.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _const(self, nome):
+        return re.search(nome + r" = ([\d.]+)", self.html).group(1)
+
+    def _olho(self, piso_novo, passos, dt=1.0 / 60.0, imediato="false"):
+        """Roda acomodarOlho() varias vezes e devolve a altura a cada passo."""
+        olho = self._const("const OLHO")
+        programa = (
+            "const OLHO = " + olho + ";\n"
+            "const TEMPO_DO_OLHO = " + self._const("TEMPO_DO_OLHO") + ";\n"
+            "const malhaImportada = null;\n"
+            "const pessoa = {piso: 0, pos: {y: 0 + OLHO}};\n"
+            + self._trecho("  function acomodarOlho(dt, imediato){") + "\n"
+            "pessoa.piso = " + repr(float(piso_novo)) + ";\n"
+            "const alturas = [];\n"
+            "for (let i = 0; i < " + str(int(passos)) + "; i++){\n"
+            "  acomodarOlho(" + repr(float(dt)) + ", " + imediato + ");\n"
+            "  alturas.push(pessoa.pos.y);\n"
+            "}\n"
+            "console.log(JSON.stringify(alturas));\n")
+        caminho = os.path.join(_TEMP, "olho.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip()), float(olho)
+
+    def test_o_olho_sobe_o_degrau_aos_poucos(self):
+        """
+        O defeito: a altura do olho era colada no piso, entao cada degrau de
+        18 cm era um salto seco — dezesseis vezes numa escada. Subir parecia
+        teleporte, nao caminhada.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        alturas, olho = self._olho(0.184, 3)
+        self.assertGreater(alturas[0], olho, "o olho nao saiu do lugar")
+        self.assertLess(alturas[0], olho + 0.184,
+                        "o olho venceu o degrau inteiro no primeiro quadro")
+        for antes, depois in zip(alturas, alturas[1:]):
+            self.assertGreaterEqual(depois + 1e-9, antes,
+                                    "a altura do olho recuou na subida")
+
+    def test_mas_alcanca_o_degrau_e_nao_fica_a_caminho(self):
+        """
+        Suavizar sem chegar seria pior que nao suavizar: o olho ficaria
+        permanentemente abaixo do piso, e a casa inteira pareceria baixa.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        alturas, olho = self._olho(0.184, 60)
+        self.assertAlmostEqual(alturas[-1], olho + 0.184, places=3,
+                               msg="o olho nunca alcancou o degrau")
+
+    def test_a_chegada_a_um_comodo_e_salto_e_nao_subida(self):
+        """
+        Clicar num comodo do outro andar e TELEPORTE. Com a altura subindo
+        devagar a partir do piso antigo, a camera atravessaria a laje no
+        caminho — e o que se veria seria o teto de baixo passando pelo rosto.
+        """
+        if not self.node:
+            self.skipTest("node nao encontrado")
+        alturas, olho = self._olho(2.95, 1, imediato="true")
+        self.assertAlmostEqual(alturas[0], olho + 2.95, places=6,
+                               msg="a chegada nao foi imediata")
+
+    def test_clicar_no_comodo_leva_ate_ele_so_quando_se_esta_a_pe(self):
+        """
+        De fora, clicar no comodo ACENDE o ambiente: quem olha a maquete por
+        cima quer destacar, nao viajar. A pe, o mesmo clique leva. Sao dois
+        gestos iguais com intencoes opostas, e trocar um pelo outro irrita
+        nos dois sentidos.
+        """
+        corpo = self._trecho("  function selecionar(nome){")
+        self.assertIn("emPessoa", corpo,
+                      "selecionar() nao distingue estar a pe de estar fora")
+        self.assertIn("irParaComodo", corpo)
+
+    def test_a_busca_do_lugar_no_comodo_usa_o_andar_certo(self):
+        """
+        livre() responde em funcao do andar em que se esta. Procurar lugar no
+        quarto de cima com o pe no terreo testa contra a mobilia do terreo, e
+        devolve um ponto que la em cima esta dentro de um armario.
+        """
+        corpo = self._trecho("  function pontoDoComodo(im, zona){")
+        self.assertIn("pessoa.piso = zona.andar", corpo,
+                      "a busca nao poe o pe no andar do comodo")
+        self.assertIn("finally", corpo,
+                      "a busca nao devolve o andar de origem se algo falhar")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

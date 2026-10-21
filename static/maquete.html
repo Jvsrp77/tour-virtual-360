@@ -995,6 +995,66 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // mesa de 42 cm. Para ANDAR nao da: nasceria dentro dela. Entao escolhe-se o
   // primeiro ponto onde caiba um corpo, e se nenhum couber, o centro do maior
   // comodo.
+  // LEVAR ATE O COMODO CLICADO.
+  //
+  // A lista de comodos so ACENDIA o piso do ambiente. Numa casa de 445 m2 com
+  // 24 comodos, quem esta a pe no hall e quer ver o quarto 5 atravessa a casa
+  // inteira no teclado — e desiste antes. O nome do comodo ja esta na tela, e
+  // a planta sabe onde ele fica: clicar devia bastar.
+  //
+  // O PISO ENTRA ANTES DA BUSCA, e isso importa num sobrado: livre() responde
+  // em funcao do andar em que se esta, entao procurar lugar no quarto de cima
+  // com o pe no terreo testa contra a mobilia errada.
+  function pontoDoComodo(im, zona){
+    const antes = pessoa.piso;
+    pessoa.piso = zona.andar || 0;
+    try {
+      // 1. um ponto de captura DESTE comodo: e lugar escolhido a dedo
+      for (const p of (im.pontos || [])){
+        if (Math.abs((p.andar || 0) - pessoa.piso) > 1.2) continue;
+        if (p.x < zona.x0 || p.x > zona.x1 || p.z < zona.z0 || p.z > zona.z1)
+          continue;
+        const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
+        if (livre(x, z)) return {x: x, z: z, piso: pessoa.piso};
+      }
+      // 2. senao, varre o comodo e fica com o lugar mais folgado
+      let melhor = null, folga = -1;
+      for (let px = zona.x0 + 0.3; px < zona.x1 - 0.3; px += 0.2){
+        for (let pz = zona.z0 + 0.3; pz < zona.z1 - 0.3; pz += 0.2){
+          const x = px - im.larg / 2, z = pz - im.fundo / 2;
+          if (!livre(x, z)) continue;
+          // distancia ate a borda do comodo serve de folga aproximada
+          const d = Math.min(px - zona.x0, zona.x1 - px,
+                             pz - zona.z0, zona.z1 - pz);
+          if (d > folga){ folga = d; melhor = {x: x, z: z, piso: pessoa.piso}; }
+        }
+      }
+      return melhor;
+    } finally {
+      pessoa.piso = antes;
+    }
+  }
+
+  function irParaComodo(nome){
+    const im = imoveis[atual];
+    if (!im || !im.zonas) return false;
+    // `filter(...)[0]` e nao `find(...)`: a mesma expressao ja e a ancora de
+    // uma mutacao em outro lugar do arquivo, e ancora que casa em dois
+    // lugares deixa de testar o que devia.
+    const zona = (im.zonas || []).filter(q => q.nome === nome)[0];
+    if (!zona) return false;
+    const alvo = pontoDoComodo(im, zona);
+    if (!alvo){
+      avisarTrena("Não achei lugar livre dentro de " + nome + ".");
+      return false;
+    }
+    pessoa.piso = alvo.piso;
+    pessoa.pos.set(alvo.x, alvo.piso + OLHO, alvo.z);
+    acomodarOlho(0, true);        // chegada e salto: nada de olho subindo
+    mostrarOnde();
+    return true;
+  }
+
   function pontoDeEntrada(im){
     for (const p of im.pontos){
       const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
@@ -1198,6 +1258,21 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
             z: -cos * frente - sen * lado};
   }
 
+  // Quanto tempo o olho leva para alcancar a altura do piso novo. Baixo o
+  // bastante para nao parecer elevador, alto o bastante para a escada deixar
+  // de ser um soco: cada degrau sobe 18 cm de uma vez, e com a altura
+  // grudada no piso isso era um salto seco por degrau, dezesseis vezes.
+  // Subir passa a parecer subir.
+  const TEMPO_DO_OLHO = 0.09;   // segundos
+
+  function acomodarOlho(dt, imediato){
+    const alvo = pessoa.piso + OLHO;
+    if (imediato || malhaImportada){ pessoa.pos.y = alvo; return; }
+    const k = 1 - Math.exp(-Math.max(dt, 0) / TEMPO_DO_OLHO);
+    pessoa.pos.y += (alvo - pessoa.pos.y) * k;
+    if (Math.abs(alvo - pessoa.pos.y) < 0.002) pessoa.pos.y = alvo;
+  }
+
   function andar(dt){
     let frente = 0, lado = 0;
     if (teclas["w"] || teclas["arrowup"]) frente += 1;
@@ -1207,7 +1282,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     // o manche entra ANALOGICO: polegar pela metade anda pela metade
     frente += manche.frente;
     lado += manche.lado;
-    if (!frente && !lado) return;
+    if (!frente && !lado){ acomodarOlho(dt); return; }
 
     // Shift corre. Quem esta vendo um imovel anda devagar para olhar, mas
     // atravessar um corredor no mesmo ritmo cansa.
@@ -1219,10 +1294,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (livre(pessoa.pos.x + dx, pessoa.pos.z)) pessoa.pos.x += dx;
     if (livre(pessoa.pos.x, pessoa.pos.z + dz)) pessoa.pos.z += dz;
     // o pe acompanha o que esta embaixo: degrau, laje, ou o chao
-    if (!malhaImportada){
-      pessoa.piso = alturaDoPiso(pessoa.pos.x, pessoa.pos.z);
-      pessoa.pos.y = pessoa.piso + OLHO;
-    }
+    if (!malhaImportada) pessoa.piso = alturaDoPiso(pessoa.pos.x, pessoa.pos.z);
+    acomodarOlho(dt);
     seguirOChao();
     mostrarOnde();
   }
@@ -1792,7 +1865,14 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // ----------------------------------------------------------------- ficha
 
   function selecionar(nome){
-    selecionado = selecionado === nome ? null : nome;
+    // A PE, clicar no comodo LEVA ate ele. De fora, continua so acendendo:
+    // quem esta vendo a maquete por cima quer destacar o ambiente, nao
+    // viajar — sao dois gestos com a mesma aparencia e intencoes opostas.
+    if (emPessoa && nome && irParaComodo(nome)){
+      selecionado = nome;
+    } else {
+      selecionado = selecionado === nome ? null : nome;
+    }
     pisos.forEach(m => {
       const e = m.userData.zona.nome === selecionado;
       m.material.emissive = new THREE.Color(e ? 0x5a2a05 : 0x000000);

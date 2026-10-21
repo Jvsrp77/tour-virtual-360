@@ -471,6 +471,24 @@ MUT = [
 
     # comodo que nao existe tem de deixar a maquete como estava, e nao cair
     # no primeiro da lista fingindo que achou
+    # o olho volta a grudar no piso: a escada vira dezesseis solavancos
+    ("olho grudado no piso", "static/maquete.html",
+     "    pessoa.pos.y += (alvo - pessoa.pos.y) * k;",
+     "    pessoa.pos.y = alvo;",
+     "TestAndarNaMaquete.test_o_olho_sobe_o_degrau_aos_poucos"),
+
+    # suavizar e nunca chegar: a casa inteira pareceria baixa
+    ("olho que nunca alcanca o degrau", "static/maquete.html",
+     "    if (Math.abs(alvo - pessoa.pos.y) < 0.002) pessoa.pos.y = alvo;",
+     "    if (false) pessoa.pos.y = alvo;",
+     "TestAndarNaMaquete.test_mas_alcanca_o_degrau_e_nao_fica_a_caminho"),
+
+    # a busca do lugar deixa de olhar o andar do comodo
+    ("busca de lugar no andar errado", "static/maquete.html",
+     "    pessoa.piso = zona.andar || 0;",
+     "    pessoa.piso = pessoa.piso;",
+     "TestAndarNaMaquete.test_a_busca_do_lugar_no_comodo_usa_o_andar_certo"),
+
     ("comodo inventado cai no primeiro da lista", "static/maquete.html",
      ".find(q => q.nome === nome)",
      ".find(q => true)",
