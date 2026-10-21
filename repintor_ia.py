@@ -55,25 +55,50 @@ def _png_base64(img):
     return "data:image/png;base64," + base64.b64encode(buf.tobytes()).decode()
 
 
-def _pedir(url, cabecalhos, corpo=None):
+def _pedir(url, cabecalhos, corpo=None, tentativas=8):
+    """
+    Um pedido ao Replicate, com espera no 429.
+
+    O LIMITE DE TAXA NAO E ERRO, e tratar como erro quebraria o lote. Com
+    pouco credito a conta fica em 6 pedidos por minuto e rajada de 1 — ou
+    seja, oito vistas seguidas JA batem no teto. Num lote de 392 imagens isso
+    pararia tudo na segunda. A resposta traz `retry_after`: obedecer a ele e o
+    certo, e e mais educado do que chutar um intervalo.
+    """
     dados = json.dumps(corpo).encode("utf-8") if corpo is not None else None
     cab = dict(cabecalhos)
     if dados is not None:
         cab["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=dados, headers=cab)
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as erro:
-        # O corpo do erro diz O QUE esta errado (campo que nao existe, modelo
-        # que nao existe, credito acabado). Engolir isso e deixar o dono com
-        # "HTTP 422" e nada mais.
-        detalhe = ""
+
+    for n in range(tentativas):
+        req = urllib.request.Request(url, data=dados, headers=cab)
         try:
-            detalhe = erro.read().decode("utf-8")[:400]
-        except Exception:
-            pass
-        raise RuntimeError("Replicate respondeu %s: %s" % (erro.code, detalhe))
+            with urllib.request.urlopen(req, timeout=120) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as erro:
+            # O corpo do erro diz O QUE esta errado (campo que nao existe,
+            # modelo que nao existe, credito acabado). Engolir isso e deixar o
+            # dono com "HTTP 422" e nada mais.
+            detalhe = ""
+            try:
+                detalhe = erro.read().decode("utf-8")[:400]
+            except Exception:
+                pass
+            if erro.code == 429 and n + 1 < tentativas:
+                espera = 11.0
+                try:
+                    espera = max(1.0, float(json.loads(detalhe)["retry_after"]))
+                except Exception:
+                    pass
+                # o `retry_after` costuma vir curto demais para uma janela de
+                # 6 por minuto; um respiro a mais evita bater de novo em
+                # seguida e gastar tentativa a toa
+                time.sleep(espera + 10.0)
+                continue
+            raise RuntimeError("Replicate respondeu %s: %s"
+                               % (erro.code, detalhe))
+    raise RuntimeError("o Replicate seguiu limitando apos %d tentativas"
+                       % tentativas)
 
 
 def _baixar(url):

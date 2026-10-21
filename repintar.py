@@ -39,7 +39,27 @@ import numpy as np
 import cv2
 
 LADO = 1024               # lado da vista entregue ao modelo, em pixels
-FOV = 110.0               # graus; > o necessario, para sobrepor (ver acima)
+
+# 140 graus, e o numero tem duas razoes.
+#
+# A primeira e a sobreposicao, explicada acima: com seis vistas a cada 60
+# graus, 140 de campo deixa 80 graus de encontro entre vizinhas, e a mistura
+# por peso dilui o desacordo ao longo deles.
+#
+# A segunda sai de uma medicao, e foi ela que mudou o valor de 110 para 140.
+# As seis vistas do anel nao cobrem os polos, e o que sobra e preenchido —
+# ou seja, inventado. Ponderando pela AREA NA ESFERA, e nao pelos pixels do
+# equirretangular, que infla os polos ate o absurdo:
+#
+#     110 graus -> 19,5% da esfera inventada
+#     125 graus -> 12,3%
+#     140 graus ->  6,6%
+#     150 graus ->  3,7%
+#
+# De 110 para 140 a area inventada cai a um terco, pelas MESMAS seis imagens.
+# 150 cobriria mais ainda, mas a distorcao na borda da vista ja atrapalha o
+# modelo mais do que a calota menor compensa.
+FOV = 140.0
 
 
 def direcoes_padrao():
@@ -169,6 +189,105 @@ def tecer(vistas, largura, altura, lado=LADO, fov=FOV):
     return (saida[:, :, 0] if canais == 1 else saida), vazio
 
 
+def direcoes_do_anel():
+    """
+    So as seis do anel do olho — sem zenite e sem nadir.
+
+    POR QUE OS POLOS SAIRAM DA LISTA. Olhando direto para cima, o guia de
+    profundidade e quase uniforme: o teto e uma superficie so, a distancia
+    quase constante, sem aresta. Nao ha geometria para o modelo obedecer, e o
+    que ele faz com liberdade total e inventar — na primeira rodada botou
+    GALHOS DE ARVORE no teto da sala, e na segunda, ja com o texto pedindo
+    "teto branco liso", devolveu uma textura de concreto oxidado esverdeado.
+
+    Eu tratei isso como falta de TEXTO e era falta de SINAL. Texto nao segura
+    um modelo que nao tem o que obedecer. A resposta certa nao e pedir melhor,
+    e nao perguntar: teto e piso sao uniformes, entao a cor do anel ja
+    repintado os descreve inteiros. Ver tapar_polos().
+
+    De quebra, sao duas imagens a menos por cena — num imovel de 49 pontos,
+    98 chamadas a menos.
+    """
+    return [(yaw, 0.0) for yaw in (0.0, 60.0, 120.0, 180.0, 240.0, 300.0)]
+
+
+def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05):
+    """
+    Preenche o que ficou sem cobertura no alto e embaixo, a partir do anel.
+
+    A cor sai da MEDIANA de uma faixa de linhas ja cobertas, vizinha ao furo —
+    mediana e nao media porque uma luminaria acesa ou uma quina escura puxaria
+    a media e tingiria o teto inteiro.
+
+    A juncao entra esfumada: tapar com cor chapada deixa uma linha horizontal
+    atravessando o panorama, e no visor 360 essa linha vira um anel visivel
+    girando com a cabeca.
+    """
+    altura, largura = equi.shape[:2]
+    saida = equi.astype(np.float32).copy()
+    meio = altura // 2
+    h = max(2, int(altura * faixa))
+
+    # O ESFUMADO SEGUE A MASCARA, e nao a linha. A fronteira da cobertura nao
+    # e horizontal: as vistas sao quadradas e as QUINAS delas alcancam mais
+    # longe que o centro, entao o furo tem contorno de serra. Misturando por
+    # linha, esse ziguezague fica visivel como uma fileira de triangulos
+    # atravessando o panorama — e no visor 360 vira um anel girando com a
+    # cabeca. Borrando a propria mascara, a transicao acompanha o recorte.
+    for alto in (True, False):
+        faixa_alvo = slice(0, meio) if alto else slice(meio, altura)
+        furo = vazio[faixa_alvo]
+        if not furo.any():
+            continue
+        pedaco = saida[faixa_alvo]
+
+        # CADA COLUNA HERDA O QUE ESTA LOGO ABAIXO DELA, em vez de a calota
+        # inteira receber uma cor so.
+        #
+        # A versao da cor unica errou duas vezes antes desta. Primeiro porque
+        # a mediana pegava pixels nao cobertos — pretos — e sujava o branco.
+        # Depois, ja so com os cobertos, porque NAO EXISTE uma faixa de
+        # latitude que seja "o teto": a mediana de qualquer faixa mistura o
+        # teto claro com o que a luz escurece, e devolve um cinza medio que
+        # nao e a cor de lugar nenhum. A calota saia visivelmente mais escura
+        # do que o teto que ela deveria continuar.
+        #
+        # Propagar por coluna nao escolhe faixa nenhuma: o pixel de cima
+        # recebe o valor do primeiro coberto abaixo dele, no MESMO azimute.
+        # Se aquele canto do teto esta na sombra, a sombra sobe junto.
+        ordem = np.arange(furo.shape[0])
+        if alto:
+            # o primeiro coberto olhando de baixo para cima
+            idx = np.where(~furo, ordem[:, None], furo.shape[0] * 2)
+            fonte = idx.min(axis=0)
+        else:
+            idx = np.where(~furo, ordem[:, None], -1)
+            fonte = idx.max(axis=0)
+        validas = (fonte >= 0) & (fonte < furo.shape[0])
+        if not validas.any():
+            continue
+        linha = np.where(validas, fonte, 0)
+        cor_da_coluna = pedaco[linha, np.arange(largura)]        # (largura, 3)
+        # colunas sem nenhum coberto herdam a mediana das que tem
+        cor_da_coluna[~validas] = np.median(cor_da_coluna[validas], axis=0)
+        # borrao horizontal largo: sem ele cada coluna vira uma listra
+        espalhado = cv2.GaussianBlur(cor_da_coluna[None, :, :], (0, 0),
+                                     max(1.0, largura * 0.02))[0]
+        tapa = np.repeat(espalhado[None, :, :], furo.shape[0], axis=0)
+
+        # O FURO E DILATADO ANTES DE BORRAR. Sem isso a transicao acontece
+        # exatamente sobre a fronteira serrilhada, e o serrilhado aparece como
+        # fileira de triangulos. Dilatado, a mistura comeca ja DENTRO da area
+        # coberta — onde o teto e uniforme de qualquer jeito.
+        raio = max(3, int(altura * 0.02))
+        grosso = cv2.dilate(furo.astype(np.uint8),
+                            np.ones((raio, raio), np.uint8))
+        peso = cv2.GaussianBlur(grosso.astype(np.float32), (0, 0),
+                                max(1.0, altura * esfumado))[:, :, None]
+        saida[faixa_alvo] = pedaco * (1.0 - peso) + tapa * peso
+    return np.clip(saida, 0, 255).astype(np.uint8)
+
+
 def identidade(vista, profundidade, descricao):
     """Repintor que nao repinta. E o padrao, e e o que torna isto testavel."""
     return vista
@@ -189,5 +308,11 @@ def repintar(equi, profundidade_equi, descricao="",
     for yaw, pitch in direcoes:
         vista = extrair(equi, yaw, pitch, lado, fov)
         prof = extrair(profundidade_equi, yaw, pitch, lado, fov)
-        prontas.append((yaw, pitch, repintor(vista, prof, descricao)))
+        # O TEXTO PODE VARIAR POR DIRECAO, e precisa. A vista de cima e quase
+        # so teto liso: o guia de profundidade ali e um borrao sem estrutura,
+        # o modelo nao tem o que obedecer e inventa. Na primeira rodada ele
+        # pos GALHOS DE ARVORE no teto da sala. Quem olha para cima merece um
+        # texto que diga "teto", e nao o texto do comodo inteiro.
+        texto = descricao(yaw, pitch) if callable(descricao) else descricao
+        prontas.append((yaw, pitch, repintor(vista, prof, texto)))
     return tecer(prontas, largura, altura, lado, fov)

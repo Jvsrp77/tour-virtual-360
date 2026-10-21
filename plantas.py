@@ -479,11 +479,19 @@ def compacto():
         (7.30, 0.00, 3.25, 8.88, 0.10, 4.90, "porcelanato"),
         (7.26, 0.10, 3.25, 7.34, 1.95, 4.90, "vidro"),
         (7.30, 0.10, 3.21, 8.88, 1.95, 3.29, "vidro"),
-        # quarto
-        (5.20, 0.00, 6.00, 7.00, 0.52, 7.45, "estofado"),
-        (5.20, 0.52, 6.00, 7.00, 0.62, 7.45, "roupa_cama"),
-        (5.20, 0.52, 7.15, 7.00, 0.80, 7.45, "estofado_b"),
-        (7.20, 0.00, 6.95, 7.70, 0.55, 7.45, "madeira"),
+        # QUARTO. A cama fica no fundo, longe da porta, e a passagem corre ao
+        # LADO dela — nao na frente.
+        #
+        # Ela estava em x 5,20, colada no vao de 90 cm que da para o quarto, e
+        # lacrava o comodo: dilatada pela folga de passagem ela cobria a porta
+        # inteira. O quarto tem 2,6 m de profundidade, ou seja 1,59 m uteis
+        # depois da folga — cama nenhuma cabe atravessada ali, entao andar so
+        # e possivel pelo lado. Com ela no fundo sobram 83 cm de corredor
+        # entre a porta e o pe da cama.
+        (6.50, 0.00, 5.50, 8.00, 0.52, 7.40, "estofado"),
+        (6.50, 0.52, 5.50, 8.00, 0.62, 7.40, "roupa_cama"),
+        (6.50, 0.52, 5.50, 8.00, 0.80, 5.80, "estofado_b"),
+        (6.50, 0.00, 5.15, 7.00, 0.55, 5.45, "madeira"),
         (8.10, 0.00, 5.30, 8.90, 2.10, 7.10, "madeira_esc"),
     ]
     janelas = [
@@ -510,7 +518,8 @@ def compacto():
         ("Cozinha - junto à mesa", 8.35, 2.20),
         ("Banheiro", 6.30, 4.40),
         ("Quarto - entrada", 5.95, 5.55),
-        ("Quarto - junto à janela", 7.55, 6.30),
+        # o ponto estava em (7,55, 6,30), que agora e DENTRO da cama
+        ("Quarto - junto à janela", 5.75, 6.70),
     ]
     return dict(nome="Apartamento compacto 2 dormitórios", pasta="apto_compacto",
                 larg=larg, fundo=fundo, zonas=zonas, caixas=caixas,
@@ -704,7 +713,10 @@ def mansao():
         (10.52, 0.40, 0.30, 10.80, 0.95, 3.60, "estofado_b"),
         (6.60, 0.00, 1.20, 9.20, 0.012, 2.80, "tapete"),
         (7.20, 0.012, 1.60, 8.60, 0.40, 2.40, "madeira"),
-        (6.40, 0.00, 5.70, 9.60, 0.55, 6.25, "madeira_esc"),
+        # O APARADOR SAI DA FRENTE DA PORTA. Em x 6,40 ele cobria, ja
+        # dilatado pela folga, o vao de 1 m que liga a sala ao resto da
+        # casa — 59 m2 de sala de estar publicados e inalcancaveis.
+        (8.00, 0.00, 5.70, 11.20, 0.55, 6.25, "madeira_esc"),
         (6.90, 0.55, 5.85, 9.10, 0.62, 6.10, "vidro"),
         (4.45, 0.00, 5.40, 4.95, 0.95, 6.30, "planta"),
 
@@ -729,7 +741,11 @@ def mansao():
         (18.10, 0.00, 1.10, 21.40, 0.74, 1.80, "madeira"),
         (20.60, 0.00, 1.80, 21.40, 0.74, 3.60, "madeira"),
         (18.30, 0.74, 1.25, 19.60, 0.80, 1.65, "vidro"),
-        (17.80, 0.00, 4.90, 21.60, 2.10, 5.50, "madeira_esc"),
+        # A ESTANTE ENCURTA PARA SOBRAR CORREDOR. Com 3,8 m ela cruzava a
+        # largura util do escritorio e o partia em dois: a sala de jantar,
+        # que se alcanca ATRAVESSANDO este comodo, ficava cortada junto.
+        # Agora sobram 1,11 m de passagem do lado direito.
+        (17.80, 0.00, 4.90, 20.00, 2.10, 5.50, "madeira_esc"),
         (17.95, 0.00, 4.87, 21.45, 0.32, 5.53, "livro_a"),
         (17.95, 0.66, 4.87, 21.45, 0.98, 5.53, "livro_a"),
         (17.95, 1.32, 4.87, 21.45, 1.64, 5.53, "livro_a"),
@@ -769,10 +785,16 @@ def mansao():
 
         # --- banheiro: banheira, pia e box
         (15.70, 0.00, 13.30, 18.30, 0.62, 14.80, "louca"),
-        (15.70, 0.00, 8.75, 18.30, 0.86, 9.45, "madeira_esc"),
-        (15.70, 0.86, 8.75, 18.30, 0.92, 9.45, "pedra"),
-        (16.00, 0.92, 8.90, 17.10, 1.06, 9.30, "louca"),
-        (15.70, 0.00, 10.20, 17.10, 2.10, 11.60, "vidro"),
+        # A BANCADA SAI DA FRENTE DA PORTA e encosta na parede lateral.
+        # Atravessada, a 45 cm do vao, ela lacrava o banheiro inteiro: a
+        # conferencia antiga aprovava porque bastava UMA celula do
+        # retangulo tocar a parte alcancavel, e a boca da porta punha 48
+        # celulas la dentro contra 8.438 trancadas.
+        (15.70, 0.00, 9.60, 16.40, 0.86, 11.00, "madeira_esc"),
+        (15.66, 0.86, 9.56, 16.44, 0.92, 11.04, "pedra"),
+        (15.80, 0.92, 9.90, 16.30, 1.06, 10.60, "louca"),
+        # o box desce pela mesma parede, deixando 85 cm de corredor
+        (15.70, 0.00, 11.60, 16.90, 2.10, 13.00, "vidro"),
 
         # --- quarto 2: cama de solteiro e escrivaninha
         (18.80, 0.00, 12.90, 20.20, 0.50, 14.70, "madeira_esc"),

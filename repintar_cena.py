@@ -20,7 +20,16 @@ import sys
 import cv2
 import numpy as np
 
+import cena_apartamento
+import janelas_de_volta
+import plantas
 import repintar
+
+# A altura do olho VEM DO TRACADOR, nao e copiada. Eu copiei 1,55 na primeira
+# tentativa — que e o OLHO do plantas.py, usado para conferir se cabe camera —
+# quando o render usa 1,50. Cinco centimetros bastam para a mascara de janela
+# cair fora do vao, e o erro seria mudo: a janela voltaria torta.
+OLHO = cena_apartamento.OLHO
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,9 +54,9 @@ def gravar_imagem(caminho, img, qualidade=92):
         f.write(buf.tobytes())
 
 
-def metros(disp):
-    """O .npy guarda disparidade: r = 1 / (1,542 d + 0,125)."""
-    return (1.0 / np.maximum(disp, 1e-6) - 0.125) / 1.542
+def metros(guardado):
+    """O .npy guarda g = (1/m - 0,125)/1,542; a volta e 1/(1,542 g + 0,125)."""
+    return 1.0 / (1.542 * np.clip(guardado, 0.0, 1.0) + 0.125)
 
 
 def guia_de_profundidade(disp):
@@ -66,10 +75,19 @@ def main():
                    help="largura do equirretangular de saida")
     p.add_argument("--lado", type=int, default=1024,
                    help="lado de cada vista entregue ao modelo")
+    p.add_argument("--reaproveitar", action="store_true",
+                   help="usar as vistas ja repintadas em repintura/ em vez de "
+                        "chamar o modelo. E de graca, e e o que permite "
+                        "mexer na costura, nas janelas e nas calotas sem "
+                        "pagar a mesma imagem de novo a cada tentativa")
+    p.add_argument("--esfera", dest="anel", action="store_false",
+                   help="repintar tambem o zenite e o nadir. O padrao e nao: "
+                        "sem geometria para obedecer, o modelo inventa teto")
     p.add_argument("--vistas", type=int, default=0,
                    help="quantas das 8 direcoes repintar (0 = todas). Comece "
                         "com 1: uma imagem basta para ver se o visual presta, "
                         "e a costura so importa depois que ele prestar")
+    p.set_defaults(anel=True)
     a = p.parse_args()
 
     base = os.path.join(AQUI, "fotos_" + a.pasta)
@@ -87,6 +105,8 @@ def main():
              np.percentile(m, 2), np.percentile(m, 98)))
 
     try:
+        if a.reaproveitar:
+            raise RuntimeError("reaproveitando as vistas ja repintadas")
         import repintor_ia
         pintor = repintor_ia.de_replicate()
         print("repintor: Replicate (ControlNet de profundidade)")
@@ -107,22 +127,76 @@ def main():
         guia = guia_de_profundidade(prof)
         n = feitas[0]
         feitas[0] += 1
+        guardada = os.path.join(saida, "%s_%d_nova_%d.jpg"
+                                % (a.pasta, a.ponto, n))
+        if a.reaproveitar:
+            # de graca: a vista ja foi paga uma vez
+            nova = ler_imagem(guardada)
+            if nova is None:
+                raise SystemExit("falta %s — rode sem --reaproveitar antes"
+                                 % guardada)
+            if nova.shape[:2] != vista.shape[:2]:
+                nova = cv2.resize(nova, (vista.shape[1], vista.shape[0]),
+                                  interpolation=cv2.INTER_CUBIC)
+            return nova
         nova = pintor(vista, guia, descricao)
         for rotulo, img in (("vista", vista), ("guia", guia), ("nova", nova)):
             gravar_imagem(os.path.join(
                 saida, "%s_%d_%s_%d.jpg" % (a.pasta, a.ponto, rotulo, n)), img)
         return nova
 
-    direcoes = repintar.direcoes_padrao()
+    # O ANEL, e nao a esfera: zenite e nadir saem do preenchimento, nao do
+    # modelo. Ver direcoes_do_anel() — e duas imagens a menos por cena.
+    direcoes = repintar.direcoes_do_anel() if a.anel else repintar.direcoes_padrao()
     if a.vistas:
         direcoes = direcoes[:a.vistas]
         print("repintando %d de %d direcoes — o resto fica como esta"
               % (len(direcoes), len(repintar.direcoes_padrao())))
 
-    novo, vazio = repintar.repintar(equi, disp, a.descricao,
+    # O COMODO SE APRESENTA. O texto era so o que veio da linha de comando, e
+    # o modelo entao escolhia sozinho o que era cada volume: o painel de TV
+    # virou armario. A planta sabe o nome do comodo; dizer isso custa nada.
+    planta = next((f() for f in plantas.TODAS if f()["pasta"] == a.pasta), None)
+    ponto = planta["pontos"][a.ponto] if planta else None
+    comodo = ponto[0].split(" - ")[0] if ponto else ""
+    corpo = (a.descricao or "interior fotografico").strip()
+    if comodo:
+        corpo = "%s. %s" % (comodo.lower(), corpo)
+
+    def texto_da_vista(yaw, pitch):
+        # CIMA E BAIXO TEM TEXTO PROPRIO. Olhando para o teto o guia de
+        # profundidade e um borrao sem estrutura — nao ha o que obedecer — e
+        # com o texto do comodo inteiro o modelo pos GALHOS DE ARVORE no teto
+        # da sala. Pedir teto, recebe-se teto.
+        if pitch <= -89:
+            return ("teto branco liso de ambiente interno, luminaria "
+                    "embutida, sem moveis, sem plantas, sem janela")
+        if pitch >= 89:
+            return ("piso de madeira clara de ambiente interno, visto de "
+                    "cima, sem moveis, sem plantas")
+        return corpo
+
+    novo, vazio = repintar.repintar(equi, disp, texto_da_vista,
                                     repintor=adaptado, direcoes=direcoes,
                                     lado=a.lado)
     novo = np.clip(novo, 0, 255).astype(np.uint8)
+    if vazio.any():
+        novo = repintar.tapar_polos(novo, vazio)
+        print("calotas preenchidas pela cor do anel: %.1f%% do panorama"
+              % (100.0 * vazio.mean()))
+
+    # AS JANELAS VOLTAM POR GEOMETRIA, nao por palpite de cor: a distancia
+    # exata de cada pixel diz onde o raio bateu, e a planta diz onde estao os
+    # vaos. Sem isto o modelo fecha a janela, porque na profundidade o vidro
+    # esta a mesma distancia que a parede ao redor.
+    if planta and ponto is not None and not a.vistas:
+        m = janelas_de_volta.mascara(planta, ponto, disp, OLHO)
+        if m.any():
+            novo = janelas_de_volta.colar(novo, equi, m)
+            print("janelas recolocadas: %.2f%% do panorama"
+                  % (100.0 * m.mean()))
+        else:
+            print("nenhuma janela deste ponto cai no campo de visao")
 
     dif = np.abs(novo.astype(np.int16) - equi.astype(np.int16)).max(axis=2)
     porcol = dif.mean(axis=0)
