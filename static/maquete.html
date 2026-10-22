@@ -787,9 +787,21 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
                   pos: new THREE.Vector3(p.x + cx, (p.andar || 0) + OLHO,
                                          p.z + cz)});
     });
+    // HAVENDO FOTO, ELA VEM LIGADA.
+    //
+    // Nasceu desligada, como toda chave nova, e isso estava errado: o dono
+    // abriu a maquete do imovel repintado, viu parede chapada e disse "ainda
+    // esta daquele jeito". Estava mesmo — a chave existia tres cliques
+    // adiante, no painel lateral, entre outras quatro. Quem pediu ambiente
+    // realista nao deveria precisar procurar o ambiente realista.
+    //
+    // Continua sendo chave: desmarcar devolve a maquete chapada, que e a
+    // melhor forma de ler a planta. O que muda e qual dos dois e o padrao, e
+    // o padrao deve ser o que o imovel TEM a oferecer.
     const rotulo = $("rotuloFoto");
+    const chave = $("chFoto");
     if (rotulo) rotulo.hidden = fotos.length === 0;
-    if (!fotos.length && $("chFoto")) $("chFoto").checked = false;
+    if (chave) chave.checked = fotos.length > 0;
   }
 
   // A foto mais proxima do pedaco de geometria, no MESMO andar. Sem o corte
