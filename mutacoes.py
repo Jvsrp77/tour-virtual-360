@@ -319,9 +319,15 @@ MUT = [
 
     # sem o casamento por nome, o pino da maquete nao abre cena nenhuma
     ("pino da maquete perde a cena", "app.py",
-     '        ponto["cena_id"] = por_nome.get(ponto.get("nome"))',
+     '        ponto["cena_id"] = cena.get("id")',
      '        ponto["cena_id"] = None',
      "TestMaquete.test_cada_ponto_aponta_para_a_cena_tirada_dali"),
+
+    # sem o arquivo do panorama a maquete nao tem o que projetar na geometria
+    ("maquete perde a foto para vestir", "app.py",
+     '        ponto["arquivo"] = cena.get("arquivo")',
+     '        ponto["arquivo"] = None',
+     "TestFotoNaMaquete.test_o_ponto_leva_o_arquivo_do_panorama"),
 
     # link velho com cena apagada nao pode abrir tela preta
     ("visor usa cena pedida sem conferir", "static/viewer.html",

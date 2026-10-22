@@ -215,6 +215,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
           <label class="chave"><input type="checkbox" id="chPontos"> Pontos de captura</label>
           <label class="chave"><input type="checkbox" id="chRotulos" checked> Nomes dos cômodos</label>
           <label class="chave"><input type="checkbox" id="chPlanta"> Planta baixa (vista de cima)</label>
+          <label class="chave" id="rotuloFoto" hidden><input type="checkbox" id="chFoto"> Acabamento fotográfico</label>
         </div>
       </div>
 
@@ -674,6 +675,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     cena.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
     orbita.raio = Math.max(L, F) * 1.35;
     orbita.alvo.set(0, 0.9, 0);
+    // as fotos do proprio imovel, para a chave de acabamento ter o que vestir
+    vestidos = [];
+    carregarFotos(imovel);
     aplicarCorte();
     aplicarChaves();
   }
@@ -713,7 +717,129 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     });
   }
 
+
+  // ---------------------------------------------------- acabamento fotografico
+  //
+  // A MAQUETE VESTE A FOTO DO PROPRIO IMOVEL.
+  //
+  // Ate aqui ela era geometria chapada: parede branca, movel colorido. Boa
+  // para entender a planta, longe do que o dono queria ver — "queria que o
+  // personagem andasse em primeira pessoa e esse ambiente realista".
+  //
+  // A foto nao pode SUBSTITUIR a geometria: foto e tirada de um ponto, e aqui
+  // se anda livremente, de qualquer angulo. Mas ela pode ser PROJETADA nela.
+  // Para cada pedaco de superficie o sombreador descobre em que direcao ele
+  // esta, visto do ponto onde a foto foi tirada, e pega a cor de la. Parede,
+  // piso e teto sao planos de verdade na geometria, entao a imagem cola neles
+  // sem deformar — e continua sendo geometria, entao anda-se a 60 quadros por
+  // segundo, de onde se quiser.
+  //
+  // O MOVEL CONTINUA SENDO CAIXA. A foto cola nele tambem, e de frente parece
+  // um sofa; de lado, parece um sofa achatado. Isso nao e limitacao da
+  // textura, e da forma: na geometria aquilo E um paralelepipedo. Para o
+  // movel ficar real seria preciso modelo 3D no lugar da caixa.
+  //
+  // Fica como OPCAO, nao como troca: a maquete chapada continua sendo a
+  // melhor forma de ler a planta, e e ela que o corretor usa para explicar
+  // metragem. Por isso a chave, e por isso ela so aparece quando ha foto.
+
+  const VERTICE_FOTO = `
+    varying vec3 vMundo;
+    void main(){
+      vMundo = (modelMatrix * vec4(position, 1.0)).xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+
+  // A conta do equirretangular e a MESMA do tracador, letra por letra:
+  // lon = atan2(x, z) e v = 0,5 - lat/pi, com a linha 0 apontando para cima.
+  // A textura entra com flipY desligado justamente para que a linha 0 do
+  // arquivo seja a linha 0 aqui — com o flip padrao do three.js, o teto da
+  // casa apareceria no chao.
+  const FRAGMENTO_FOTO = `
+    uniform sampler2D foto;
+    uniform vec3 origem;
+    varying vec3 vMundo;
+    const float PI = 3.141592653589793;
+    void main(){
+      vec3 d = normalize(vMundo - origem);
+      float lon = atan(d.x, d.z);
+      float lat = asin(clamp(d.y, -1.0, 1.0));
+      vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+      gl_FragColor = vec4(texture2D(foto, uv).rgb, 1.0);
+    }`;
+
+  let fotos = [];            // {pos: Vector3, tex: Texture}
+  let vestidos = [];         // {malha, original}
+
+  function carregarFotos(im){
+    fotos.forEach(f => f.tex.dispose());
+    fotos = [];
+    const base = "/data/" + IMOVEL + "/scenes/";
+    const carregador = new THREE.TextureLoader();
+    const cx = -im.larg / 2, cz = -im.fundo / 2;
+    (im.pontos || []).forEach(p => {
+      if (!p.arquivo) return;
+      const tex = carregador.load(base + p.arquivo, () => { ocioso = false; });
+      tex.flipY = false;                 // linha 0 do arquivo = topo da esfera
+      tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+      tex.wrapS = THREE.RepeatWrapping;  // a emenda de 0 grau fecha sozinha
+      fotos.push({tex: tex,
+                  pos: new THREE.Vector3(p.x + cx, (p.andar || 0) + OLHO,
+                                         p.z + cz)});
+    });
+    const rotulo = $("rotuloFoto");
+    if (rotulo) rotulo.hidden = fotos.length === 0;
+    if (!fotos.length && $("chFoto")) $("chFoto").checked = false;
+  }
+
+  // A foto mais proxima do pedaco de geometria, no MESMO andar. Sem o corte
+  // por andar, a parede do quarto de cima vestiria a foto da sala de baixo.
+  function fotoPerto(centro){
+    let melhor = null, dist = Infinity;
+    for (const f of fotos){
+      if (Math.abs(f.pos.y - centro.y) > 2.0) continue;
+      const d = f.pos.distanceTo(centro);
+      if (d < dist){ dist = d; melhor = f; }
+    }
+    return melhor || fotos[0] || null;
+  }
+
+  const _centro = new THREE.Vector3();
+
+  function vestirDeFoto(ligar){
+    if (ligar && !fotos.length) return;
+    if (!ligar){
+      vestidos.forEach(v => {
+        if (v.malha.material.dispose) v.malha.material.dispose();
+        v.malha.material = v.original;
+      });
+      vestidos = [];
+      ocioso = false;
+      return;
+    }
+    if (vestidos.length) return;         // ja esta vestida
+    const alvos = [];
+    [grupoObra, grupoMoveis].forEach(g => g && g.traverse(o => {
+      if (o.isMesh) alvos.push(o);
+    }));
+    alvos.forEach(malha => {
+      if (!malha.geometry.boundingBox) malha.geometry.computeBoundingBox();
+      malha.geometry.boundingBox.getCenter(_centro);
+      malha.localToWorld(_centro);
+      const f = fotoPerto(_centro);
+      if (!f) return;
+      vestidos.push({malha: malha, original: malha.material});
+      malha.material = new THREE.ShaderMaterial({
+        uniforms: {foto: {value: f.tex}, origem: {value: f.pos.clone()}},
+        vertexShader: VERTICE_FOTO,
+        fragmentShader: FRAGMENTO_FOTO,
+      });
+    });
+    ocioso = false;
+  }
+
   function aplicarChaves(){
+    vestirDeFoto($("chFoto") && $("chFoto").checked);
     grupoMoveis.visible = $("chMoveis").checked;
     grupoPontos.visible = $("chPontos").checked;
     grupoRotulos.visible = $("chRotulos").checked;
@@ -838,7 +964,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     });
 
     $("corte").addEventListener("input", aplicarCorte);
-    ["chMoveis", "chPontos", "chRotulos"].forEach(id =>
+    ["chMoveis", "chPontos", "chRotulos", "chFoto"].forEach(id =>
       $(id).addEventListener("change", aplicarChaves));
     $("chPlanta").addEventListener("change", () => {
       emPlanta = $("chPlanta").checked;

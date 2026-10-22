@@ -1282,9 +1282,18 @@ def api_maquete():
     # 360 tirada dali. O casamento e pelo NOME, que e o mesmo dos dois lados
     # porque a cena nasceu do ponto. Cena renomeada perde o link e o pino deixa
     # de ser clicavel — o que e melhor do que levar para a cena errada.
-    por_nome = {c.get("nome"): c.get("id") for c in tour.get("cenas", [])}
+    # O ARQUIVO DO PANORAMA VAI JUNTO, e nao so o id da cena.
+    #
+    # A maquete sempre foi geometria chapada: parede branca, movel colorido.
+    # Com o panorama em maos ela pode PROJETAR a foto na geometria — a parede
+    # deixa de ser branca e passa a ter a imagem colada nela, e quem anda em
+    # primeira pessoa ve o comodo, nao o diagrama. O id sozinho nao bastava:
+    # com ele a pagina sabe QUAL cena, mas nao onde esta a imagem.
+    por_nome = {c.get("nome"): c for c in tour.get("cenas", [])}
     for ponto in dados.get("pontos", []):
-        ponto["cena_id"] = por_nome.get(ponto.get("nome"))
+        cena = por_nome.get(ponto.get("nome")) or {}
+        ponto["cena_id"] = cena.get("id")
+        ponto["arquivo"] = cena.get("arquivo")
     return jsonify({"ok": True, "maquete": dados})
 
 

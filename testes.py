@@ -7998,6 +7998,72 @@ class TestAndarNaMaquete(unittest.TestCase):
                       "a busca nao devolve o andar de origem se algo falhar")
 
 
+class TestFotoNaMaquete(TestMaquete):
+    """
+    A maquete vestida com a foto do proprio imovel.
+
+    POR QUE ISTO EXISTE. A maquete era geometria chapada — parede branca,
+    movel colorido — e o dono queria andar em primeira pessoa num ambiente
+    realista. A foto nao pode substituir a geometria (foto se tira de um
+    ponto, e aqui se anda de qualquer angulo), mas pode ser PROJETADA nela:
+    cada pedaco de superficie descobre em que direcao esta, visto do ponto
+    onde a foto foi tirada, e pega a cor de la.
+    """
+
+    def test_o_ponto_leva_o_arquivo_do_panorama(self):
+        """
+        O id da cena sozinho diz QUAL foto, nao ONDE ela esta. Sem o nome do
+        arquivo a pagina nao tem o que carregar, e a chave de acabamento
+        aparece desligada para sempre — sem erro nenhum na tela.
+        """
+        self.dona.post("/api/imoveis/%s/cenas/demo" % self.iid,
+                       json={"nome": "x"})
+        tour = self.dona.get("/api/imoveis/%s/tour" % self.iid).get_json()
+        self.dona.put("/api/imoveis/%s/cenas/%s"
+                      % (self.iid, tour["cenas"][0]["id"]),
+                      json={"nome": self.GEOMETRIA["pontos"][0]["nome"]})
+        m = self.dona.get("/api/imoveis/%s/maquete"
+                          % self.iid).get_json()["maquete"]
+        ponto = m["pontos"][0]
+        self.assertIn("arquivo", ponto,
+                      "o ponto nao leva o arquivo do panorama")
+        self.assertTrue(ponto["arquivo"],
+                        "a maquete ficou sem foto para projetar")
+
+    def test_a_projecao_usa_a_mesma_conta_do_tracador(self):
+        """
+        O sombreador converte direcao em pixel do equirretangular. Se a conta
+        divergir da do tracador, a foto entra girada ou de cabeca para baixo —
+        e o teto da casa aparece no chao.
+
+        Duas coisas se conferem no texto: a longitude por atan2(x, z) e a
+        linha 0 apontando para CIMA (v = 0,5 - lat/pi), que e a convencao do
+        _direcoes() do cena_apartamento.
+        """
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        self.assertIn("atan(d.x, d.z)", html,
+                      "a longitude deixou de ser atan2(x, z)")
+        self.assertIn("0.5 - lat / PI", html,
+                      "a linha 0 deixou de apontar para cima")
+        self.assertIn("flipY = false", html,
+                      "sem flipY desligado o three.js vira a foto")
+
+    def test_a_foto_e_opcao_e_nao_troca(self):
+        """
+        A maquete chapada continua sendo a melhor forma de ler a planta, e e
+        ela que explica metragem. A foto entra como chave, e a chave so
+        aparece quando ha foto — imovel sem cena repintada nao mostra um
+        controle que nao faz nada.
+        """
+        html = io.open(os.path.join("static", "maquete.html"),
+                       encoding="utf-8").read()
+        self.assertIn('id="chFoto"', html, "nao ha chave de acabamento")
+        self.assertIn('id="rotuloFoto"', html)
+        self.assertIn("rotulo.hidden = fotos.length === 0", html,
+                      "a chave aparece mesmo sem foto para vestir")
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
