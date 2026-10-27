@@ -297,13 +297,13 @@ MUT = [
     ("primeira pessoa atravessa parede", "static/maquete.html",
      "    return x > b.x0 - RAIO_CORPO && x < b.x1 + RAIO_CORPO",
      "    return false && x < b.x1 + RAIO_CORPO",
-     "TestPrimeiraPessoa.test_a_parede_barra_o_corpo"),
+     "TestPrimeiraPessoa"),
 
     # movel do andar de cima volta a barrar quem anda embaixo
     ("movel de um andar barra o outro", "static/maquete.html",
      "      if (b.y0 >= piso + ALTURA_CORPO) continue;",
      "      if (false) continue;",
-     "TestPrimeiraPessoa.test_a_parede_barra_o_corpo"),
+     "TestPrimeiraPessoa"),
 
     # de dentro, parede cortada deixa ver o comodo vizinho por cima
     ("visita de dentro com parede cortada", "static/maquete.html",

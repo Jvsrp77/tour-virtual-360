@@ -1695,6 +1695,47 @@ class TestPrimeiraPessoa(unittest.TestCase):
         self.assertEqual(self._livre(p, [[x, z]]), [False],
                          "atravessou a parede")
 
+    def test_a_planta_do_andar_de_cima_nao_barra_quem_anda_embaixo(self):
+        """
+        O defeito que prendeu o dono no hall do sobrado: sem filtrar o sólido
+        por altura, cada parede e cada armário do pavimento de CIMA virava
+        parede invisível no térreo, e a casa ficava intransitável. É o pior
+        tipo de defeito, porque não há nada na tela que explique — o que
+        barra está três metros acima da cabeça de quem anda.
+
+        O contrário de test_a_parede_barra_o_corpo, e ele sozinho não bastava:
+        arrancar o filtro de altura faz a colisão barrar MAIS, não menos,
+        então o teste que só cobra "parede barra" aprovava a casa trancada.
+
+        Mede nos 27 pontos do térreo que ficam debaixo de um sólido de cima e
+        livres embaixo — colhidos da planta, para não envelhecerem com ela.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        p = plantas.sobrado()
+        L, F = p["larg"], p["fundo"]
+        cima = [c for c in p["caixas"] if c[1] > 2.0]
+        # sólido do térreo é TUDO que começa embaixo, inclusive a parede
+        # inteira de 2,90 m — filtrar por topo deixaria elas de fora
+        baixo = [c for c in p["caixas"] if c[1] < 2.0]
+        self.assertTrue(cima, "o sobrado perdeu o pavimento de cima")
+        alvos = []
+        for c in cima:
+            x, z = (c[0] + c[3]) / 2, (c[2] + c[5]) / 2
+            if not (0.6 < x < L - 0.6 and 0.6 < z < F - 0.6):
+                continue
+            if any(b[0] - 0.4 < x < b[3] + 0.4 and b[2] - 0.4 < z < b[5] + 0.4
+                   for b in baixo):
+                continue
+            alvos.append([x - L / 2, z - F / 2])
+        self.assertGreater(len(alvos), 10,
+                           "a planta mudou e não sobrou ponto para medir")
+        livres = self._livre(p, alvos, piso=0.0)
+        presos = [a for a, ok in zip(alvos, livres) if not ok]
+        self.assertEqual(presos, [],
+                         "%d de %d pontos do térreo barrados pela planta de "
+                         "cima" % (len(presos), len(alvos)))
+
     def test_nao_se_sai_do_imovel(self):
         if not self.node:
             self.skipTest("node não encontrado")
@@ -7960,12 +8001,18 @@ class TestAndarNaMaquete(unittest.TestCase):
         """
         Suavizar sem chegar seria pior que nao suavizar: o olho ficaria
         permanentemente abaixo do piso, e a casa inteira pareceria baixa.
+
+        COBRA IGUALDADE EXATA, e nao "quase". A suavizacao e exponencial:
+        em 60 passos ela sozinha chega a 3 milionesimos do alvo, e qualquer
+        tolerancia razoavel aceita isso. Entao o teste que pedia tres casas
+        decimais passava com a linha que CRAVA o valor arrancada — e sem ela
+        o olho nunca chega, so se aproxima para sempre.
         """
         if not self.node:
             self.skipTest("node nao encontrado")
         alturas, olho = self._olho(0.184, 60)
-        self.assertAlmostEqual(alturas[-1], olho + 0.184, places=3,
-                               msg="o olho nunca alcancou o degrau")
+        self.assertEqual(alturas[-1], olho + 0.184,
+                         "o olho so se aproximou do degrau, nao alcancou")
 
     def test_a_chegada_a_um_comodo_e_salto_e_nao_subida(self):
         """
