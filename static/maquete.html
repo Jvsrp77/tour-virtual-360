@@ -466,6 +466,305 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     return m;
   }
 
+  // ------------------------------------------------- movel com forma de movel
+  //
+  // CADA MOVEL ERA UM PARALELEPIPEDO. Visto de cima, numa maquete, caixote
+  // passa: o olho le o retangulo como "sofa" porque esta no lugar do sofa e do
+  // tamanho do sofa. A PE, EM PRIMEIRA PESSOA, NAO PASSA — de perto, sofa sem
+  // braco e sem encosto e um caixote, e a casa inteira vira deposito de
+  // caixas. Depois que a caminhada ficou boa, era o que mais faltava.
+  //
+  // Nao ha modelo 3D baixado aqui, e e de proposito: biblioteca de modelos
+  // cobra megabytes por peca, licenca de terceiro e um carregador novo, para
+  // mobiliar uma planta que o projeto ja descreve inteira. A forma sai de
+  // primitivas, como todo o resto.
+  //
+  // O OBSTACULO e que a planta guarda MATERIAL, nao tipo de movel: "estofado"
+  // e sofa e tambem cadeira; "madeira_esc" e cama, mesa e criado-mudo. Mas
+  // movel de verdade tem medida caracteristica — mesa de jantar com 72 cm de
+  // alto, bancada com 88, cama com 52 e dois metros de comprimento — e o tipo
+  // sai da PROPORCAO. Os limites abaixo foram escolhidos medindo as 560 pecas
+  // do acervo, nao chutando.
+  //
+  // E SO APARENCIA. solidos continua recebendo a CAIXA da planta: colisao,
+  // degrau e alcance de comodo nao mudam em nada. A forma nunca decide por
+  // onde se anda — se decidisse, afinar um sofa abriria passagem onde o
+  // tracador que gerou a foto nao abriu, e a maquete mentiria sobre a casa.
+
+  // Peca fina nao tem estrutura para mostrar: cortina, quadro, tela e tampo
+  // solto continuam sendo a placa que sempre foram.
+  const MOVEL_MAGRO = 0.18;
+  const MACIOS = ["estofado", "estofado_b", "couro", "palha"];
+
+  let MAT_PERNA, MAT_CLARO, MAT_METAL;
+
+  function materiaisDeAcabamento(){
+    if (MAT_PERNA) return;
+    // Perna, rodape e estrutura em tom escuro: e o contraste entre estrutura
+    // e estofamento que faz o olho ler "movel" e nao "bloco pintado".
+    MAT_PERNA = new THREE.MeshLambertMaterial({color: 0x4a3b2e});
+    MAT_CLARO = new THREE.MeshLambertMaterial({color: 0xeae4da});
+    MAT_METAL = new THREE.MeshLambertMaterial({color: 0x9aa0a6});
+  }
+
+  function cilindro(x, y0, z, y1, r, mat, lados){
+    const g = new THREE.CylinderGeometry(r, r, Math.max(y1 - y0, 0.002),
+                                         lados || 10);
+    const m = new THREE.Mesh(g, mat);
+    m.position.set(x, (y0 + y1) / 2, z);
+    return m;
+  }
+
+  function esfera(x, y, z, r, mat){
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 9), mat);
+    m.position.set(x, y, z);
+    return m;
+  }
+
+  // Ruido repetivel: a mesma peca recebe sempre a mesma variacao, senao a
+  // estante remexe os livros a cada troca de imovel.
+  function sorte(n){
+    const s = Math.sin(n * 12.9898) * 43758.5453;
+    return s - Math.floor(s);
+  }
+
+  // base e topo chegam MEDIDOS DO PISO DA PECA, nao do chao zero. Medir do
+  // zero classificava o armario do segundo andar — base 2,95 — como enfeite
+  // apoiado em outro movel, e no sobrado isso era metade do mobiliario.
+  function tipoDoMovel(mat, larg, prof, alt, base){
+    const maior = Math.max(larg, prof), menor = Math.min(larg, prof);
+    const area = larg * prof;
+    const topo = base + alt;
+    if (alt <= 0.045) return "caixa";              // tapete, tampo, soleira
+    if (menor < MOVEL_MAGRO) return "caixa";
+    // PECA APOIADA EM OUTRA e enfeite, nao movel: a roupa de cama sobre o
+    // colchao, a louca sobre a bancada, o livro sobre a estante. Dar perna a
+    // ela a deixaria flutuando com quatro palitos no ar. O limite e 35 cm
+    // porque e a menor coisa que serve de apoio — abaixo disso a peca esta
+    // sobre um rodape ou uma base, e continua sendo movel de chao.
+    if (base > 0.35) return "caixa";
+    if (mat === "planta") return "planta";
+    if (mat === "louca"){
+      if (alt >= 0.30 && maior <= 0.95) return "vaso";
+      if (maior >= 1.20 && menor >= 0.60 && alt >= 0.35 && alt <= 0.80)
+        return "banheira";
+      return "caixa";
+    }
+    if (mat === "livro_a" && topo >= 1.20) return "estante";
+    if (MACIOS.indexOf(mat) >= 0){
+      if (topo < 0.30) return "caixa";             // puff, futon
+      return maior >= 1.25 ? "sofa" : "cadeira";
+    }
+    // 1,05 m e onde a bancada acaba: acima disso nao ha tampo de trabalho, ha
+    // caixa fechada — comoda, armario baixo, torre de forno. Todas levam
+    // rodape recuado, porta e puxador, e nenhuma leva perna.
+    if (topo >= 1.05) return "armario";
+    if (maior >= 1.75 && menor >= 0.85 && topo >= 0.28 && topo <= 0.70)
+      return "cama";
+    // A ALTURA DO TAMPO SEPARA MESA DE BANCADA, e e a unica coisa que separa:
+    // mesa de jantar e escrivaninha ficam entre 58 e 80 cm e tem perna a
+    // vista; bancada de cozinha e de banheiro ficam entre 80 e 105 e tem
+    // armario embaixo, com rodape recuado. Dar perna a uma bancada e tao
+    // errado quanto deixar uma mesa macica ate o chao. E e o TAMPO, nao a
+    // espessura da caixa: a bancada de 3,20 m da cozinha e um bloco de 78 cm
+    // sobre um rodape de 10, e pela espessura ela viraria mesa de jantar.
+    if (topo >= 0.80 && topo <= 1.05 && area >= 0.20) return "bancada";
+    if (topo >= 0.58 && topo <= 0.80 && area >= 0.22) return "mesa";
+    // PECA PEQUENA NA ALTURA DO ASSENTO. Medido: 38 delas no acervo, em
+    // madeira e pedra — cadeira de jantar, banqueta, mesa de canto. O
+    // material nao desempata, e o tamanho tambem nao: cadeira de madeira e
+    // mesa de canto tem a mesma caixa. Entao leva PERNA E NAO LEVA ENCOSTO:
+    // perna serve as duas, encosto numa mesa de canto seria erro na cara.
+    if (topo >= 0.35 && topo <= 0.60 && area <= 0.55 && maior <= 0.75)
+      return "mesa";
+    // Balcao de TV, comoda baixa, banco de sapateira: baixo demais para ter
+    // perna a vista, grande demais para ser enfeite. Leva o mesmo corpo da
+    // bancada, que nao tem escala propria — rodape recuado e tampo com
+    // beiral funcionam a 50 cm como a 90.
+    if (topo >= 0.30 && topo <= 0.58 && area >= 0.30 && menor >= 0.25)
+      return "bancada";
+    return "caixa";
+  }
+
+  // De que lado ficam as costas: do lado da parede mais proxima. Sofa de
+  // costas para o meio da sala, cabeceira de cama no meio do quarto e bancada
+  // encostada no ar sao erros que se veem de longe. O encosto corre ao longo
+  // do lado mais COMPRIDO da peca, entao os candidatos sao os dois lados
+  // perpendiculares ao eixo curto.
+  function ladoDasCostas(x0, z0, x1, z1, L, F){
+    if ((x1 - x0) >= (z1 - z0)) return z0 <= (F - z1) ? "z0" : "z1";
+    return x0 <= (L - x1) ? "x0" : "x1";
+  }
+
+  function formaDoMovel(tipo, a, mat, costas, semente){
+    const g = new THREE.Group();
+    const larg = a.x1 - a.x0, prof = a.z1 - a.z0, alt = a.y1 - a.y0;
+
+    // Dentro de uma forma e mais facil raciocinar em (u, v): u corre ao longo
+    // das costas e v mede a distancia a partir delas. Assim o sofa e escrito
+    // uma vez, e nao quatro vezes — uma por orientacao.
+    const eZ = (costas === "z0" || costas === "z1");
+    const sinal = (costas === "z0" || costas === "x0") ? 1 : -1;
+    const comp = eZ ? larg : prof;
+    const fundo = eZ ? prof : larg;
+    const u0 = eZ ? a.x0 : a.z0;
+    const v0 = eZ ? (sinal > 0 ? a.z0 : a.z1) : (sinal > 0 ? a.x0 : a.x1);
+
+    function bloco(ua, va, ub, vb, y0, y1, m){
+      const p = v0 + sinal * va, q = v0 + sinal * vb;
+      const w0 = Math.min(p, q), w1 = Math.max(p, q);
+      if (eZ) g.add(caixa(u0 + ua, y0, w0, u0 + ub, y1, w1, m || mat));
+      else    g.add(caixa(w0, y0, u0 + ua, w1, y1, u0 + ub, m || mat));
+    }
+
+    function pino(uu, vv, y0, y1, r, m, lados){
+      const p = v0 + sinal * vv;
+      if (eZ) g.add(cilindro(u0 + uu, y0, p, y1, r, m || mat, lados));
+      else    g.add(cilindro(p, y0, u0 + uu, y1, r, m || mat, lados));
+    }
+
+    if (tipo === "sofa"){
+      // A planta descreve o sofa pela altura do ASSENTO (38 a 52 cm). O
+      // encosto sobe ACIMA da caixa declarada, e tem de subir: sofa de 45 cm
+      // de altura total e um banco. Nao muda colisao nenhuma — o encosto fica
+      // dentro da mesma pegada no chao.
+      const pe = 0.11;
+      const esp = Math.min(0.18, fundo * 0.26);
+      const braco = Math.min(0.17, comp * 0.16);
+      const topo = Math.max(a.y1 + 0.36, a.y0 + 0.80);
+      const altoBraco = a.y0 + (topo - a.y0) * 0.66;
+      [[braco * 0.6, esp * 0.8], [comp - braco * 0.6, esp * 0.8],
+       [braco * 0.6, fundo - 0.10], [comp - braco * 0.6, fundo - 0.10]]
+        .forEach(q => pino(q[0], q[1], a.y0, a.y0 + pe, 0.03, MAT_PERNA));
+      bloco(0, 0, comp, esp, a.y0 + pe, topo);
+      bloco(0, esp, braco, fundo, a.y0 + pe, altoBraco);
+      bloco(comp - braco, esp, comp, fundo, a.y0 + pe, altoBraco);
+      const vao = comp - 2 * braco;
+      bloco(braco, esp, comp - braco, fundo, a.y0 + pe, a.y1 - 0.09);
+      const n = Math.max(1, Math.round(vao / 0.62));
+      for (let i = 0; i < n; i++)
+        bloco(braco + i * vao / n + 0.012, esp + 0.01,
+              braco + (i + 1) * vao / n - 0.012, fundo - 0.02,
+              a.y1 - 0.10, a.y1);
+    } else if (tipo === "cadeira"){
+      const assento = Math.min(a.y1, a.y0 + 0.46);
+      const ins = Math.min(0.06, comp * 0.15);
+      [[ins, ins], [comp - ins, ins],
+       [ins, fundo - ins], [comp - ins, fundo - ins]]
+        .forEach(q => pino(q[0], q[1], a.y0, assento - 0.05, 0.023, MAT_PERNA));
+      bloco(0.01, 0.012, comp - 0.01, fundo - 0.012, assento - 0.05, assento);
+      bloco(0.03, 0.02, comp - 0.03, Math.min(0.09, fundo * 0.30),
+            assento, Math.max(a.y1, a.y0 + 0.86));
+    } else if (tipo === "cama"){
+      const pe = 0.10;
+      const colchao = Math.max(a.y0 + 0.20, a.y1 - 0.26);
+      const cab = Math.min(0.07, fundo * 0.06);
+      [[0.12, cab + 0.08], [comp - 0.12, cab + 0.08],
+       [0.12, fundo - 0.10], [comp - 0.12, fundo - 0.10]]
+        .forEach(q => pino(q[0], q[1], a.y0, a.y0 + pe, 0.035, MAT_PERNA));
+      bloco(0, cab, comp, fundo, a.y0 + pe, colchao);
+      bloco(0.03, cab + 0.03, comp - 0.03, fundo - 0.03, colchao, a.y1,
+            MAT_CLARO);
+      bloco(0, 0, comp, cab, a.y0 + pe, a.y0 + 0.95);
+    } else if (tipo === "mesa"){
+      const esp = 0.045;
+      const ins = Math.min(0.08, Math.min(comp, fundo) * 0.14);
+      const r = Math.max(0.016, Math.min(0.03, Math.min(comp, fundo) * 0.06));
+      bloco(0, 0, comp, fundo, a.y1 - esp, a.y1);
+      [[ins, ins], [comp - ins, ins],
+       [ins, fundo - ins], [comp - ins, fundo - ins]]
+        .forEach(q => pino(q[0], q[1], a.y0, a.y1 - esp, r, MAT_PERNA));
+    } else if (tipo === "bancada"){
+      const esp = 0.04, saia = 0.09, rec = 0.05;
+      bloco(rec, rec, comp - rec, fundo, a.y0, a.y0 + saia, MAT_PERNA);
+      bloco(0.012, 0.012, comp - 0.012, fundo, a.y0 + saia, a.y1 - esp);
+      bloco(0, 0, comp, fundo + 0.02, a.y1 - esp, a.y1);   // tampo com beiral
+      const portas = Math.max(1, Math.round(comp / 0.60));
+      for (let i = 1; i < portas; i++)
+        bloco(i * comp / portas - 0.006, fundo - 0.004,
+              i * comp / portas + 0.006, fundo + 0.004,
+              a.y0 + saia + 0.02, a.y1 - esp - 0.02, MAT_PERNA);
+    } else if (tipo === "armario"){
+      const saia = 0.06, rec = 0.035;
+      bloco(rec, rec, comp - rec, fundo, a.y0, a.y0 + saia, MAT_PERNA);
+      bloco(0, 0, comp, fundo, a.y0 + saia, a.y1);
+      const portas = Math.max(1, Math.round(comp / 0.55));
+      for (let i = 1; i < portas; i++){
+        bloco(i * comp / portas - 0.006, fundo - 0.004,
+              i * comp / portas + 0.006, fundo + 0.006,
+              a.y0 + saia, a.y1 - 0.02, MAT_PERNA);
+        [-0.045, 0.045].forEach(d =>
+          pino(i * comp / portas + d, fundo + 0.016,
+               a.y0 + alt * 0.42, a.y0 + alt * 0.58, 0.012, MAT_METAL, 8));
+      }
+    } else if (tipo === "estante"){
+      const esp = 0.03;
+      bloco(0, 0, esp * 1.2, fundo, a.y0, a.y1, MAT_PERNA);
+      bloco(comp - esp * 1.2, 0, comp, fundo, a.y0, a.y1, MAT_PERNA);
+      bloco(0, 0, comp, esp, a.y0, a.y1, MAT_PERNA);
+      const pr = Math.max(2, Math.round(alt / 0.38));
+      for (let i = 0; i <= pr; i++){
+        const y = Math.min(a.y0 + i * alt / pr, a.y1 - esp);
+        bloco(esp * 1.2, esp, comp - esp * 1.2, fundo, y, y + esp, MAT_PERNA);
+        if (i === pr) break;
+        // LIVRO NA PRATELEIRA. Estante vazia nao parece estante; parece
+        // divisoria. Os blocos saem de sorte() para que a mesma estante traga
+        // sempre os mesmos livros.
+        let u = esp * 1.2 + 0.02;
+        let k = 0;
+        while (u < comp - esp * 1.2 - 0.06){
+          const w = 0.04 + sorte(semente * 31 + i * 17 + k) * 0.10;
+          const h = (alt / pr - esp) * (0.55 + sorte(semente * 7 + i * 5 + k)
+                                              * 0.33);
+          if (u + w > comp - esp * 1.2 - 0.02) break;
+          bloco(u, esp + 0.015, u + w, fundo - 0.03, y + esp, y + esp + h);
+          u += w + 0.008;
+          k++;
+        }
+      }
+    } else if (tipo === "vaso"){
+      const rp = Math.min(0.13, Math.min(comp, fundo) * 0.30);
+      const tq = Math.min(0.19, fundo * 0.40);
+      const bacia = a.y0 + Math.min(0.42, alt * 0.72);
+      pino(comp / 2, tq + (fundo - tq) * 0.55, a.y0, bacia - 0.09, rp, mat, 14);
+      bloco(comp * 0.10, tq, comp * 0.90, fundo - 0.02, bacia - 0.09, bacia);
+      bloco(0.01, 0.01, comp - 0.01, tq, a.y0 + 0.20,
+            Math.max(a.y1, a.y0 + 0.72));
+    } else if (tipo === "banheira"){
+      // Sem geometria de subtracao, a cuba e o VAZIO deixado entre quatro
+      // bordas. E a borda que faz o olho ler banheira em vez de caixote.
+      const bo = Math.min(0.11, Math.min(comp, fundo) * 0.13);
+      bloco(0, 0, comp, bo, a.y0, a.y1);
+      bloco(0, fundo - bo, comp, fundo, a.y0, a.y1);
+      bloco(0, 0, bo, fundo, a.y0, a.y1);
+      bloco(comp - bo, 0, comp, fundo, a.y0, a.y1);
+      bloco(bo, bo, comp - bo, fundo - bo, a.y0, a.y0 + 0.08);
+    } else if (tipo === "planta"){
+      const mx = (a.x0 + a.x1) / 2, mz = (a.z0 + a.z1) / 2;
+      const r = Math.min(larg, prof) * 0.46;
+      const hv = Math.min(0.30, alt * 0.38);
+      g.add(cilindro(mx, a.y0, mz, a.y0 + hv, r * 0.82, MAT_PERNA, 14));
+      g.add(cilindro(mx, a.y0 + hv, mz, a.y0 + alt * 0.62, 0.022, MAT_PERNA, 8));
+      g.add(esfera(mx, a.y0 + alt * 0.74, mz, r * 1.05, mat));
+      g.add(esfera(mx + r * 0.5, a.y0 + alt * 0.92, mz - r * 0.3, r * 0.62, mat));
+    }
+    return g;
+  }
+
+  // Uma caixa da planta virando o objeto que ela representa.
+  function movel(p, cx, cz, nomeMat, mat, L, F, semente, piso){
+    const larg = p[3] - p[0], prof = p[5] - p[2];
+    const alt = Math.max(p[4] - p[1], 0.002);
+    const a = {x0: p[0] + cx, y0: p[1], z0: p[2] + cz,
+               x1: p[3] + cx, y1: p[4], z1: p[5] + cz};
+    const tipo = tipoDoMovel(nomeMat, larg, prof, alt, p[1] - (piso || 0));
+    if (tipo === "caixa")
+      return caixa(a.x0, a.y0, a.z0, a.x1, a.y1, a.z1, mat);
+    materiaisDeAcabamento();
+    return formaDoMovel(tipo, a, mat,
+                        ladoDasCostas(p[0], p[2], p[3], p[5], L, F), semente);
+  }
+
   // Metragem junto do nome no proprio chao da maquete. Sem ela, quem olha de
   // cima ve "Quarto" e "Quarto" e nao sabe qual e o de casal — o tamanho e a
   // primeira pergunta de quem procura imovel, e estava so na lista lateral.
@@ -582,7 +881,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     // paredes e mobiliario
     const corParede = new THREE.Color(getComputedStyle(document.documentElement)
       .getPropertyValue("--surface").trim() || "#ffffff");
-    imovel.caixas.forEach(c => {
+    imovel.caixas.forEach((c, iCaixa) => {
       const p = c.p;
       const eParede = c.m === "parede";
       const larg = Math.max(p[3] - p[0], p[5] - p[2]);
@@ -590,14 +889,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       const mat = eParede
         ? new THREE.MeshLambertMaterial({color: corParede})
         : material(c.cor, c.m, larg, alt);
-      const m = caixa(p[0] + cx, p[1], p[2] + cz, p[3] + cx, p[4], p[5] + cz, mat);
       if (eParede){
+        const m = caixa(p[0] + cx, p[1], p[2] + cz,
+                        p[3] + cx, p[4], p[5] + cz, mat);
         m.userData.alturaCheia = p[4] - p[1];
         m.userData.baseY = cotaDoPiso(p[1], imovel.zonas);
         paredes.push(m);
         grupoObra.add(m);
       } else {
-        grupoMoveis.add(m);
+        grupoMoveis.add(movel(p, cx, cz, c.m, mat, L, F, iCaixa,
+                              cotaDoPiso(p[1], imovel.zonas)));
       }
       // O SOLIDO LEVA ALTURA, e isso nao e detalhe.
       //

@@ -1176,6 +1176,54 @@ MUT = [
      'RAIO_CORPO = 0.28',
      'RAIO_CORPO = 0.10',
      'TestAlcanceAPe.test_o_corpo_tem_a_mesma_largura_aqui_e_no_visor'),
+
+    # -------------------------------------- movel com forma, no lugar da caixa
+
+    ('a base do movel volta a ser medida do chao zero', 'static/maquete.html',
+     'const tipo = tipoDoMovel(nomeMat, larg, prof, alt, p[1] - (piso || 0));',
+     'const tipo = tipoDoMovel(nomeMat, larg, prof, alt, p[1]);',
+     'TestMovelComFormaDeMovel.test_a_base_do_movel_e_medida_do_piso_dele'),
+
+    ('mesa e bancada voltam a se separar pela espessura',
+     'static/maquete.html',
+     'const topo = base + alt;',
+     'const topo = alt;',
+     'TestMovelComFormaDeMovel'
+     '.test_o_tampo_separa_mesa_de_bancada_e_nao_a_espessura'),
+
+    ('bancada ganha quatro pernas a vista', 'static/maquete.html',
+     'if (topo >= 0.80 && topo <= 1.05 && area >= 0.20) return "bancada";',
+     'if (false) return "bancada";',
+     'TestMovelComFormaDeMovel'
+     '.test_o_tampo_separa_mesa_de_bancada_e_nao_a_espessura'),
+
+    ('peca apoiada em outra ganha perna', 'static/maquete.html',
+     'if (base > 0.35) return "caixa";',
+     'if (false) return "caixa";',
+     'TestMovelComFormaDeMovel.test_peca_fina_e_peca_apoiada_continuam_placa'),
+
+    ('cortina ganha rodape e puxador', 'static/maquete.html',
+     'const MOVEL_MAGRO = 0.18;',
+     'const MOVEL_MAGRO = 0.0;',
+     'TestMovelComFormaDeMovel.test_peca_fina_e_peca_apoiada_continuam_placa'),
+
+    ('as costas do movel ignoram onde esta a parede', 'static/maquete.html',
+     'if ((x1 - x0) >= (z1 - z0)) return z0 <= (F - z1) ? "z0" : "z1";',
+     'if ((x1 - x0) >= (z1 - z0)) return "z0";',
+     'TestMovelComFormaDeMovel.test_as_costas_do_movel_ficam_do_lado_da_parede'),
+
+    ('estofado deixa de ser sofa e cadeira', 'static/maquete.html',
+     'const MACIOS = ["estofado", "estofado_b", "couro", "palha"];',
+     'const MACIOS = [];',
+     'TestMovelComFormaDeMovel.test_o_tipo_sai_da_proporcao_e_cobre_o_acervo'),
+
+    # Esta e a mutacao que mais custou a pegar: o classificador continua
+    # classificando certo, e todo teste que o exercita passa — so que ninguem
+    # monta a forma, e a casa volta inteira a ser caixote em silencio.
+    ('a mobilia volta a ser caixote em silencio', 'static/maquete.html',
+     'if (tipo === "caixa")\n      return caixa(',
+     'if (true)\n      return caixa(',
+     'TestMovelComFormaDeMovel.test_cada_tipo_tem_forma_montada'),
 ]
 
 

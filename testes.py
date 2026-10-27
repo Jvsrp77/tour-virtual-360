@@ -6632,7 +6632,13 @@ class TestAlcanceAPe(unittest.TestCase):
         """
         p = self._planta(plantas._px(3.0, [(0.0, 4.0)]))
         self.assertIn("B", cena_apartamento.comodos_sem_acesso(p))
-        self.assertTrue(cena_apartamento.conferir(p))
+        # COBRA O NOME DO COMODO, e nao so "deu algum problema". Quando a
+        # caminhada partida entrou no conferir(), ela passou a encher a lista
+        # sozinha — comodo lacrado tambem parte a caminhada — e o assertTrue
+        # ficou satisfeito pelo problema errado: arrancar a checagem de
+        # acesso inteira deixou de ser acusado.
+        self.assertIn("B: nao da para chegar andando",
+                      cena_apartamento.conferir(p))
 
     def test_com_porta_o_comodo_passa(self):
         """O contraste do teste de cima: a mesma parede, com um vao de 1 m."""
@@ -8062,6 +8068,317 @@ class TestFotoNaMaquete(TestMaquete):
         self.assertIn('id="rotuloFoto"', html)
         self.assertIn("rotulo.hidden = fotos.length === 0", html,
                       "a chave aparece mesmo sem foto para vestir")
+
+
+# Um three.js de mentira, só com o que o montador de móveis toca. Com ele a
+# forma de CADA peça do acervo pode ser montada de verdade no Node — e é a
+# única maneira de pegar geometria degenerada, que não aparece em revisão de
+# código e na tela some atrás de outro móvel.
+_THREE_DE_MENTIRA = r'''
+class Pos {
+  constructor(){ this.x = 0; this.y = 0; this.z = 0; }
+  set(x, y, z){ this.x = x; this.y = y; this.z = z; }
+}
+const THREE = {
+  Group: class { constructor(){ this.children = []; this.isGroup = true; }
+                 add(o){ this.children.push(o); } },
+  Mesh: class { constructor(g, m){ this.geometry = g; this.material = m;
+                 this.isMesh = true; this.position = new Pos(); } },
+  BoxGeometry: class { constructor(w, h, d){ this.kind = "box";
+                 this.parameters = {width: w, height: h, depth: d}; } },
+  CylinderGeometry: class { constructor(rt, rb, h){ this.kind = "cil";
+                 this.parameters = {radius: rt, height: h}; } },
+  SphereGeometry: class { constructor(r){ this.kind = "esf";
+                 this.parameters = {radius: r}; } },
+  MeshLambertMaterial: class { constructor(o){ Object.assign(this, o || {}); } },
+};
+function material(){ return new THREE.MeshLambertMaterial({}); }
+function caixaDe(o){
+  const p = o.geometry.parameters, q = o.position;
+  if (o.geometry.kind === "box")
+    return [q.x - p.width/2, q.y - p.height/2, q.z - p.depth/2,
+            q.x + p.width/2, q.y + p.height/2, q.z + p.depth/2];
+  if (o.geometry.kind === "cil")
+    return [q.x - p.radius, q.y - p.height/2, q.z - p.radius,
+            q.x + p.radius, q.y + p.height/2, q.z + p.radius];
+  return [q.x - p.radius, q.y - p.radius, q.z - p.radius,
+          q.x + p.radius, q.y + p.radius, q.z + p.radius];
+}
+'''
+
+
+class TestMovelComFormaDeMovel(unittest.TestCase):
+    """
+    Movel com forma de movel, no lugar do paralelepipedo.
+
+    POR QUE ISTO EXISTE. Visto de cima, numa maquete, caixote passa: o olho le
+    o retangulo como "sofa" porque esta no lugar do sofa e do tamanho do sofa.
+    A PE, EM PRIMEIRA PESSOA, nao passa — de perto, sofa sem braco e sem
+    encosto e um caixote, e a casa inteira vira deposito de caixas. Depois que
+    a caminhada ficou boa, era o que mais faltava.
+
+    Nao ha modelo 3D baixado: a forma sai de primitivas. O obstaculo e que a
+    planta guarda MATERIAL, nao tipo de movel — "estofado" e sofa e tambem
+    cadeira; "madeira_esc" e cama, mesa e criado-mudo. O tipo sai da
+    PROPORCAO, e e por isso que estes testes rodam contra o ACERVO INTEIRO no
+    Node: limite que so acerta no papel deixa a casa cheia de caixote.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _rodar(self, programa, nome):
+        caminho = os.path.join(_TEMP, nome)
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def _tipos(self, pecas):
+        """Roda o tipoDoMovel() da propria pagina sobre uma lista de pecas."""
+        consts = re.search(r"  const MOVEL_MAGRO = [^\n]+\n"
+                           r"  const MACIOS = [^\n]+", self.html).group(0)
+        return self._rodar(
+            consts + "\n" + self._trecho("  function tipoDoMovel(") + "\n"
+            + "console.log(JSON.stringify(" + json.dumps(pecas)
+            + ".map(q => tipoDoMovel(q[0], q[1], q[2], q[3], q[4]))));\n",
+            "tipos.mjs")
+
+    def _acervo(self):
+        """Toda peca de mobilia do acervo, com a base medida do piso DELA."""
+        pecas = []
+        for construir in plantas.TODAS:
+            p = construir()
+            andares = cena_apartamento.andares_da(p) or [0.0]
+            for c in p["caixas"]:
+                if c[6] in ("parede", "teto"):
+                    continue
+                piso = max([a for a in andares if a <= c[1] + 0.01] or [0.0])
+                pecas.append([c[6], round(c[3] - c[0], 3),
+                              round(c[5] - c[2], 3), round(c[4] - c[1], 3),
+                              round(c[1] - piso, 3)])
+        return pecas
+
+    def test_a_forma_nunca_decide_por_onde_se_anda(self):
+        """
+        A forma e SO aparencia. Se o solido passasse a sair dela, afinar um
+        sofa abriria passagem onde o tracador que gerou a FOTO nao abriu: a
+        maquete e a foto discordariam sobre a casa, e o visitante atravessaria
+        um movel que esta ali na imagem.
+
+        Entao solidos continua recebendo a CAIXA da planta, p.
+        """
+        self.assertIn("grupoMoveis.add(movel(p, cx, cz", self.html,
+                      "a mobilia deixou de ganhar forma")
+        self.assertIn("solidos.push({x0: p[0] + cx, x1: p[3] + cx", self.html,
+                      "o solido deixou de sair da caixa da planta")
+        self.assertIn("y0: p[1], y1: p[4]", self.html,
+                      "a altura do solido deixou de sair da caixa da planta")
+
+    def test_a_base_do_movel_e_medida_do_piso_dele(self):
+        """
+        MEDIDO, e foi o erro que custou a primeira medicao: medindo do chao
+        zero, o armario do segundo andar do sobrado — base 2,95 m — era lido
+        como enfeite apoiado em cima de outro movel, e continuava caixote. No
+        sobrado isso era metade do mobiliario.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        armario = ["laminado", 0.60, 2.80, 2.30]
+        tipos = self._tipos([armario + [0.00], armario + [2.95]])
+        self.assertEqual(tipos[0], "armario",
+                         "armario no proprio piso nao foi reconhecido")
+        self.assertEqual(tipos[1], "caixa",
+                         "peca a 2,95 m DO PROPRIO PISO seria movel flutuando")
+        self.assertIn("p[1] - (piso || 0)", self.html,
+                      "movel() deixou de medir a base a partir do piso")
+        self.assertIn("cotaDoPiso(p[1], imovel.zonas)", self.html,
+                      "a chamada deixou de passar o piso da peca")
+
+    def test_o_tampo_separa_mesa_de_bancada_e_nao_a_espessura(self):
+        """
+        MEDIDO: a bancada de 3,20 m da cozinha e um bloco de 78 cm sobre um
+        rodape de 10 — tampo a 88, altura de bancada. Decidindo pela ESPESSURA
+        da caixa ela virava mesa de jantar, e ganhava quatro pernas a vista
+        com o armario da cozinha flutuando em cima delas.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        tipos = self._tipos([
+            ["laminado", 3.20, 0.62, 0.78, 0.10],    # tampo a 0,88: bancada
+            ["madeira_esc", 1.80, 0.90, 0.74, 0.00],  # tampo a 0,74: mesa
+        ])
+        self.assertEqual(tipos, ["bancada", "mesa"])
+
+    def test_peca_fina_e_peca_apoiada_continuam_placa(self):
+        """
+        Cortina tem 16 cm de espessura, tapete tem 1 cm, e a roupa de cama
+        esta em cima do colchao. Dar perna, rodape ou encosto a qualquer uma
+        delas poe quatro palitos flutuando no ar.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        self.assertEqual(self._tipos([
+            ["cortina", 0.16, 6.00, 2.50, 0.00],
+            ["tapete", 2.40, 1.70, 0.01, 0.00],
+            ["roupa_cama", 1.60, 2.10, 0.14, 0.52],
+            ["louca", 0.50, 0.40, 0.18, 0.90],
+        ]), ["caixa"] * 4)
+
+    def test_as_costas_do_movel_ficam_do_lado_da_parede(self):
+        """
+        Sofa de costas para o meio da sala e cabeceira plantada no meio do
+        quarto sao erros que se veem de longe. O encosto corre ao longo do
+        lado mais comprido da peca e tem um lado certo: o da parede proxima.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        # imovel de 8 x 6; sofa de 2,20 x 0,90 encostado em cada parede
+        casos = [[2.0, 0.10, 4.2, 1.00],     # junto a parede z = 0
+                 [2.0, 5.00, 4.2, 5.90],     # junto a parede z = 6
+                 [0.10, 2.0, 1.00, 4.2],     # junto a parede x = 0
+                 [7.00, 2.0, 7.90, 4.2]]     # junto a parede x = 8
+        lados = self._rodar(
+            self._trecho("  function ladoDasCostas(") + "\n"
+            + "console.log(JSON.stringify(" + json.dumps(casos)
+            + ".map(q => ladoDasCostas(q[0], q[1], q[2], q[3], 8, 6))));\n",
+            "costas.mjs")
+        self.assertEqual(lados, ["z0", "z1", "x0", "x1"])
+
+    def test_o_tipo_sai_da_proporcao_e_cobre_o_acervo(self):
+        """
+        O que prova que os limites valem e o ACERVO, nao o papel.
+
+        MEDIDO sobre as 673 pecas de mobilia das plantas publicadas: 311
+        (46%) ganham forma de movel. O resto e laje de 13 cm, cortina de 16 e
+        armario aereo — caixa mesmo. Os dez tipos tem de aparecer: tipo que
+        nao pega nenhuma peca do acervo e codigo morto se fazendo de feature.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        tipos = self._tipos(self._acervo())
+        conta = {}
+        for t in tipos:
+            conta[t] = conta.get(t, 0) + 1
+        for esperado in ("sofa", "cadeira", "cama", "mesa", "bancada",
+                         "armario", "estante", "vaso", "banheira", "planta"):
+            self.assertGreater(conta.get(esperado, 0), 0,
+                               "nenhuma peça do acervo virou %s" % esperado)
+        com_forma = len(tipos) - conta.get("caixa", 0)
+        self.assertGreater(
+            com_forma * 1.0 / len(tipos), 0.30,
+            "a mobília voltou a ser caixote: só %d de %d com forma"
+            % (com_forma, len(tipos)))
+
+    def test_nenhuma_forma_do_acervo_sai_torta(self):
+        """
+        Monta a forma de TODA peca do acervo num three.js de mentira e cobra
+        quatro coisas que na tela passam despercebidas:
+
+        - medida <= 0 ou NaN: o three.js aceita e desenha nada. O movel some,
+          mas a colisao continua la — o visitante bate no que nao ve.
+        - transbordar a pegada: a colisao usa a CAIXA da planta, entao braco
+          de sofa que escapa dela de lado e um pedaco de movel atravessavel.
+        - afundar no piso: perna que nasce abaixo do chao do comodo.
+        - subir demais: encosto e cabeceira sobem de proposito (sofa sem
+          encosto e banco), mas 70 cm acima do topo declarado e o limite —
+          acima disso ja nao e movel, e poste na frente da camera.
+
+        MEDIDO: 673 pecas, 310 com forma, 2897 malhas, zero defeitos.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        consts = re.search(r"  const MOVEL_MAGRO = [^\n]+\n"
+                           r"  const MACIOS = [^\n]+", self.html).group(0)
+        pecas = []
+        for construir in plantas.TODAS:
+            p = construir()
+            andares = cena_apartamento.andares_da(p) or [0.0]
+            for c in p["caixas"]:
+                if c[6] in ("parede", "teto"):
+                    continue
+                piso = max([a for a in andares if a <= c[1] + 0.01] or [0.0])
+                pecas.append({"m": c[6], "piso": piso, "L": p["larg"],
+                              "F": p["fundo"], "p": list(c[:6])})
+        montador = "".join(
+            self._trecho(cabeca) + "\n" for cabeca in (
+                "  function materiaisDeAcabamento(){",
+                "  function caixa(x0, y0, z0, x1, y1, z1, mat){",
+                "  function cilindro(", "  function esfera(",
+                "  function sorte(", "  function tipoDoMovel(",
+                "  function ladoDasCostas(", "  function formaDoMovel(",
+                "  function movel("))
+        d = self._rodar(
+            _THREE_DE_MENTIRA + "\n" + consts + "\n"
+            + "  let MAT_PERNA, MAT_CLARO, MAT_METAL;\n" + montador
+            + "const pecas = " + json.dumps(pecas) + ";\n" + r'''
+const ruins = [];
+let grupos = 0, malhas = 0;
+pecas.forEach((q, i) => {
+  const cx = -q.L / 2, cz = -q.F / 2;
+  const o = movel(q.p, cx, cz, q.m, material(), q.L, q.F, i, q.piso);
+  const filhos = o.isGroup ? o.children : [o];
+  if (o.isGroup) grupos++;
+  malhas += filhos.length;
+  if (o.isGroup && !filhos.length){
+    ruins.push("grupo vazio: " + q.m); return;
+  }
+  const x0 = q.p[0] + cx, x1 = q.p[3] + cx;
+  const z0 = q.p[2] + cz, z1 = q.p[5] + cz;
+  filhos.forEach(f => {
+    const b = caixaDe(f), d = f.geometry.parameters;
+    if (b.some(v => !isFinite(v))) return ruins.push("NaN: " + q.m);
+    if ([d.width, d.height, d.depth, d.radius]
+          .filter(v => v !== undefined).some(v => v <= 0))
+      ruins.push("medida <= 0: " + q.m);
+    const fora = Math.max(x0 - b[0], b[3] - x1, z0 - b[2], b[5] - z1);
+    if (fora > 0.05)
+      ruins.push("transborda " + fora.toFixed(2) + " m: " + q.m);
+    if (b[1] < q.p[1] - 0.001) ruins.push("afunda no piso: " + q.m);
+    if (b[4] > q.p[4] + 0.70)
+      ruins.push("sobe " + (b[4] - q.p[4]).toFixed(2) + " m: " + q.m);
+  });
+});
+console.log(JSON.stringify({grupos: grupos, malhas: malhas,
+                            ruins: ruins.slice(0, 12), n: ruins.length}));
+''', "montar.mjs")
+        self.assertEqual(d["n"], 0, "%d formas tortas, por exemplo: %s"
+                         % (d["n"], "; ".join(d["ruins"])))
+        self.assertGreater(d["grupos"], 200,
+                           "só %d peças ganharam forma" % d["grupos"])
+        self.assertLess(d["malhas"] * 1.0 / len(pecas), 8.0,
+                        "%.1f malhas por peça: a cena ficou pesada demais"
+                        % (d["malhas"] * 1.0 / len(pecas)))
+
+    def test_cada_tipo_tem_forma_montada(self):
+        """
+        Classificar sem montar e pior que nao classificar: a peca sai do ramo
+        da caixa, cai num ramo que nao existe e desaparece da tela. Movel
+        invisivel com colisao e o pior dos dois mundos — o visitante bate numa
+        parede que nao esta la.
+        """
+        corpo = self._trecho("  function formaDoMovel(")
+        for tipo in ("sofa", "cadeira", "cama", "mesa", "bancada", "armario",
+                     "estante", "vaso", "banheira", "planta"):
+            self.assertIn('tipo === "%s"' % tipo, corpo,
+                          "formaDoMovel() nao monta %s" % tipo)
+        # e o despacho tem de ser PELO TIPO. Mutando a condicao para `true`,
+        # tudo volta a ser caixote e nenhum outro teste daqui percebe: eles
+        # exercitam o classificador, que continua classificando certo para
+        # uma forma que ninguem mais monta.
+        self.assertIn('if (tipo === "caixa")\n      return caixa(', self.html,
+                      "movel() parou de despachar pelo tipo: ou devolve "
+                      "sempre caixa, ou nunca")
 
 
 def limpar():
