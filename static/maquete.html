@@ -1143,6 +1143,94 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // O PISO ENTRA ANTES DA BUSCA, e isso importa num sobrado: livre() responde
   // em funcao do andar em que se esta, entao procurar lugar no quarto de cima
   // com o pe no terreo testa contra a mobilia errada.
+
+  // ------------------------------------------- onde nascer, e para onde olhar
+  //
+  // O PRIMEIRO SEGUNDO DA VISITA ESTAVA RUIM, e e o segundo que decide se
+  // alguem continua. Entrando a pe, a camera nascia num PONTO DE CAPTURA — e
+  // ponto de captura foi escolhido para FOTOGRAFAR, nao para nascer. Varios
+  // ficam a meio metro de um armario, porque dali se enquadra bem o comodo.
+  // Nascendo ali, com o olho a 1,50 m, a tela inteira vira uma mancha bege de
+  // parede borrada, e o visitante nao sabe nem que lado e o certo.
+  //
+  // Agora nasce no lugar de MAIOR FOLGA do comodo, olhando para a direcao em
+  // que se enxerga mais longe. E a mesma pergunta que o posicionador de
+  // pontos ja faz — "onde cabe mais corpo" — respondida aqui para outro fim.
+
+  // Distancia de (x, z) ate o obstaculo mais proximo, no andar em que se esta.
+  function folgaEm(x, z){
+    const im = imoveis[atual];
+    if (!im) return 0;
+    const piso = pessoa.piso;
+    const sobe = naEscada(x, z) ? SUBIDA_MAX : DESNIVEL;
+    let d = Math.min(x + im.larg / 2, im.larg / 2 - x,
+                     z + im.fundo / 2, im.fundo / 2 - z);
+    for (const b of solidos){
+      // a condicao vai escrita ao contrario de proposito: a forma direta ja
+      // e ancora de uma mutacao no livre(), e ancora que casa em dois lugares
+      // deixa de testar o que devia
+      if (!b.parede && b.y1 - b.y0 <= 0.35) continue;
+      if (b.y1 <= piso + sobe) continue;
+      if (!(b.y0 < piso + ALTURA_CORPO)) continue;
+      const dx = Math.max(b.x0 - x, 0, x - b.x1);
+      const dz = Math.max(b.z0 - z, 0, z - b.z1);
+      const q = Math.hypot(dx, dz);
+      if (q < d) d = q;
+    }
+    return d;
+  }
+
+  // O lugar mais folgado de um comodo — ou do imovel inteiro, sem comodo.
+  function lugarMaisFolgado(im, zona){
+    const antes = pessoa.piso;
+    if (zona) pessoa.piso = zona.andar || 0;
+    const x0 = zona ? zona.x0 : 0.3, x1 = zona ? zona.x1 : im.larg - 0.3;
+    const z0 = zona ? zona.z0 : 0.3, z1 = zona ? zona.z1 : im.fundo - 0.3;
+    let melhor = null, folga = -1;
+    for (let px = x0 + 0.2; px < x1 - 0.2; px += 0.15){
+      for (let pz = z0 + 0.2; pz < z1 - 0.2; pz += 0.15){
+        const x = px - im.larg / 2, z = pz - im.fundo / 2;
+        if (!livre(x, z)) continue;
+        const f = folgaEm(x, z);
+        if (f > folga){ folga = f; melhor = {x: x, z: z, piso: pessoa.piso,
+                                             folga: f}; }
+      }
+    }
+    pessoa.piso = antes;
+    return melhor;
+  }
+
+  // Para que lado se enxerga mais longe. Sem isto, nascer no meio do comodo
+  // ainda deixa metade das vezes o visitante de cara para a parede mais
+  // proxima — e o lugar certo com a vista errada nao resolve nada.
+  const PASSOS_DO_OLHAR = 24;
+
+  function olharMaisAberto(x, z){
+    let melhor = 0, maior = -1;
+    for (let i = 0; i < PASSOS_DO_OLHAR; i++){
+      const giro = i * Math.PI * 2 / PASSOS_DO_OLHAR;
+      const v = direcao(giro, 1, 0);
+      let d = 0;
+      while (d < 12 && livre(x + v.x * (d + 0.25), z + v.z * (d + 0.25)))
+        d += 0.25;
+      if (d > maior){ maior = d; melhor = giro; }
+    }
+    return melhor;
+  }
+
+  // Onde comecar a visita: o lugar mais folgado do maior comodo. Com varios
+  // pavimentos, o terreo — e por onde se entra numa casa.
+  function lugarDeEntrada(im){
+    const noChao = (im.zonas || []).filter(z => (z.andar || 0) < 0.01);
+    const candidatas = (noChao.length ? noChao : (im.zonas || []))
+      .slice().sort((a, b) => b.m2 - a.m2);
+    for (const zona of candidatas.slice(0, 3)){
+      const lugar = lugarMaisFolgado(im, zona);
+      if (lugar && lugar.folga > 0.5) return lugar;
+    }
+    return lugarMaisFolgado(im, null);
+  }
+
   function pontoDoComodo(im, zona){
     const antes = pessoa.piso;
     pessoa.piso = zona.andar || 0;
@@ -1153,7 +1241,12 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         if (p.x < zona.x0 || p.x > zona.x1 || p.z < zona.z0 || p.z > zona.z1)
           continue;
         const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
-        if (livre(x, z)) return {x: x, z: z, piso: pessoa.piso};
+        // PONTO DE CAPTURA SO SE FOR FOLGADO. Ele foi escolhido para
+        // fotografar, e varios ficam a meio metro de um armario — chegar
+        // num comodo de cara para uma parede borrada e pior do que chegar
+        // um metro ao lado.
+        if (livre(x, z) && folgaEm(x, z) > 0.8)
+          return {x: x, z: z, piso: pessoa.piso};
       }
       // 2. senao, varre o comodo e fica com o lugar mais folgado
       let melhor = null, folga = -1;
@@ -1189,6 +1282,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     pessoa.piso = alvo.piso;
     pessoa.pos.set(alvo.x, alvo.piso + OLHO, alvo.z);
     acomodarOlho(0, true);        // chegada e salto: nada de olho subindo
+    pessoa.giro = olharMaisAberto(alvo.x, alvo.z);
     mostrarOnde();
     return true;
   }
@@ -1218,15 +1312,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const im = imoveis[atual];
     if (!im) return;
     // modelo importado nao tem ponto de captura: entra-se no meio dele
-    const p = im.importado ? {x: 0, z: 0} : pontoDeEntrada(im);
+    const p = im.importado ? {x: 0, z: 0}
+                          : (lugarDeEntrada(im) || pontoDeEntrada(im));
     if (!p){
       avisarTrena("Não achei lugar livre para entrar neste imóvel.");
       return;
     }
-    pessoa.piso = p.andar || 0;
+    pessoa.piso = p.piso || p.andar || 0;
     pessoa.pos.set(p.x, pessoa.piso + OLHO, p.z);
     seguirOChao();
-    pessoa.giro = 0;
+    pessoa.giro = im.importado ? 0 : olharMaisAberto(p.x, p.z);
     pessoa.inclinacao = 0;
     emPessoa = true;
     ocioso = false;
