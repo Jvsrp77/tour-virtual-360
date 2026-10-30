@@ -8428,6 +8428,330 @@ console.log(JSON.stringify({grupos: grupos, malhas: malhas,
                       "sempre caixa, ou nunca")
 
 
+class TestMisturaDeFotos(unittest.TestCase):
+    """
+    Cada pedaco de superficie vestido pelas fotos tiradas PERTO DELE.
+
+    POR QUE ISTO EXISTE. Cada malha vestia UMA foto: a mais proxima do centro
+    dela. Parece razoavel e nao e, porque malha nao tem tamanho fixo — o piso
+    da sala integrada do apartamento compacto tem 36,5 m2 e e UMA malha, e o
+    living da casa pavilhao tem 149,6 m2. A malha inteira recebia a foto do
+    centro, enquanto seus cantos estavam perto de fotos diferentes.
+
+    MEDIDO antes, nos imoveis publicados: a foto que pintava cada pedaco de
+    piso estava, em media, de 1,7 a 7,1 vezes mais longe do que a foto mais
+    proxima dali, e de 47% a 96% da area era pintada pela foto errada. O
+    absurdo e que PIORAVA com mais trabalho: quanto mais pontos de captura o
+    imovel tinha, maior a chance de a foto escolhida pelo centro nao servir
+    para o canto. Dai os dois defeitos visiveis — a tabua do assoalho mudando
+    de direcao numa linha reta (a borda da malha) e o borrao no fundo dos
+    comodos grandes (uma foto esticada por seis metros).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+        cls.raio = float(re.search(r"RAIO_DA_MISTURA = ([\d.]+)",
+                                   cls.html).group(1))
+        cls.quantas = int(re.search(r"FOTOS_NA_MISTURA = (\d+)",
+                                    cls.html).group(1))
+        cls.fatia = float(re.search(r"LADO_DA_FATIA = ([\d.]+)",
+                                    cls.html).group(1))
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _peso(self, d):
+        """O mesmo peso do sombreador. O expoente 6 e conferido abaixo."""
+        return max(0.0, 1.0 / max(d, 0.30) - 1.0 / self.raio) ** 6
+
+    def _amostras(self, planta, fatiar=True):
+        """
+        Cada pedaço de piso, com as distâncias que importam: até as fotos
+        que a malha RECEBEU, e até todas as do andar.
+
+        AS FOTOS SÃO ESCOLHIDAS PELO CENTRO DA MALHA, e a malha é uma FATIA
+        de LADO_DA_FATIA metros — é assim que o montador constrói e é a
+        lista que o sombreador recebe. Medir com as fotos mais próximas de
+        CADA PEDAÇO mediria um programa melhor do que o que existe, e foi o
+        erro que este teste tinha: ele passava com a mistura reduzida a uma
+        foto só, porque reduzia junto a régua com que media.
+        """
+        pontos = [(q[1], q[2], cena_apartamento.base_do_ponto(q))
+                  for q in planta["pontos"]]
+        for z in planta["zonas"]:
+            base = cena_apartamento.base_da_zona(z)
+            perto = [q for q in pontos if abs(q[2] - base) <= 2.0]
+            if not perto:
+                continue
+            # fatiar=False reproduz o programa ANTIGO: a zona inteira era uma
+            # malha só, com uma lista escolhida no centro dela
+            emX = self._fatias(z[1], z[2]) if fatiar else [(z[1], z[2])]
+            emZ = self._fatias(z[3], z[4]) if fatiar else [(z[3], z[4])]
+            for fx0, fx1 in emX:
+                for fz0, fz1 in emZ:
+                    cx, cz = (fx0 + fx1) / 2.0, (fz0 + fz1) / 2.0
+                    escolhidas = sorted(perto, key=lambda q: (q[0] - cx) ** 2
+                                        + (q[1] - cz) ** 2)[:self.quantas]
+                    px = fx0 + 0.2
+                    while px < fx1 - 0.1:
+                        pz = fz0 + 0.2
+                        while pz < fz1 - 0.1:
+                            def ate(q, px=px, pz=pz):
+                                return (((q[0] - px) ** 2
+                                         + (q[1] - pz) ** 2) ** 0.5)
+                            yield ([ate(q) for q in escolhidas],
+                                   sorted(ate(q) for q in perto))
+                            pz += 0.2
+                        px += 0.2
+
+    def _fatias(self, a0, a1):
+        """O mesmo corte do montador: fatias iguais, nunca maiores que o lado."""
+        n = max(1, int(math.ceil((a1 - a0) / self.fatia - 1e-9)))
+        p = (a1 - a0) / n
+        return [(a0 + i * p, a0 + (i + 1) * p) for i in range(n)]
+
+    def test_o_peso_zera_no_raio_e_nao_so_encolhe(self):
+        """
+        É isto que faz a emenda sumir, e é sutil.
+
+        Um peso que apenas ENCOLHE com a distância continua dando degrau: a
+        foto que sai da lista de uma malha para a vizinha sai com peso
+        pequeno, mas não nulo, e pequeno vezes uma foto inteira ainda é uma
+        linha visível na divisa. Zerando no raio, ela sai com peso zero.
+
+        O expoente 6 é o que mantém a imagem nítida: com 2, um pedaço a 2,0 m
+        de uma foto e a 2,5 m de outra saía 65/35 — metade do cômodo
+        misturado, e misturar dois panoramas repintados em separado não
+        suaviza, borra. Com 6 o mesmo pedaço sai 86/14.
+        """
+        corpo = self._trecho("    float peso(vec3 o, float lig){")
+        self.assertIn("max(0.0, 1.0 / d - 1.0 / raio)", corpo,
+                      "o peso deixou de zerar no raio")
+        self.assertIn("float p3 = perto * perto * perto;", corpo)
+        self.assertIn("return lig * frente * p3 * p3;", corpo,
+                      "o expoente da queda mudou; _peso() aqui usa 6")
+
+    def test_foto_atras_da_superficie_nao_opina(self):
+        """
+        Sem isto a mistura PIORARIA a parede entre dois cômodos: ela é uma
+        caixa só, e a foto da cozinha, mirando a face da sala, atravessa a
+        parede e traz a cozinha. A face da sala sairia meio sala, meio
+        cozinha — defeito que a escolha por malha não tinha.
+        """
+        corpo = self._trecho("    float peso(vec3 o, float lig){")
+        self.assertIn("dot(vNormalM, normalize(v))", corpo,
+                      "o peso não olha mais para que lado a superfície aponta")
+        self.assertIn("vNormalM = normalize(mat3(modelMatrix) * normal);",
+                      self.html, "a normal do mundo não chega ao sombreador")
+
+    def test_superficie_que_nenhuma_foto_enxerga_fica_chapada(self):
+        """
+        Fundo de armário e face externa da casca: antes recebiam o que o
+        panorama mostrasse naquela direção, que é o cômodo do outro lado da
+        parede — de fora, a casa aparecia vestida por dentro.
+        """
+        self.assertIn("gl_FragColor = vec4(corBase, 1.0); return;", self.html)
+        self.assertIn("function corDoMaterial(m){", self.html)
+
+    def test_os_espacos_do_sombreador_saem_da_constante(self):
+        """
+        Escritos à mão, trocar FOTOS_NA_MISTURA exigiria lembrar de mexer em
+        quatro lugares do GLSL, e o espaço que sobrasse para trás sairia
+        preto na tela — num imóvel só, o que ninguém notaria em revisão.
+        """
+        self.assertIn("uniform float ativo[${FOTOS_NA_MISTURA}];", self.html)
+        self.assertIn('_slots(i => "uniform sampler2D foto" + i + ";")',
+                      self.html)
+        self.assertIn("Array.from({length: FOTOS_NA_MISTURA}", self.html)
+
+    def test_espaco_sobrando_recebe_textura_de_verdade(self):
+        """
+        O sombreador lê os seis espaços sempre. Amostrar um sampler sem
+        textura é indefinido — em parte das placas sai preto — então o imóvel
+        com menos de seis fotos ficaria todo manchado. A sobra recebe a
+        textura do espaço 0, com peso zero.
+        """
+        self.assertIn("perto[Math.min(i, perto.length - 1)]", self.html)
+        self.assertIn("i < perto.length ? 1 : 0", self.html)
+
+    def test_fotos_perto_traz_as_mais_proximas_do_mesmo_andar(self):
+        """
+        Sem o corte por andar, a parede do quarto de cima vestiria a foto da
+        sala de baixo — três metros abaixo, do outro lado de uma laje.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        programa = (
+            "class V3 { constructor(x,y,z){this.x=x;this.y=y;this.z=z;}\n"
+            "  distanceTo(o){ return Math.hypot(this.x-o.x, this.y-o.y,"
+            " this.z-o.z); } }\n"
+            "const fotos = [\n"
+            "  {nome:'terreo perto', pos:new V3(0,1.5,1)},\n"
+            "  {nome:'terreo longe', pos:new V3(0,1.5,6)},\n"
+            "  {nome:'terreo medio', pos:new V3(0,1.5,3)},\n"
+            "  {nome:'de cima',      pos:new V3(0,4.45,0.2)},\n"
+            "];\n"
+            + self._trecho("  function fotosPerto(centro, quantas){") + "\n"
+            "console.log(JSON.stringify("
+            "fotosPerto(new V3(0,1.5,0), 2).map(f => f.nome)));\n")
+        caminho = os.path.join(_TEMP, "fotosperto.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        self.assertEqual(json.loads(r.stdout.strip()),
+                         ["terreo perto", "terreo medio"],
+                         "a foto de cima entrou, ou a ordem não é por "
+                         "distância")
+
+    def test_a_mistura_pinta_cada_pedaco_com_a_foto_dali(self):
+        """
+        O número que justifica o trabalho todo, medido nas oito plantas.
+
+        "Distância efetiva" é a média das distâncias das fotos, pesada pelo
+        peso que cada uma tem naquele pedaço — ou seja, de que longe, na
+        prática, veio a cor dali. Dividida pela distância da foto mais
+        próxima, ela diz quanto se está desperdiçando: 1,0 é o ideal.
+
+        MEDIDO: antes, de 1,7 a 7,1. Depois, 1,02 em todos.
+        """
+        pior_antes, pior_depois = 0.0, 0.0
+        for construir in plantas.TODAS:
+            p = construir()
+            # ANTES: o cômodo inteiro era uma malha, e usava a foto mais
+            # próxima do centro dela — slots[0] da lista sem fatiar.
+            n = soma = 0
+            for slots, todas in self._amostras(p, fatiar=False):
+                n += 1
+                soma += slots[0] / max(todas[0], 0.2)
+            if n:
+                pior_antes = max(pior_antes, soma / n)
+            # DEPOIS: cada fatia mistura a lista dela, peso a peso.
+            n = soma = 0
+            for slots, todas in self._amostras(p):
+                ws = [self._peso(d) for d in slots]
+                s = sum(ws)
+                n += 1
+                soma += (sum(w * d for w, d in zip(ws, slots)) / s
+                         if s > 0 else slots[0]) / max(todas[0], 0.2)
+            if n:
+                pior_depois = max(pior_depois, soma / n)
+        self.assertGreater(pior_antes, 1.5,
+                           "a escolha por malha deixou de ser ruim; este "
+                           "teste perdeu o contraste que o justifica")
+        self.assertLess(pior_depois, 1.10,
+                        "a cor de cada pedaço vem de %.2f vezes mais longe "
+                        "do que a foto que havia ali" % pior_depois)
+
+    def test_truncar_em_seis_nao_recria_o_degrau(self):
+        """
+        O sombreador recebe só as seis fotos mais próximas da MALHA, e a
+        lista muda de uma malha para a vizinha. Se as fotos de fora da lista
+        carregassem peso de verdade, a troca da lista seria um novo degrau —
+        o mesmo defeito, mudado de lugar.
+
+        MEDIDO em 32.763 pedaços de piso das oito plantas, com fatia de
+        1,5 m: mediana 0%, p90 0,03%, p99 0,46%, p99,9 4,4%, pior 29,7%.
+        Só 0,09% da área passa de 5%, e está nas casas de captura mais densa
+        — 135 fotos em 520 m², onde seis vizinhas não seguram o peso.
+
+        Sem fatiar, o mesmo número era 100%: o canto do living de 149,6 m²
+        ficava a mais de cinco metros das seis fotos escolhidas no centro
+        dele, peso zero, e o piso virava mancha chapada.
+        """
+        pior, p99 = 0.0, []
+        for construir in plantas.TODAS:
+            p = construir()
+            for slots, todas in self._amostras(p):
+                if len(todas) <= len(slots):
+                    continue
+                dentro = sum(self._peso(d) for d in slots)
+                tot = sum(self._peso(d) for d in todas)
+                if tot <= 0:
+                    continue
+                q = max(0.0, tot - dentro) / tot
+                p99.append(q)
+                pior = max(pior, q)
+        self.assertTrue(p99, "nenhuma planta tem mais fotos do que espaços")
+        p99.sort()
+        n = len(p99)
+        self.assertLess(p99[int(n * 0.99)], 0.01,
+                        "no percentil 99 sobra peso demais fora dos espaços")
+        self.assertLess(p99[int(n * 0.999)], 0.06,
+                        "no percentil 99,9 sobra peso demais fora dos espaços")
+        acima = sum(1 for q in p99 if q > 0.05) * 1.0 / n
+        self.assertLess(acima, 0.003,
+                        "%.2f%% da área tem mais de 5%% do peso fora dos "
+                        "espaços: a emenda voltou a ser visível"
+                        % (100 * acima))
+        self.assertLess(pior, 0.35,
+                        "no pior pedaço, %.1f%% do peso fica fora dos "
+                        "espaços" % (100 * pior))
+
+    def test_a_malha_comprida_e_fatiada_e_o_solido_nao(self):
+        """
+        A lista de fotos é por malha, e isso impõe um tamanho máximo a ela:
+        num living de 149,6 m² as seis fotos escolhidas no centro ficam todas
+        no meio, e o canto fica fora do raio de todas — peso zero, mancha
+        chapada no meio do cômodo fotografado.
+
+        Piso, parede interna e casca externa vão fatiados. O SÓLIDO não: ele
+        continua saindo da caixa inteira da planta, uma vez, senão fatiar a
+        aparência mudaria a colisão junto.
+        """
+        self.assertIn("const LADO_DA_FATIA = 1.5;", self.html)
+        self.assertIn("function fatias(a0, a1){", self.html)
+        montar = self.html[self.html.index("    imovel.zonas.forEach(z => {"):]
+        montar = montar[:montar.index("\n  }")]
+        self.assertEqual(montar.count("fatias("), 6,
+                         "piso, parede e casca precisam de dois cortes cada")
+        # o sólido entra uma vez por caixa, fora de qualquer laço de fatia
+        self.assertIn("solidos.push({x0: p[0] + cx, x1: p[3] + cx",
+                      self.html, "o sólido deixou de sair da caixa inteira")
+        corpo = self.html[self.html.index("imovel.caixas.forEach((c, iCaixa)"):]
+        corpo = corpo[:corpo.index("solidos.push(")]
+        self.assertNotIn("solidos", corpo,
+                         "o sólido entrou dentro do laço das fatias")
+
+    def test_a_fatia_nao_quebra_o_ladrilho_do_piso(self):
+        """
+        Cada fatia é uma malha com uv de 0 a 1. Sem deslocar a textura, as
+        trinta fatias do piso mostrariam o mesmo pedaço do ladrilho e o
+        assoalho sairia com uma grade de emendas de 1,5 m — teria trocado a
+        emenda da foto por uma emenda de textura, no modo chapado, que é
+        justamente o que o corretor usa para explicar metragem.
+        """
+        self.assertIn("if (desX || desY) t.offset.set(desX || 0, desY || 0);",
+                      self.html)
+        self.assertIn("material(z.piso, z.piso_m, rx * fx[3], rz * fz[3],",
+                      self.html, "a fatia do piso não repassa a escala")
+        self.assertIn("rx * fx[2], rz * fz[2])", self.html,
+                      "a fatia do piso não repassa o deslocamento")
+
+    def test_nenhuma_superficie_fica_sem_foto_dentro_do_raio(self):
+        """
+        O peso zera no raio, então um pedaço de piso longe de tudo cairia
+        para a cor chapada e apareceria como um buraco no meio do cômodo
+        fotografado. A foto mais distante do acervo está a 4,06 m, e é por
+        isso que o raio não desce de 5,0 — baixá-lo para 3,0 deixaria 0,79%
+        do piso chapado.
+        """
+        pior = 0.0
+        for construir in plantas.TODAS:
+            p = construir()
+            for ds, _ in self._amostras(p):
+                pior = max(pior, ds[0])
+        self.assertLess(pior, self.raio,
+                        "há piso a %.2f m da foto mais próxima, e o raio é "
+                        "%.1f m: ele ficaria chapado" % (pior, self.raio))
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 

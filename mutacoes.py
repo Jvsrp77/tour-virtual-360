@@ -1224,6 +1224,60 @@ MUT = [
      'if (tipo === "caixa")\n      return caixa(',
      'if (true)\n      return caixa(',
      'TestMovelComFormaDeMovel.test_cada_tipo_tem_forma_montada'),
+
+    # ------------------------------ a foto de cada pedaco vem do lado dele
+
+    # O degrau volta de duas maneiras diferentes, e so uma e obvia.
+    ('o peso encolhe mas nao zera no raio', 'static/maquete.html',
+     'float perto = max(0.0, 1.0 / d - 1.0 / raio);',
+     'float perto = 1.0 / d;',
+     'TestMisturaDeFotos.test_o_peso_zera_no_raio_e_nao_so_encolhe'),
+
+    # Com a malha fatiada em 1,5 m, uma foto so continua sendo uma foto
+    # LOCAL, entao a distancia quase nao piora — quem acusa nao e a razao de
+    # distancia, e o degrau: com um espaco so, todo o peso das vizinhas fica
+    # de fora da lista, e a emenda volta em cada borda de fatia.
+    ('so uma foto volta a pintar cada fatia', 'static/maquete.html',
+     'const FOTOS_NA_MISTURA = 6;',
+     'const FOTOS_NA_MISTURA = 1;',
+     'TestMisturaDeFotos'),
+
+    ('a malha volta a ser grande demais para a lista', 'static/maquete.html',
+     'const LADO_DA_FATIA = 1.5;',
+     'const LADO_DA_FATIA = 99.0;',
+     'TestMisturaDeFotos'),
+
+    ('o raio encolhe e o piso fica chapado', 'static/maquete.html',
+     'const RAIO_DA_MISTURA = 5.0;',
+     'const RAIO_DA_MISTURA = 3.0;',
+     'TestMisturaDeFotos.test_nenhuma_superficie_fica_sem_foto_dentro_do_raio'),
+
+    ('a mistura alarga e borra a imagem', 'static/maquete.html',
+     'return lig * frente * p3 * p3;',
+     'return lig * frente * perto * perto;',
+     'TestMisturaDeFotos.test_o_peso_zera_no_raio_e_nao_so_encolhe'),
+
+    ('foto atras da parede volta a opinar', 'static/maquete.html',
+     'float frente = smoothstep(0.0, 0.35, dot(vNormalM, normalize(v)));',
+     'float frente = 1.0;',
+     'TestMisturaDeFotos.test_foto_atras_da_superficie_nao_opina'),
+
+    ('a casa volta a aparecer vestida por dentro', 'static/maquete.html',
+     'if (s < 1e-6){ gl_FragColor = vec4(corBase, 1.0); return; }',
+     'if (s < 1e-6){ s = 1e-6; }',
+     'TestMisturaDeFotos.test_superficie_que_nenhuma_foto_enxerga_fica_chapada'),
+
+    ('a parede de cima veste a foto de baixo', 'static/maquete.html',
+     'if (Math.abs(f.pos.y - centro.y) > 2.0) continue;',
+     'if (false) continue;',
+     'TestMisturaDeFotos.test_fotos_perto_traz_as_mais_proximas_do_mesmo_andar'),
+
+    # Sem textura no espaco que sobra, parte das placas amostra preto — e o
+    # imovel com menos fotos do que espacos sai todo manchado.
+    ('espaco que sobra fica sem textura', 'static/maquete.html',
+     'const f = perto[Math.min(i, perto.length - 1)];',
+     'const f = perto[i] || {tex: null, pos: perto[0].pos};',
+     'TestMisturaDeFotos.test_espaco_sobrando_recebe_textura_de_verdade'),
 ]
 
 

@@ -441,7 +441,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       () => { TEXTURAS[nome] = null; });          // sem ladrilho: fica a cor
   }
 
-  function material(cor, nome, larguraM, alturaM){
+  function material(cor, nome, larguraM, alturaM, desX, desY){
     // A cor entra sempre: ela e o que se ve enquanto o ladrilho nao chegou, e
     // e o que fica se ele nao existir para este material.
     const m = new THREE.MeshLambertMaterial({color: new THREE.Color(cor)});
@@ -452,6 +452,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       // no minimo meia repeticao: movel pequeno com o ladrilho inteiro dentro
       // vira mancha, e o olho le mancha como sujeira
       t.repeat.set(Math.max(0.5, larguraM || 1), Math.max(0.5, alturaM || 1));
+      // DESLOCAMENTO, para o piso fatiado. Cada fatia e uma malha com uv de 0
+      // a 1; sem deslocar, as trinta fatias do piso mostrariam o mesmo pedaco
+      // do ladrilho, e o assoalho sairia com uma grade de emendas de 1,5 m —
+      // trocando a emenda da foto por uma emenda de textura.
+      if (desX || desY) t.offset.set(desX || 0, desY || 0);
       m.map = t;
       m.color.setScalar(1);    // a cor multiplica: branco entrega o ladrilho
       m.needsUpdate = true;
@@ -464,6 +469,34 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const m = new THREE.Mesh(g, mat);
     m.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     return m;
+  }
+
+  // ------------------------------------------------ fatiar a malha comprida
+  //
+  // A LISTA DE FOTOS E POR MALHA, e isso impoe um tamanho maximo a ela.
+  //
+  // O sombreador mistura as fotos mais proximas da malha, escolhidas uma vez
+  // so, no centro dela. Numa malha pequena isso serve a malha inteira. Num
+  // living de 149,6 m2 — que no acervo e UMA malha — as seis fotos escolhidas
+  // ficam todas no meio do comodo, e o canto fica a mais de cinco metros de
+  // todas elas: peso zero, e o piso aparece como uma MANCHA CHAPADA no meio
+  // do comodo fotografado. Medido: 2,51% do piso do acervo caia nisso.
+  //
+  // Fatiando em 1,5 m some: 0% de mancha, e o peso que escapa da lista cai de
+  // 100% para 0,46% no percentil 99. O numero saiu de varrer 1,5 / 2,0 / 2,5
+  // / 3,0 / 4,0 m sobre as oito plantas — abaixo de 1,5 o ganho nao paga as
+  // malhas a mais.
+  //
+  // A fatia e so de APARENCIA: solidos recebe a caixa inteira, uma vez.
+  const LADO_DA_FATIA = 1.5;
+
+  function fatias(a0, a1){
+    const n = Math.max(1, Math.ceil((a1 - a0) / LADO_DA_FATIA - 1e-9));
+    const p = (a1 - a0) / n;
+    const r = [];
+    for (let i = 0; i < n; i++) r.push([a0 + i * p, a0 + (i + 1) * p, i / n,
+                                        1 / n]);
+    return r;
   }
 
   // ------------------------------------------------- movel com forma de movel
@@ -864,11 +897,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
     // piso de cada comodo, com a cor real do revestimento
     imovel.zonas.forEach(z => {
-      const m = caixa(z.x0 + cx, -0.06, z.z0 + cz, z.x1 + cx, 0, z.z1 + cz,
-                      material(z.piso, z.piso_m, z.x1 - z.x0, z.z1 - z.z0));
-      m.userData.zona = z;
-      pisos.push(m);
-      grupoObra.add(m);
+      const rx = Math.max(0.5, z.x1 - z.x0), rz = Math.max(0.5, z.z1 - z.z0);
+      fatias(z.x0, z.x1).forEach(fx => fatias(z.z0, z.z1).forEach(fz => {
+        const m = caixa(fx[0] + cx, -0.06, fz[0] + cz, fx[1] + cx, 0,
+                        fz[1] + cz,
+                        material(z.piso, z.piso_m, rx * fx[3], rz * fz[3],
+                                 rx * fx[2], rz * fz[2]));
+        m.userData.zona = z;
+        pisos.push(m);
+        grupoObra.add(m);
+      }));
 
       // o nome sozinho nao ajuda quem esta comparando imoveis; a metragem ao
       // lado transforma a maquete em algo que se le como planta
@@ -890,12 +928,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         ? new THREE.MeshLambertMaterial({color: corParede})
         : material(c.cor, c.m, larg, alt);
       if (eParede){
-        const m = caixa(p[0] + cx, p[1], p[2] + cz,
-                        p[3] + cx, p[4], p[5] + cz, mat);
-        m.userData.alturaCheia = p[4] - p[1];
-        m.userData.baseY = cotaDoPiso(p[1], imovel.zonas);
-        paredes.push(m);
-        grupoObra.add(m);
+        // A parede tambem vai fatiada: a do fundo do sobrado tem 18 m, e uma
+        // lista de fotos escolhida no meio dela nao chega nas pontas.
+        fatias(p[0], p[3]).forEach(fx => fatias(p[2], p[5]).forEach(fz => {
+          const m = caixa(fx[0] + cx, p[1], fz[0] + cz,
+                          fx[1] + cx, p[4], fz[1] + cz, mat);
+          m.userData.alturaCheia = p[4] - p[1];
+          m.userData.baseY = cotaDoPiso(p[1], imovel.zonas);
+          paredes.push(m);
+          grupoObra.add(m);
+        }));
       } else {
         grupoMoveis.add(movel(p, cx, cz, c.m, mat, L, F, iCaixa,
                               cotaDoPiso(p[1], imovel.zonas)));
@@ -929,13 +971,17 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     // quem chegasse ao andar de cima o veria sem parede externa nenhuma —
     // uma laje solta no ar, com ceu em volta.
     const topo = Math.max(0, ...imovel.zonas.map(q => q.andar || 0)) + PE;
+    const matCasca = new THREE.MeshLambertMaterial({color: corParede});
     [[0, 0, L, E], [0, F - E, L, E], [0, 0, E, F], [L - E, 0, E, F]].forEach(w => {
-      const m = caixa(w[0] + cx, 0, w[1] + cz, w[0] + w[2] + cx, topo, w[1] + w[3] + cz,
-                      new THREE.MeshLambertMaterial({color: corParede}));
-      m.userData.alturaCheia = topo;
-      m.userData.baseY = 0;
-      paredes.push(m);
-      grupoObra.add(m);
+      fatias(w[0], w[0] + w[2]).forEach(fx =>
+        fatias(w[1], w[1] + w[3]).forEach(fz => {
+          const m = caixa(fx[0] + cx, 0, fz[0] + cz, fx[1] + cx, topo,
+                          fz[1] + cz, matCasca);
+          m.userData.alturaCheia = topo;
+          m.userData.baseY = 0;
+          paredes.push(m);
+          grupoObra.add(m);
+        }));
     });
 
     // janelas: faixas claras rentes a parede externa
@@ -1035,19 +1081,41 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // sem deformar — e continua sendo geometria, entao anda-se a 60 quadros por
   // segundo, de onde se quiser.
   //
-  // O MOVEL CONTINUA SENDO CAIXA. A foto cola nele tambem, e de frente parece
-  // um sofa; de lado, parece um sofa achatado. Isso nao e limitacao da
-  // textura, e da forma: na geometria aquilo E um paralelepipedo. Para o
-  // movel ficar real seria preciso modelo 3D no lugar da caixa.
-  //
   // Fica como OPCAO, nao como troca: a maquete chapada continua sendo a
   // melhor forma de ler a planta, e e ela que o corretor usa para explicar
   // metragem. Por isso a chave, e por isso ela so aparece quando ha foto.
+  //
+  // ------------------------------------------- a foto vem de VARIOS pontos
+  //
+  // Cada pedaco de geometria vestia UMA foto so: a mais proxima do centro da
+  // malha. Parece razoavel e nao e, porque malha nao tem tamanho fixo — o
+  // piso da sala integrada deste apartamento tem 36,5 m2 e e UMA malha. Ela
+  // inteira recebia a foto do canto de refeicoes, enquanto seus quatro
+  // cantos estavam perto de quatro fotos DIFERENTES.
+  //
+  // MEDIDO no apartamento compacto, de 68,5 m2 com nove pontos: 57,8% do
+  // piso recebia uma foto que nao era a mais proxima dali, e em media a foto
+  // escolhida estava 1,89 vez mais longe do que a que havia — no pior pedaco,
+  // 16 vezes. Dai os dois defeitos que se viam: a tabua do assoalho mudando
+  // de direcao numa linha reta (a borda da malha, onde a foto trocava de
+  // uma vez) e o borrao no fundo dos comodos grandes (a foto de um canto
+  // esticada por seis metros).
+  //
+  // Agora cada PEDACO de superficie mistura as quatro fotos mais proximas,
+  // com peso que so depende de onde aquele pedaco esta no mundo. Como o peso
+  // e continuo no espaco, duas malhas vizinhas chegam ao mesmo valor na
+  // divisa: a linha reta some sem ninguem precisar costurar nada.
+  //
+  // Nao custa memoria: as fotos ja estavam todas carregadas na placa de
+  // video para que a troca entre elas fosse instantanea. O que muda e que o
+  // sombreador le quatro em vez de uma.
 
   const VERTICE_FOTO = `
     varying vec3 vMundo;
+    varying vec3 vNormalM;
     void main(){
       vMundo = (modelMatrix * vec4(position, 1.0)).xyz;
+      vNormalM = normalize(mat3(modelMatrix) * normal);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }`;
 
@@ -1056,17 +1124,96 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // A textura entra com flipY desligado justamente para que a linha 0 do
   // arquivo seja a linha 0 aqui — com o flip padrao do three.js, o teto da
   // casa apareceria no chao.
+  // QUANTAS FOTOS ENTRAM, E ATE ONDE UMA FOTO OPINA. Os dois sairam de
+  // medir as oito plantas do acervo, 25.678 amostras de piso, e nao de
+  // chutar. Duas coisas brigam:
+  //
+  // - o peso que fica de FORA das fotos enviadas volta a ser degrau, porque
+  //   a foto que entra e sai da lista entra e sai de uma vez;
+  // - superficie sem NENHUMA foto dentro do raio cai para a cor chapada.
+  //
+  // Medido, no pior pedaco de piso de todo o acervo:
+  //
+  //     fotos  raio   peso de fora   sem foto
+  //       4     8,0      35,3%         0%
+  //       4     4,0      21,8%         0%
+  //       6     8,0      13,5%         0%
+  //       6     5,0       8,3%         0%
+  //       8     4,0       0,3%         0%
+  //       6     3,0       0,4%      0,79%   <- piso ficando chapado
+  //
+  // Seis e cinco: o pior caso cai de 35% para 8% (no meio do acervo, para
+  // 0,17%), nenhuma superficie fica sem foto, e seis texturas cabem no
+  // minimo de oito unidades que QUALQUER placa garante — oito consumiria o
+  // minimo inteiro. O raio nao desce de 5,0 porque a foto mais distante do
+  // acervo esta a 4,06 m: com raio 4,0 nao sobra folga nenhuma para uma
+  // planta futura capturada mais esparsa.
+  const FOTOS_NA_MISTURA = 6;
+  const RAIO_DA_MISTURA = 5.0;
+
+  // Os espacos do sombreador saem da constante acima, e nao escritos a mao:
+  // escritos a mao, trocar o numero exigiria lembrar de mexer em quatro
+  // lugares, e o que sobrasse para tras sairia preto na tela.
+  const _slots = (molde) => Array.from({length: FOTOS_NA_MISTURA},
+                                       (_, i) => molde(i)).join("\n    ");
+
   const FRAGMENTO_FOTO = `
-    uniform sampler2D foto;
-    uniform vec3 origem;
+    ${_slots(i => "uniform sampler2D foto" + i + ";")}
+    ${_slots(i => "uniform vec3 origem" + i + ";")}
+    uniform float ativo[${FOTOS_NA_MISTURA}];
+    uniform vec3 corBase;
+    uniform float raio;
     varying vec3 vMundo;
+    varying vec3 vNormalM;
     const float PI = 3.141592653589793;
-    void main(){
-      vec3 d = normalize(vMundo - origem);
+
+    vec3 amostra(sampler2D t, vec3 o){
+      vec3 d = normalize(vMundo - o);
       float lon = atan(d.x, d.z);
       float lat = asin(clamp(d.y, -1.0, 1.0));
-      vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
-      gl_FragColor = vec4(texture2D(foto, uv).rgb, 1.0);
+      return texture2D(t, vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI)).rgb;
+    }
+
+    // O peso de uma foto neste pedaco de superficie. Duas coisas decidem:
+    //
+    // PERTO. Cai com o inverso da distancia e chega a ZERO no raio, em vez
+    // de apenas ficar pequeno. Isso e o que faz a mistura ser continua: a
+    // foto que esta saindo da lista sai com peso nulo, e nao com um degrau.
+    //
+    // DE FRENTE. Foto atras da superficie nao opina. Sem isto a mistura
+    // PIORARIA a parede entre dois comodos: ela e uma caixa so, e a foto da
+    // cozinha, mirando a face da sala, atravessa a parede e traz a cozinha
+    // — a face da sala sairia meio sala, meio cozinha.
+    // A POTENCIA DECIDE A LARGURA DA FAIXA DE MISTURA, e ela importa mais do
+    // que parece. Com expoente 2, um pedaco a 2,0 m de uma foto e a 2,5 m de
+    // outra sai 65/35 — ou seja, quase metade do comodo sai misturado. Como
+    // cada panorama foi repintado pela IA por conta propria, misturar dois
+    // nao suaviza: desfoca, porque a tabua de um nao cai onde cai a do
+    // outro. Com expoente 6 o mesmo pedaco sai 86/14: a foto de perto manda,
+    // e a mistura fica restrita a faixa estreita onde as duas empatam — que
+    // e exatamente onde antes havia o degrau.
+    float peso(vec3 o, float lig){
+      vec3 v = o - vMundo;
+      float d = max(length(v), 0.30);
+      float perto = max(0.0, 1.0 / d - 1.0 / raio);
+      float p3 = perto * perto * perto;
+      float frente = smoothstep(0.0, 0.35, dot(vNormalM, normalize(v)));
+      return lig * frente * p3 * p3;
+    }
+
+    void main(){
+      ${_slots(i => "float w" + i + " = peso(origem" + i + ", ativo[" + i + "]);")}
+      float s = ${Array.from({length: FOTOS_NA_MISTURA},
+                             (_, i) => "w" + i).join(" + ")};
+      // Superficie que NENHUMA foto enxerga — fundo de armario, face externa
+      // da casca — fica com a cor chapada da maquete. Antes ela recebia o
+      // que o panorama mostrasse naquela direcao, que e o comodo do outro
+      // lado da parede: de fora, a casa aparecia vestida por dentro.
+      if (s < 1e-6){ gl_FragColor = vec4(corBase, 1.0); return; }
+      vec3 c = ${Array.from({length: FOTOS_NA_MISTURA},
+        (_, i) => "w" + i + " * amostra(foto" + i + ", origem" + i + ")")
+        .join("\n             + ")};
+      gl_FragColor = vec4(c / s, 1.0);
     }`;
 
   let fotos = [];            // {pos: Vector3, tex: Texture}
@@ -1105,16 +1252,24 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     if (chave) chave.checked = fotos.length > 0;
   }
 
-  // A foto mais proxima do pedaco de geometria, no MESMO andar. Sem o corte
-  // por andar, a parede do quarto de cima vestiria a foto da sala de baixo.
-  function fotoPerto(centro){
-    let melhor = null, dist = Infinity;
+  // As fotos mais proximas do pedaco de geometria, no MESMO andar. Sem o
+  // corte por andar, a parede do quarto de cima vestiria a foto da sala de
+  // baixo.
+  function fotosPerto(centro, quantas){
+    const perto = [];
     for (const f of fotos){
       if (Math.abs(f.pos.y - centro.y) > 2.0) continue;
-      const d = f.pos.distanceTo(centro);
-      if (d < dist){ dist = d; melhor = f; }
+      perto.push({f: f, d: f.pos.distanceTo(centro)});
     }
-    return melhor || fotos[0] || null;
+    perto.sort((a, b) => a.d - b.d);
+    const r = perto.slice(0, quantas).map(q => q.f);
+    if (!r.length && fotos.length) r.push(fotos[0]);
+    return r;
+  }
+
+  // A cor chapada da maquete, para a superficie que nenhuma foto enxerga.
+  function corDoMaterial(m){
+    return (m && m.color) ? m.color.clone() : new THREE.Color(0xdcd8d2);
   }
 
   const _centro = new THREE.Vector3();
@@ -1139,11 +1294,25 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       if (!malha.geometry.boundingBox) malha.geometry.computeBoundingBox();
       malha.geometry.boundingBox.getCenter(_centro);
       malha.localToWorld(_centro);
-      const f = fotoPerto(_centro);
-      if (!f) return;
+      const perto = fotosPerto(_centro, FOTOS_NA_MISTURA);
+      if (!perto.length) return;
+      const u = {raio: {value: RAIO_DA_MISTURA},
+                 corBase: {value: corDoMaterial(malha.material)},
+                 ativo: {value: Array.from({length: FOTOS_NA_MISTURA},
+                                           (_, i) => i < perto.length ? 1 : 0)}};
+      for (let i = 0; i < FOTOS_NA_MISTURA; i++){
+        // SOBRA SEMPRE RECEBE UMA TEXTURA DE VERDADE, com peso zero. Deixar
+        // o uniforme vazio nao e "slot desligado": o sombreador le as quatro
+        // de qualquer jeito, e amostrar sampler sem textura e indefinido —
+        // em parte das placas sai preto, e o imovel com tres pontos ficaria
+        // todo manchado de preto.
+        const f = perto[Math.min(i, perto.length - 1)];
+        u["foto" + i] = {value: f.tex};
+        u["origem" + i] = {value: f.pos.clone()};
+      }
       vestidos.push({malha: malha, original: malha.material});
       malha.material = new THREE.ShaderMaterial({
-        uniforms: {foto: {value: f.tex}, origem: {value: f.pos.clone()}},
+        uniforms: u,
         vertexShader: VERTICE_FOTO,
         fragmentShader: FRAGMENTO_FOTO,
       });
