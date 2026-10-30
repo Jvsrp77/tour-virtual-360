@@ -25,3 +25,6 @@ data/texturas/
 # renders antigos postos de lado antes de re-renderizar (reversivel)
 antigo_fotos_*/
 antigo2_fotos_*/
+
+# Saída de execução que não pertence ao repositório
+*.err

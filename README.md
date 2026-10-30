@@ -1,9 +1,11 @@
-# Tour Virtual — protótipo
+# Tour Virtual 360
 
-Software que recebe fotos de um imóvel, costura em panorama 360 e publica um tour
-navegável. Roda inteiro na máquina local, sem depender de Kuula, CloudPano ou internet.
+Software que recebe fotos de um imóvel, costura em panorama 360° e publica um
+tour navegável — com modo de caminhada em primeira pessoa, maquete eletrônica e
+estimativa de metragem. O núcleo roda inteiro na máquina local, sem depender de
+Kuula, CloudPano ou de API paga.
 
-**Repositório:** https://github.com/Jvsrp77/tour-virtual-360 *(privado)*
+**Python 3.11 · Flask · OpenCV · ONNX Runtime · three.js**
 
 ## Como fica
 
@@ -33,97 +35,96 @@ no canto — a mesma planta da maquete, para quem anda não se perder.
 
 ![Caminhada em primeira pessoa, com setas de passo e a planta no canto](docs/caminhada.jpg)
 
-## Tecnologias
+## O que faz
 
-### Backend — Python 3.11
+- **Costura automática** de 8–12 fotos em panorama equirretangular (OpenCV), com
+  5 configurações tentadas em ordem e validação do resultado — rejeita costura
+  deformada em vez de entregar panorama inútil.
+- **Várias formas de criar um ambiente:** costurar fotos, importar equirretangular
+  pronto, converter panorama cilíndrico do celular, extrair quadros de um vídeo,
+  importar um OBJ de escaneamento de celular ou gerar cena sintética de teste.
+- **Modo de caminhada** com paralaxe real: a profundidade estimada transforma a
+  casca do panorama em geometria, e os pontos de captura se encadeiam para
+  percorrer o imóvel inteiro — inclusive **entre pavimentos**.
+- **Maquete eletrônica** do imóvel em 3D, com as áreas de cada cômodo e os pontos
+  de captura, vestindo as fotos do próprio imóvel.
+- **Estimativa de metragem** a partir do mapa de profundidade, com publicação
+  opcional no cartão do tour.
+- **Correções automáticas:** nivelamento do horizonte pelas verticais da cena,
+  reconstrução do teto, correção local de exposição (CLAHE) e marca no chão.
+- **Panorama em ladrilhos**, para o visor baixar só o pedaço que está na tela.
+- **Painel de administração** com setas de navegação, pontos de informação,
+  miniaturas, dados do imóvel e cor de destaque.
+- **Captura de lead** dentro do tour, com consentimento registrado, resposta por
+  WhatsApp e exportação em CSV.
+- **Multi-imóvel** com uma conta por imobiliária, isolamento por pasta e métricas
+  de visita.
+- **Exportação em ZIP:** site estático autocontido, que roda em qualquer
+  hospedagem sem Python.
 
-| | Versão | Para quê |
-|---|---|---|
-| Flask | 3.1 | servidor web e API |
-| Werkzeug | 3.1 | hash de senha (scrypt) e `ProxyFix` |
-| OpenCV | 5.0 | costura, nivelamento, teto, projeções |
-| NumPy | 2.3 | a matemática por trás disso |
-| ONNX Runtime | 1.30 | roda os modelos de IA, em CPU |
-| waitress | 3.0 | servidor de produção |
+## Stack
 
-São **seis dependências**, e isso é escolha. Não há banco de dados, ORM nem fila externa:
-os dados são JSON em disco com escrita atômica e trava por imóvel, e a fila é uma thread.
-Num produto que uma imobiliária vai rodar por anos, cada biblioteca a menos é uma
-atualização de segurança a menos para acompanhar.
+| Camada | O que usa |
+|---|---|
+| **Backend** | Python 3.11 · Flask · Werkzeug · OpenCV · NumPy · ONNX Runtime · waitress |
+| **Frontend** | JavaScript puro, sem framework e sem build · Pannellum · three.js (vendorizados) |
+| **IA local** | Depth Anything V2 Small (94 MB) · LaMa (208 MB) — via ONNX, em CPU |
+| **Infra** | Docker · Caddy 2 (HTTPS automático) · `unittest` da biblioteca padrão |
 
-### Frontend — sem framework
+São poucas dependências de backend, e isso é escolha. Não há banco de dados, ORM
+nem fila externa: os dados são JSON em disco com escrita atômica e trava por
+imóvel, e a fila é uma thread. Num produto que uma imobiliária vai rodar por
+anos, cada biblioteca a menos é uma atualização de segurança a menos para
+acompanhar.
 
-JavaScript puro, sem React, sem build, sem `npm install`.
-
-| | Versão | Para quê |
-|---|---|---|
-| Pannellum | 2.5.6 | visualizador 360 do tour |
-| three.js | r150 | WebGL do modo de caminhada |
-
-As duas são **vendorizadas** em `static/vendor/`, não vêm de CDN. O motivo foi prático: o
-CDN estava bloqueado no ambiente e o tour parava de funcionar. De quebra, o ZIP exportado
+As bibliotecas de frontend são servidas localmente, não por CDN — o CDN estava
+bloqueado no ambiente e o tour parava de funcionar. De quebra, o ZIP exportado
 roda offline.
 
-### Inteligência artificial — 292 MB, tudo local
+Os dois modelos de IA rodam na própria máquina: nenhuma chamada a API de
+terceiros, nenhum custo por uso, e nenhuma foto de imóvel saindo do servidor — o
+que também simplifica o lado da LGPD.
 
-| Modelo | Tamanho | Para quê |
-|---|---|---|
-| Depth Anything V2 Small | 94 MB | profundidade → caminhada e metragem |
-| LaMa | 198 MB | reconstrói o que está atrás dos móveis |
+**Uma exceção, e ela é opcional:** o repintor de ambientes chama um modelo de
+imagem no Replicate, que é serviço pago. Exige `REPLICATE_API_TOKEN` e é o único
+ponto do projeto que fala com fora. Sem o token, todo o resto funciona.
 
-Rodam na própria máquina, via ONNX. Nenhuma chamada a API de terceiros, nenhum custo por
-uso, e nenhuma foto de imóvel saindo do servidor — o que também simplifica o lado da LGPD.
-
-**Três modelos foram testados e recusados por medição**, evitando ~700 MB de dependência
-sem ganho: o CLIP (nomear ambientes), o Depth Anything Base (4× maior, ganho invisível) e
-o próprio LaMa no teto (onde a técnica clássica ganhou). Os números estão nas seções
-correspondentes.
-
-### Infraestrutura e desenvolvimento
-
-Docker e Caddy 2 (HTTPS automático pelo Let's Encrypt). Testes em `unittest`, da
-biblioteca padrão. O Node v22 é usado **só para validar a sintaxe do JavaScript** das
-páginas nos testes — não é dependência de execução.
-
-### Tamanho
-
-4.686 linhas de Python em 16 arquivos, 2.665 de HTML/JS/CSS em 5 páginas.
-
-## Clonar
-
-```bash
-git clone https://github.com/Jvsrp77/tour-virtual-360.git
-```
-
-Os modelos (292 MB) não vêm no repositório. Depois de clonar:
-
-```bash
-python baixar_modelo.py            # profundidade, 94 MB
-python baixar_modelo.py --fundo    # reconstrução do fundo, 198 MB (opcional)
-```
-
-Sem eles tudo funciona, menos o modo "andar pelo ambiente", a metragem e a camada de
-fundo.
+**Tamanho:** 22.492 linhas de Python em 40 arquivos, 7.112 de HTML/JS/CSS em 7 páginas.
 
 ## Como rodar
 
-Dê dois cliques em `iniciar.bat`. O navegador abre sozinho no painel, na porta 5000.
+```bash
+git clone https://github.com/Jvsrp77/tour-virtual-360.git
+cd tour-virtual-360
+python -m pip install -r requirements.txt
+```
+
+Os modelos (302 MB) não vêm no repositório:
 
 ```bash
-python -m pip install -r requirements.txt
+python baixar_modelo.py            # profundidade, 94 MB
+python baixar_modelo.py --fundo    # reconstrução de fundo, 208 MB (opcional)
+```
+
+Sem eles tudo funciona, menos o modo de caminhada, a metragem e a camada de fundo.
+
+```bash
 python app.py         # desenvolvimento, porta 5000
 python servidor.py    # produção, porta 8000, com backup automático
 ```
 
-No primeiro acesso a `/entrar` você cria a conta da sua imobiliária. O tour publicado
-continua aberto a quem tem o link; o login protege só o painel.
+No Windows, dê dois cliques em `iniciar.bat` — o navegador abre sozinho no painel.
 
-Abra **http://localhost:5000/imoveis** — é a lista de imóveis, ponto de entrada do sistema.
+Abra **http://127.0.0.1:5000/imoveis**, que é o ponto de entrada. No primeiro
+acesso a `/entrar` você cria a conta da sua imobiliária; o tour publicado
+continua aberto a quem tem o link, e o login protege só o painel.
+
+Para publicar em produção com HTTPS, ver [docs/operacao.md](docs/operacao.md).
 
 ## Vários imóveis
 
-Cada imóvel é uma pasta isolada em `data/imoveis/<id>/`, com o próprio `tour.json` e as
-próprias cenas. Dois imóveis nunca se misturam, e apagar um não toca no outro.
+Cada imóvel é uma pasta isolada em `data/imoveis/<id>/`, com o próprio `tour.json`
+e as próprias cenas. Dois imóveis nunca se misturam, e apagar um não toca no outro.
 
 | Endereço | O que é |
 |---|---|
@@ -132,1097 +133,121 @@ próprias cenas. Dois imóveis nunca se misturam, e apagar um não toca no outro
 | `/tour/<id>` | Link público para mandar ao cliente |
 | `/andar/<id>` | Modo caminhar |
 
-A API inteira vive sob `/api/imoveis/<id>/...`, num Blueprint do Flask que carrega o
-imóvel no próprio caminho — nenhuma rota precisa recebê-lo como parâmetro.
+A API inteira vive sob `/api/imoveis/<id>/...`, num Blueprint do Flask que carrega
+o imóvel no próprio caminho — nenhuma rota precisa recebê-lo como parâmetro.
 
-Quem já tinha o formato antigo (um `data/tour.json` só) não perde nada: na primeira
-subida o servidor migra sozinho para dentro de `data/imoveis/<id>/`.
+Quem já tinha o formato antigo (um `data/tour.json` só) não perde nada: na
+primeira subida o servidor migra sozinho para dentro de `data/imoveis/<id>/`.
 
-## As três formas de criar um ambiente
-
-| Forma | Quando usar | O que acontece |
-|---|---|---|
-| **Costurar em 360** | Você tirou 8–12 fotos girando no eixo | O servidor alinha e costura numa panorâmica |
-| **Importar equirretangular** | Você já tem a foto 360 (câmera 360 ou app) | Sobe direto, sem processar |
-| **Panorama do celular** | Você usou o modo Panorama do iPhone/Android | Converte de cilíndrico para equirretangular |
-| **Gerar ambiente de teste** | Não tem foto nenhuma | Cria uma cena sintética para demonstrar |
-
-### Sobre o panorama do celular
-
-O modo Panorama do iPhone entrega uma faixa em projeção **cilíndrica**, não esférica:
-ali a altura cresce com a tangente da latitude, no equirretangular cresce com a
-latitude direta. Carregar do jeito que vem esticaria teto e chão.
-
-O campo vertical não precisa ser informado — sai da própria proporção da imagem,
-porque no cilindro `largura/altura = haov / (2·tan(vfov/2))`. Num teste com uma
-varredura de 9000x1980 o valor deduzido errou 0,3° contra o real.
-
-Vantagem: uma varredura de 20 segundos substitui as 12 fotos. Desvantagem: o campo
-vertical é menor (~69° contra ~81° de uma volta com 12 fotos), então sobra mais teto
-e chão para preencher por aproximação.
-
-## Funcionalidades
-
-- Costura automática de fotos em panorama (OpenCV), com 5 configurações tentadas em ordem
-- Acabamento: preenche as bordas pretas irregulares e completa a esfera em 2:1, para o
-  visitante não ver preto ao olhar para cima ou para baixo
-- Validação do resultado: rejeita costura estreita demais ou deformada, em vez de
-  entregar um panorama inútil que só daria problema depois de montado o tour
-- Detecção de proporção 2:1 e ajuste de cobertura angular
-- Setas de navegação entre ambientes (clique no panorama para posicionar)
-- Pontos de informação com texto ao passar o mouse
-- Vista de abertura configurável por ambiente
-- Menu de ambientes com miniaturas
-- Dados do imóvel (título, endereço, preço) e cor de destaque
-- Captura de lead dentro do tour, com os contatos gravados no servidor
-- Giroscópio no celular e tela cheia
-- Código de embed para colar no site da imobiliária
-- Exportação em ZIP: site estático autocontido
-
-## Andar pelo ambiente
-
-Um panorama comum é uma casca lisa: o visitante gira, mas não se desloca. O botão
-**Gerar profundidade** calcula a distância de cada ponto do panorama e transforma a
-casca em geometria — aí o deslocamento produz paralaxe de verdade (o que está perto
-se move mais que o que está longe).
-
-Como funciona, já que o modelo de profundidade só entende foto em perspectiva:
-
-1. o panorama é recortado em 6 vistas, cobrindo a esfera;
-2. cada vista passa pelo modelo (Depth Anything V2 Small, ONNX, ~0,5 s cada);
-3. as vistas são alinhadas entre si pelas regiões que se sobrepõem — profundidade
-   monocular é relativa, cada vista sai com uma escala própria e sem esse alinhamento
-   o resultado fica em degraus;
-4. tudo volta para um mapa equirretangular, salvo em PNG com os 16 bits repartidos
-   entre os canais R e G (o canvas do navegador só entrega 8 bits por canal).
-
-Total: cerca de 5 segundos por ambiente, em CPU.
-
-## Caminhar pelo imóvel inteiro
-
-Um ponto sozinho dá ~1 metro de deslocamento. Para percorrer a casa toda, o caminho é
-o mesmo da Matterport: **vários pontos de captura encadeados**, e não um modelo 3D da
-casa inteira.
-
-Fotografe de 2 a 3 posições por cômodo, mais uma em cada corredor e porta — pontos a
-cada 1,5 a 2 metros, sempre em linha de visão um do outro. Gere a profundidade de cada
-um. Depois, no painel, arraste os pontos na **planta** para as posições reais.
-
-No modo caminhar, o visitante anda livremente e o sistema troca de ponto sozinho ao
-se aproximar do vizinho, com transição suave. O minimapa mostra onde ele está e para
-onde pode ir.
-
-Três detalhes que fazem isso funcionar:
-
-- **Escala calibrada pelo chão.** Profundidade estimada não tem metro: ela diz o que
-  está perto, não quão perto. O piso logo abaixo da câmera fica a ~1,5 m (altura do
-  peito), e é por ele que a escala é calibrada — sem isso, o passo não teria tamanho.
-- **Colisão pela geometria.** O passo só vale se couber dentro da distância real da
-  parede naquela direção. Sem isso a câmera atravessa a parede e passa a ver a cena
-  por fora.
-- **Só o ponto atual é desenhado.** Cada ponto é uma esfera em volta da câmera; duas
-  visíveis ao mesmo tempo se tapam e a tela fica preta pela metade.
-
-**Limites honestos.** Dentro de cada bolha o alcance segue em ~1 metro, e atrás dos
-móveis não existe informação nenhuma. A transição entre pontos é suave, mas com pontos
-distantes demais (acima de ~3 m) ela volta a parecer teleporte.
-
-Para movimento realmente livre seria reconstrução 3D (Gaussian Splatting), que exige
-refotografar **andando** pelo cômodo: fotos tiradas girando no eixo não têm paralaxe
-e não permitem triangular profundidade.
-
-O modelo não vem no repositório. Rode uma vez:
-
-```bash
-python baixar_modelo.py
-```
-
-## Abertura instantânea
-
-O panorama tem 1,3 MB. Em 4G fraco são ~7 s olhando *"Carregando o tour..."* antes de
-ver qualquer coisa — e quem procura imóvel no celular não espera 7 s.
-
-Cada cena guarda um **esboço** de ~40 KB: um recorte em perspectiva no enquadramento
-exato em que o tour vai abrir. O Pannellum o exibe como pôster enquanto o panorama
-vem pela rede.
-
-| Rede | Antes | Agora |
-|---|---|---|
-| 4G típico (6 Mbps) | 1,8 s | 0,2 s |
-| 4G fraco (1,5 Mbps) | 7,1 s | 0,6 s |
-| 3G (0,7 Mbps) | 15,3 s | 1,3 s |
-
-91% menos bytes até a primeira imagem, ao custo de 40 KB em disco por ambiente (3% do
-panorama).
-
-**Tem de ser perspectiva, não equirretangular reduzido.** O Pannellum desenha o
-`preview` como imagem de fundo chapada (`background-size: cover`), não sobre a esfera —
-um equirretangular apareceria esmagado. O recorte é refeito sempre que a vista inicial,
-a cobertura ou o panorama mudam.
-
-Dois detalhes sem os quais o ganho não aparecia na tela: o overlay de carregamento
-cobria o esboço até o panorama inteiro chegar (agora sai assim que o pôster monta, e no
-lugar dele fica uma pílula discreta *"carregando em alta definição"*), e a caixa
-*"Loading..."* do próprio Pannellum ficava por cima anunciando que não havia nada na
-tela — justamente quando já havia.
-
-## Modelo de profundidade maior: testado e recusado
-
-A hipótese era direta: o relevo do modo de caminhada vem do Depth Anything V2 **Small**
-(94 MB). Trocar pelo **Base** (389 MB, 4× os parâmetros) deveria dar paralaxe melhor —
-e talvez consertar a metragem.
-
-Comparação justa exige calibrar cada modelo separadamente: as constantes de `_raio()`
-foram ajustadas à distribuição de disparidade do Small, e aplicá-las ao Base seria
-condená-lo de saída. Cada um recebeu sua própria calibração pelo plano do piso.
-
-| | Small (94 MB) | Base (389 MB) |
-|---|---|---|
-| Processamento | **3,7 s** | 9,1 s |
-| Chão fora do nível | **0,36°** | 1,28° |
-| Resíduo do plano | 0,1829 | **0,1658** |
-| Nitidez de borda | 0,6153 | **0,6451** |
-| Malha duvidosa | **2,9%** | 3,6% |
-| Dimensões (real 5,26 × 2,58) | 3,99 × 2,28 | 4,35 × 3,43 |
-
-O Base tem uma vantagem real e visível: o Small produz um **artefato** — uma mancha de
-objeto fantasma muito perto da câmera, que não existe no cômodo — e no Base ela some.
-
-Mas o veredito é não, por três razões. O ganho **não aparece no produto**: lado a lado,
-no mesmo ponto de vista, o modo de caminhada fica indistinguível. O chão fica **menos**
-nivelado (0,36° → 1,28°), que é a métrica mais próxima de "a geometria está certa", já
-que o panorama foi nivelado e o piso real é horizontal. E a metragem continua errada nos
-dois: os 14,9 m² do Base (+10%) saem de erros que se cancelam — 4,35 × 3,43 contra
-5,26 × 2,58 é comprimento 17% curto e largura 33% larga, não acerto.
-
-4× o tamanho e 2,5× o tempo por um ganho invisível não se paga. Para repetir o teste:
-baixe `onnx-community/depth-anything-v2-base` em `modelos/depth_base.onnx`.
-
-Terceiro modelo grande recusado por medição, junto com o LaMa e o CLIP. O padrão se
-repete: neste projeto, modelo maior não tem ganhado de técnica simples bem aplicada.
-
-## Alinhamento estável, e a resolução que ele destravou
-
-A mesma captura dava panoramas diferentes a cada tentativa. Medido com 34 fotos a
-1600 px, cinco execuções:
-
-```
-8269x4084 | recusado | 6645x2904 | recusado | 8123x3321     4 resultados distintos
-```
-
-Causa: o alinhamento do OpenCV usa RANSAC, que sorteia. `cv2.setRNGSeed()` antes de cada
-tentativa levou a **5 de 5 idênticos**, com custo zero.
-
-Rodar com uma thread só também daria determinismo, e foi testado: **5 de 5 recusados**.
-Seria trocar "imprevisivelmente bom" por "previsivelmente ruim".
-
-### A lógica da resolução estava invertida
-
-`_largura_trabalho` reduzia a resolução conforme o número de fotos crescia — quem
-capturava melhor era punido com menos nitidez. Com 34 fotos de iPhone o software usava
-1000 px de 3024 disponíveis: **11% dos pixels que a câmera capturou**.
-
-Agora é uma escada que começa alto e cai se o alinhamento não convergir. A queda não é
-luxo: o comportamento do OpenCV **não é monotônico na resolução** — 1600 aprovou, 2000 foi
-recusado por deformação, 2400 aprovou com o melhor preenchimento de todos (0,917).
-
-### Dois defeitos que a resolução maior revelou
-
-**A volta deixou de fechar.** A 2400 px o ajuste de feixe devolve uma focal fora da
-realidade, a estimativa cai para não-confiável, e o código recorria à **proporção da
-imagem** — critério que o próprio `_geometria` já documentava como errado para captura em
-fileiras, porque fileiras aumentam a altura. O panorama saiu 8000×3729 (proporção 2,15),
-a regra exigia 2,6, e a cena perdia esfera completa, teto refeito e caminhada.
-
-Conserto: julgar pelos **ângulos de giro**, que vêm das matrizes de rotação e não passam
-pela focal. Só a comparação antiga dependia dela.
-
-**Uma mancha preta no meio da imagem.** O buraco interior foi de 0,43% (a 1000 px) para
-**2,11%** (a 2400 px). A extensão de bordas não o cobria: ele tem conteúdo válido dos dois
-lados. Tapado com `cv2.inpaint` — e vale notar que é o mesmo `cv2.inpaint` **rejeitado**
-para tirar móvel da frente da parede. Lá a área é grande e ele vira borrão; aqui são
-buracos pequenos cercados de textura, que é para o que ele foi feito.
-
-### Resultado, nas 34 fotos do quarto
-
-| | Antes | Agora |
-|---|---|---|
-| Repetibilidade (5 execuções) | 4 resultados | **1** |
-| Volta fechada | False | **True** |
-| Resolução angular | 12,0 px/grau | **22,2 px/grau** |
-| Buraco interior | 2,11% | **0,01%** |
-| Tempo | 23 s | 76 s |
-
-O tempo triplicou, e isso é aceitável: a costura roda na fila, em segundo plano.
-
-## O contato sai do arquivo
-
-Antes o lead caía no `tour.json` e ficava lá: para vê-lo era preciso abrir o painel e
-clicar num botão. Sem responder, sem marcar o que já foi atendido, sem exportar e sem
-excluir. Com 40 leads isso deixa de ser viável — é onde o sistema perde para uma planilha.
+## Documentação
 
 | | |
 |---|---|
-| **Responder** | botão WhatsApp com a mensagem já escrita, citando o nome e o imóvel |
-| **Atendido** | marca e reabre; o filtro mostra só os pendentes, com a contagem |
-| **Exportar** | CSV para o CRM da imobiliária |
-| **Excluir** | apaga o dado pessoal em definitivo |
-| **Consentimento** | o visitante autoriza, e o texto aceito fica gravado |
+| [**docs/decisoes.md**](docs/decisoes.md) | As decisões técnicas e os números que as sustentam |
+| [**docs/operacao.md**](docs/operacao.md) | Produção, HTTPS, contas, backup, fila e tratamento dos leads |
+| [**docs/captura.md**](docs/captura.md) | Como fotografar, captura em fileiras e correção de cenas antigas |
 
-**Por que WhatsApp e não e-mail:** o link `wa.me` não precisa de servidor de e-mail,
-credencial nem configuração — funciona no dia em que você instala. E-mail exigiria SMTP,
-que é uma decisão de infraestrutura sua.
+## Decisões de engenharia
 
-**Por que o CSV usa ponto e vírgula e leva BOM:** o Excel em português abre CSV com
-vírgula tudo numa coluna só, e sem o BOM ele estraga os acentos. São dois detalhes que
-decidem se o arquivo é usável pelo corretor ou não.
+O registro completo está em [docs/decisoes.md](docs/decisoes.md). Alguns exemplos:
 
-**Por que guardar o texto do consentimento, e não só que houve:** a LGPD trata do que o
-titular consentiu, e esse texto muda com o tempo. Guardar só um `true` não diz a quê a
-pessoa concordou. Excluir também não é conveniência: é o direito de eliminação.
-
-### O painel quebrou inteiro, e quase passou — e agora tem teste
-
-Ao inserir esse código, um `
-
-` virou quebra de linha literal dentro de uma string
-JavaScript. String não terminada, erro de sintaxe, **e o painel inteiro parou de
-funcionar** — não só o diálogo de contatos.
-
-Os testes não pegaram: eles exercitam a API, não o JavaScript da página. Só apareceu
-porque fui abrir a tela para conferir.
-
-**Esse buraco foi fechado.** O `TestPaginas` extrai cada bloco `<script>` das páginas e
-manda o próprio **Node** conferir a sintaxe, e checa que todo `onclick` do HTML aponta
-para uma função que existe. As duas mutações correspondentes acusam.
-
-Por que Node e não um verificador em Python: um scanner caseiro tropeçaria na primeira
-expressão regular com aspas dentro — e o painel tem uma, `/[&<>"']/g`. Se o Node não
-estiver instalado, o teste avisa que pulou em vez de fingir que passou.
-
-## A gravação que falhava no Windows
-
-Ao rodar a suíte inteira, 1 de 40 contatos simultâneos se perdia — e só na suíte
-completa, nunca no teste isolado. A instrumentação mostrou a causa:
-
-```
-PermissionError [WinError 5]: tour.json.tmp -> tour.json
-```
-
-No Windows, `MoveFileEx` **recusa a troca enquanto o destino tiver um handle aberto**. As
-escritas eram serializadas pela trava, mas as leituras não — de propósito, para o visitante
-não esperar. Bastava um GET com o arquivo aberto no instante da troca. No Linux isso não
-acontece: lá o rename é atômico mesmo com leitores.
-
-**O conserto foi mover a trava para a camada de dados**: `carregar_tour` e `salvar_tour`
-pegam a trava do imóvel. Assim nenhuma thread nossa tem o arquivo aberto na hora da troca.
-Custa pouco — ler é questão de microssegundos, e as rotas pesadas continuam fora da trava.
-
-### O teste era fraco, e por isso quase passou
-
-O defeito aparecia em 1 execução a cada 3. O teste tinha só escritores; **quem provoca o
-erro é o leitor**. Agora ele roda 4 visitantes lendo o tour sem parar enquanto os 40
-contatos chegam. Com isso o defeito virou determinístico: sem a trava na leitura, 38 a 40
-dos 40 se perdem, em 3 de 3 execuções.
-
-Fica a lição: o teste existia e passava, mas não reproduzia a condição real. Teste de
-concorrência sem a outra ponta da concorrência é teste de nada.
-
-### O retry ficou, mas não é o conserto
-
-Havia também um retry no `os.replace`. Depois da trava, medi: **a suíte passa sem ele**.
-Ele ficou para os handles que não são nossos — antivírus varrendo o arquivo recém-escrito,
-indexador do Windows, ferramenta de backup. Nenhum teste aqui produz isso, então está no
-código como precaução declarada, não como conserto medido.
+- **Modelo de IA maior, testado e recusado.** O Depth Anything Base (389 MB, 4× os
+  parâmetros) foi calibrado separadamente e medido contra o Small (94 MB). Ganho
+  invisível no produto, chão *menos* nivelado (0,36° → 1,28°) e 2,5× o tempo.
+  Terceiro modelo grande rejeitado por medição no projeto.
+- **A técnica clássica ganhou da IA no teto — e perdeu atrás dos móveis.**
+  Extrapolação de superfície marcou 2,6 de energia de cunha contra 37,3 do LaMa no
+  polo. No mesmo projeto, o LaMa venceu o `cv2.inpaint` para reconstruir o que está
+  atrás dos móveis. A rejeição era específica do caso, não veredito sobre o modelo.
+- **Costura não determinística, consertada com uma linha.** A mesma captura dava 4
+  panoramas distintos em 5 execuções, porque o RANSAC do OpenCV sorteia.
+  `cv2.setRNGSeed()` levou a 5 de 5 idênticos, com custo zero — e destravou subir a
+  resolução de 12,0 para 22,2 px/grau.
+- **Abertura 91% mais leve.** Um esboço de 40 KB em perspectiva serve de pôster
+  enquanto o panorama de 1,3 MB carrega: em 4G fraco, 7,1 s → 0,6 s até a primeira
+  imagem.
+- **Um defeito de concorrência que só aparecia no Windows.** O `MoveFileEx` recusa a
+  troca atômica enquanto o destino tem handle aberto, e 1 de 40 contatos
+  simultâneos se perdia. O teste existia e passava — mas só tinha escritores, e
+  quem provoca o erro é o leitor.
+- **A métrica que enganou duas vezes.** Energia de cunha mede quanto do anel foi
+  coberto, não se o artefato saiu sem comer conteúdo. No polo, a imagem manda na
+  métrica.
 
 ## Testes
 
 ```bash
-python testes.py        # 19 testes, ~8 s
-python mutacoes.py      # confere se os testes não estão cegos
+python testes.py        # 475 testes em 38 classes
+python mutacoes.py      # 157 mutações: confere se os testes não estão cegos
 ```
 
-Rodam numa pasta descartável (`TOUR_DADOS`), nunca sobre os dados reais, e usam o cliente
-de teste do Flask — não precisam de servidor no ar.
+Rodam numa pasta descartável (`TOUR_DADOS`), nunca sobre os dados reais, e usam o
+cliente de teste do Flask — não precisam de servidor no ar.
 
-**Cada teste existe porque o defeito correspondente aconteceu de verdade** durante o
-desenvolvimento, e só foi pego por verificação manual:
+**Cada teste existe porque o defeito correspondente aconteceu de verdade** durante
+o desenvolvimento, e só foi pego por verificação manual.
 
-| Teste | Defeito que ele guarda |
-|---|---|
-| `TestAcesso` | a conta B apagava o imóvel da conta A pelo `DELETE` registrado no `app` |
-| `TestAcesso` | o tour público devolvia `leads_capturados` a qualquer um com o link |
-| `TestConcorrencia` | 27 de 40 escritas simultâneas se perdiam antes das travas |
-| `TestCobertura` | foto 3:1 espalhada pela volta inteira, esticando a cena 1,8 vez |
-| `TestForaDoContexto` | `montar_cena` quebrava na thread da fila aos 92% da costura |
-| `TestSerializavel` | `ndarray` no `json.dump` estourava depois do trabalho pesado |
-| `TestBackup` | restauração comparada por SHA-256, arquivo por arquivo |
-| `TestContas` | senha em texto, senha curta, cadastro aberto |
+O `mutacoes.py` quebra cada proteção de propósito, uma por vez no arquivo real,
+roda o teste que deveria pegar aquilo e desfaz a mudança. Se alguma linha disser
+`NÃO ACUSOU`, o teste correspondente está decorativo.
 
-### Os testes foram testados
-
-Teste que passa em código quebrado é pior do que teste nenhum: dá confiança sem dar
-proteção. O `mutacoes.py` quebra cada proteção de propósito — uma por vez, no arquivo
-real — roda o teste que deveria pegar aquilo, e desfaz a mudança.
-
-```
-tira posse do DELETE de imovel     ACUSOU
-tira posse da API do imovel        ACUSOU
-tira a trava por imovel            ACUSOU
-tour publico devolve os leads      ACUSOU
-espalha foto parcial em 360        ACUSOU
-ndarray vaza para o JSON           ACUSOU
-sessao deixa de ser exigida        ACUSOU
-
-7 de 7 mutacoes detectadas
-```
-
-## Backup
-
-São 42 MB numa pasta: tours, panoramas, mapas de profundidade, contas e os contatos
-capturados. Um disco que falha levava tudo, e **não havia de onde refazer** — as fotos
-originais são apagadas depois que a cena é montada, e profundidade e camada de fundo
-custam minutos de CPU cada.
-
-```bash
-python backup.py criar
-python backup.py listar
-python backup.py restaurar tour-2026-09-14-1520.zip
-```
-
-Em produção roda sozinho, uma vez por dia, guardando as 7 cópias mais recentes
-(`TOUR_BACKUP_HORAS`, `TOUR_BACKUPS_GUARDAR`). Backup que depende de alguém lembrar de
-rodar não é backup.
-
-**Monte `backups/` num disco separado.** Cópia no mesmo disco dos dados não protege contra
-o caso que mais importa: o disco falhar.
-
-### Consistência sem travar o servidor
-
-O backup roda fora do processo do servidor, então não pega as travas dele — e não precisa.
-O `tour.json` é gravado com `os.replace`, que troca o arquivo inteiro de uma vez: quem lê
-pega a versão antiga ou a nova, nunca um meio-termo. As imagens são escritas uma vez e
-nunca alteradas.
-
-O caso que sobra é uma cena criada **no meio** da cópia: o `tour.json` pode entrar sem ela,
-ou a imagem entrar sem constar no `tour.json`. Nenhum dos dois corrompe nada — no pior caso
-a cena não aparece, e o próprio servidor limpa arquivos órfãos no arranque.
-
-O ZIP só vira backup quando está inteiro: grava como `.parcial` e renomeia no fim. Uma
-queda de energia no meio deixa lixo, não uma cópia falsa que parece boa.
-
-### A restauração foi testada, não só escrita
-
-Backup que nunca foi restaurado é esperança, não cópia de segurança. O teste, num sandbox:
-copiar os dados, fazer o backup, **apagar tudo**, restaurar e comparar SHA-256 arquivo por
-arquivo.
-
-| | |
-|---|---|
-| Arquivos no original | 9 |
-| Restaurados | 9 |
-| Faltando / diferentes / sobrando | nenhum |
-
-Restaurar também não é caminho sem volta: o `data/` atual é movido para
-`data-antes-de-restaurar-<data>` antes de ser substituído, para o caso de alguém restaurar
-a cópia errada.
-
-## Produção
-
-O `app.run()` do Flask é o servidor de desenvolvimento — o próprio Flask avisa para não
-usar em produção. Quem atende agora é o **waitress**: WSGI de verdade, em Python puro,
-que roda igual no Windows e no Linux (o gunicorn não roda no Windows).
-
-```bash
-python servidor.py            # local, porta 8000
-docker compose up -d          # produção, com HTTPS pelo Caddy
-```
-
-### Um processo, várias threads — e isso é requisito, não preferência
-
-| Estado | Onde vive | O que quebra com 2 processos |
-|---|---|---|
-| `_TRAVAS` | `app.py` | `threading.RLock` só serializa dentro do processo: duas requisições leem o mesmo `tour.json` e a segunda apaga o que a primeira gravou |
-| `_TAREFAS` | `tarefas.py` | a costura seria enfileirada num processo e consultada no outro — o painel esperaria por uma tarefa que nunca aparece |
-
-Escalar além de uma máquina exigiria trocar as travas por algo compartilhado (Redis,
-banco) e a fila por um worker separado. Até lá, o caminho de crescimento é **mais thread e
-mais CPU, não mais processo**.
-
-### A armadilha que quase passou
-
-As migrações rodavam dentro do `if __name__ == "__main__"` — bloco que um servidor WSGI
-**não executa**, porque ele importa o módulo em vez de rodá-lo. Em produção, miniaturas,
-esboços e a adoção de imóveis sem dono simplesmente não aconteceriam, sem erro nenhum.
-Agora estão em `inicializar()`, chamada pelos dois caminhos.
-
-### HTTPS
-
-O Caddy na frente resolve o certificado sozinho e repassa ao app. Não é enfeite: a sessão
-do painel dá acesso aos contatos capturados, e sem TLS o cookie viaja em texto claro.
-Com `TOUR_ATRAS_DE_PROXY=1` o app marca o cookie como seguro e passa a registrar o IP real
-do visitante em vez do IP do proxy.
-
-Os timeouts do proxy e do waitress vão a 900 s de propósito: uma costura de 30 fotos leva
-minutos, e o padrão de 120 s cortaria o envio no meio.
-
-Marcar o cookie como seguro não basta: quem abrir o link em `http://` manda a senha do
-corretor legível **antes** de qualquer cookie existir. Com `TOUR_EXIGIR_HTTPS=1` o app
-deixa de atender em claro — desvia as páginas para `https` e **recusa** os envios em vez
-de desviá-los, porque desviar um POST faria o navegador reenviar a senha que já viajou.
-
-Ele nasce desligado de propósito: ligado sem HTTPS de verdade na frente, desviaria para um
-endereço que não responde e tiraria o site do ar. Duas exceções ficam de fora do desvio, e
-não são detalhe: `/saude` e as chamadas de `127.0.0.1` — é por ali que o vigia confere se o
-site está vivo, e desviá-las poria o servidor em ciclo de reinício.
-
-### Aviso de contato
-
-Sem isto o contato é gravado e ninguém fica sabendo: o corretor só descobre se abrir o
-painel. Para quem vende imóvel, contato que espera um dia é contato perdido.
-
-O telefone vai no **assunto** do e-mail de propósito — o corretor lê a notificação no
-celular, na rua, e precisa poder ligar sem abrir nada.
-
-| Variável | Para quê |
-|---|---|
-| `TOUR_SMTP_SERVIDOR` | `smtp.gmail.com`, por exemplo |
-| `TOUR_SMTP_PORTA` | `587` (STARTTLS) ou `465` (SSL direto) |
-| `TOUR_SMTP_USUARIO` | a conta que envia |
-| `TOUR_SMTP_SENHA` | senha **de aplicativo**, nunca a senha da conta |
-| `TOUR_AVISO_PARA` | quem recebe o aviso, separado por vírgula |
-
-Sem `TOUR_SMTP_SERVIDOR` e `TOUR_AVISO_PARA` nada é enviado e nada quebra — é o estado em
-que o site nasce. A senha fica em variável de ambiente e nunca no `tour.json`, que vai
-inteiro para o navegador de qualquer visitante.
-
-O aviso roda **depois** de o contato já estar gravado, em outra thread e dentro de um
-`try`: servidor de e-mail fora do ar não pode custar um lead.
-
-### Aplicar uma publicação
-
-Copiar os arquivos é a parte fácil: o processo em execução segue na memória com
-o código antigo. O painel mostra o botão **Recarregar servidor** quando há versão
-publicada esperando — e só quando há vigia para repor.
-
-O processo simplesmente sai; quem o traz de volta é o `servico.py`, em segundos,
-já lendo os arquivos novos. Por isso a rota **se recusa a agir sem vigia**: ali,
-sair deixaria o site fora do ar até alguém ir até a máquina. Um botão que derruba
-o site sem volta é pior que botão nenhum.
-
-O vigia marca o processo que supervisiona com `TOUR_VIGIADO=1`. É essa marca que
-liga as duas pontas — sem ela o site não teria como saber que há quem o reponha,
-e o botão ficaria escondido para sempre.
-
-### Senha esquecida
-
-Não existe recuperação pela web, e não pode existir: redefinir sem a senha antiga por uma
-rota seria tomada de conta. Quem opera o servidor resolve na linha de comando, onde a
-autorização é o acesso ao disco:
-
-```
-python conta.py redefinir <usuario>
-```
-
-### Tentativas de login
-
-Depois de 8 erros o endereço fica 5 minutos de fora, e nesse período nem a senha certa
-entra — senão o robô acerta na nona tentativa e a trava não serviu de nada. A contagem é
-por origem, não por usuário: travar por usuário deixaria qualquer um trancar o corretor
-do lado de fora.
-
-### Volumes
-
-Os modelos (302 MB) e os dados ficam fora da imagem. Assim atualizar o código não reenvia
-os modelos, e os tours sobrevivem à troca de versão. Depois de subir, baixe os modelos uma
-vez:
-
-```bash
-docker compose exec app python baixar_modelo.py
-docker compose exec app python baixar_modelo.py --fundo
-```
-
-`/saude` responde sem login e diz se os modelos estão instalados — é o que o container e o
-proxy consultam.
-
-Verificado sob o waitress: matriz de acesso com 9 verificações em 2 perfis (dona e outra
-imobiliária), 0 falhas; e uma tarefa de fila completa — upload de 360, importação e
-profundidade — sem erro.
-
-## Contas: uma por imobiliária
-
-O painel estava aberto: qualquer pessoa com a URL editava imóveis, apagava ambientes e
-lia os contatos capturados. Agora cada imobiliária tem a própria conta e enxerga apenas
-os próprios imóveis.
-
-**O tour publicado continua aberto** — é o produto. Ficam públicos o tour, o modo de
-caminhada, as imagens das cenas, o registro de visita e o envio de lead. Ficam protegidos
-a lista, o painel, as métricas, a exportação e toda escrita.
-
-**Não existe cadastro aberto.** A primeira conta nasce no primeiro acesso a `/entrar`; as
-demais saem do `conta.py`, na mão de quem opera o servidor. Num produto vendido a
-imobiliárias, uma tela pública de "criar conta" só serviria para um estranho abrir conta
-no servidor do cliente.
-
-```bash
-python conta.py criar imobiliaria2 "Nome da Imobiliária"
-python conta.py listar
-```
-
-O imóvel guarda o `id` da conta, não o nome de login — trocar o nome no futuro não orfana
-o acervo. Imóvel sem dono (o acervo criado antes das contas) é adotado pela primeira conta.
-
-### O furo que o teste encontrou
-
-A matriz de acesso passou em tudo, menos numa linha: **a conta B apagou o imóvel da conta
-A**. `DELETE /api/imoveis/<id>` está registrada no `app`, não no Blueprint — então escapou
-da checagem de posse que o `before_request` do Blueprint faz.
-
-É a mesma armadilha que o commit da autenticação anterior já documentava, em outra direção:
-rotas do `app` e rotas do Blueprint não se comportam igual, e é fácil proteger um grupo
-achando que protegeu os dois. A checagem agora está dentro da própria rota.
-
-Matriz final: 20 verificações, 3 perfis (visitante, dona, outra imobiliária), 0 falhas.
-
-## A emenda serrilhada do teto
-
-Olhando para cima aparecia um degrau em ziguezague na junta do teto com a parede — bem
-visível no modo de caminhada.
-
-A causa não era o preenchimento, era a **volta**. O teto é reconstruído numa projeção
-azimutal de 640×640, e o resultado era misturado de volta sobre a **calota inteira** de
-70°, não apenas onde houve preenchimento. A 60° do polo esse disco tem 4,8 px por grau
-contra 14 do equirretangular: subamostragem de 3×. Pixel bom estava sendo trocado por
-pixel borrado, e a fronteira disso virava o serrilhado.
-
-Agora só volta o que foi preenchido: o peso do preenchimento viaja pelo mesmo `remap` da
-imagem e vira a máscara da mistura.
-
-| Alteração média fora do buraco | |
-|---|---|
-| Antes | 1,93 níveis |
-| Agora | **0,10 níveis** |
-
-Ou seja: fora da região sem foto, o panorama fica intacto.
-
-### E a tampa do chão baixou de 50° para 36°
-
-Pelo mesmo erro de método que já tinha me pegado: escolhi 50° porque a energia de cunha
-caía 71% contra 21%. Mas essa métrica mede **quanto do anel foi coberto**, não se o
-artefato saiu sem comer conteúdo — e na tela 50° apagava o piso e a base da cama.
-
-É a segunda vez que essa métrica engana neste mesmo problema. Fica o registro: no polo, a
-imagem manda na métrica.
-
-## O chão sob a câmera: três tentativas e o que sobrou
-
-Olhando para baixo aparece um **leque de riscos escuros** — o "degradê preto". Causa: a
-captura de uma fileira não alcança o chão sob a câmera, e o preenchimento estica a cor de
-cada coluna, o que no polo vira um leque.
-
-Três abordagens testadas, todas medidas pela energia de cunha (34,72 no estado original):
-
-| Abordagem | Resultado | Veredito |
-|---|---|---|
-| Superfície suave (a do teto, invertida) | −86% | apaga piso, tapete e pé da cama |
-| LaMa por máscara de detalhe | −0% | a máscara erra: o leque **tem** gradiente |
-| LaMa por raio (38°/45°/52°) | −5% a −15% | troca leque por borrão escuro |
-| **Tampa na cor do piso** | **−72%** | **adotada** |
-
-Por que o LaMa falha aqui e ganhou atrás dos móveis: lá o buraco é pequeno e cercado de
-estrutura para continuar; aqui é 23–43% do disco, sem nada em volta para copiar. Polo é
-caso degenerado para inpainting — a conclusão do teto valia, e vale também para o chão.
-
-A tampa não recupera o piso. Ela troca um artefato por uma superfície lisa da cor certa,
-amostrada só na metade mais clara do anel em volta (a mediana crua puxa para cinza,
-porque o anel contém sombra e pé de móvel). Sem logo é o que dá para fazer; **com a logo
-da imobiliária fica melhor**, e é o que toda foto 360 profissional faz. O botão agora
-funciona nos dois casos.
-
-A solução de verdade continua sendo captura em **três fileiras**: aí o chão é real.
-
-## Camada de fundo: reconstruir o que está atrás dos móveis
-
-Caminhando, o visitante enxerga além das bordas do que a foto registrou. Ali não há
-dado — a câmera nunca viu. Antes isso virava sombra escura; agora o vão pode ganhar
-conteúdo próprio, gerado por IA.
-
-**É conteúdo gerado, não o imóvel.** A cena fica marcada e o visualizador avisa na tela:
-*"11,31% reconstruído por IA (atrás dos móveis)"*.
-
-Primeiro a medição que justificou encarar: para andar 1 m, só **2,2%** do campo de visão
-precisa ser inventado; 3,3% em 1,5 m. Bem menos que a reconstrução de teto que o projeto
-já aceitava (43° da esfera).
-
-### LaMa ganhou — e isso contradiz o teste anterior
-
-| | cv2.inpaint | LaMa (208 MB) |
-|---|---|---|
-| Caneca sobre a mesa | vira cone borrado | removida limpa |
-| Violão na parede | desfigurado | reconstruído coerente |
-| Quina da mesa, piso | esborrachados | preservados |
-
-O mesmo LaMa **havia perdido** para a técnica clássica no teto (37,3 contra 2,58). A
-diferença é o caso: teto é polo, superfície lisa, sem estrutura a preservar — degenerado.
-Remover objeto de cena estruturada é exatamente o que o modelo aprendeu a fazer.
-
-Lição: aquela rejeição era específica do caso, não veredito sobre o modelo. Vale reabrir
-uma conclusão quando o problema muda de natureza.
-
-### Dois defeitos que só a tela revelou
-
-**A camada gerada nascia na frente da real.** O desfoque na profundidade do fundo puxava
-valores para perto. Invariante aplicada: `raio_fundo = max(raio_fundo, raio)` — o fundo
-nunca está mais perto do que a foto viu.
-
-**E ainda assim cobria a cena inteira.** Pintei a camada de vermelho para diagnosticar: a
-tela ficou toda vermelha. Medindo vértice a vértice, **71,4% do fundo estava à frente**. A
-causa era o slider "Profundidade do relevo": em 70% ele comprime a malha real em direção
-ao raio médio, enquanto o fundo usava o raio cru — duas regras diferentes, camadas
-entrelaçadas. Agora as duas passam pela mesma mistura; como ela é monótona no raio, a
-invariante sobrevive. Resultado: 0,0% à frente.
-
-Custo: ~3 min de processamento na fila, 200 KB de textura e 650 KB de profundidade por
-ambiente, só carregados no modo de caminhada. O modelo é opcional:
-`python baixar_modelo.py --fundo`.
-
-## O borrão ao caminhar: o que dá e o que não dá
-
-Andando pelo ambiente, algumas regiões esticam num borrão — tipicamente o chão atrás de
-um móvel, ou o vão sob a mesa.
-
-**A causa não tem conserto por reprocessamento.** É oclusão: a foto foi tirada de um
-ponto só, e o que estava escondido atrás da mesa nunca foi registrado. A malha liga a
-borda da mesa à parede do fundo com um triângulo, e ao caminhar esse triângulo estica.
-Não existe algoritmo que recupere pixels que a câmera não viu — só outra foto, de outro
-ponto, veria ali.
-
-**O que dá para fazer é parar de fingir.** Um triângulo cujos vértices têm raios muito
-diferentes (salto acima de 18% do menor) não é superfície do cômodo: é o vão. Esses
-triângulos vão para um segundo grupo da malha, com material próprio.
-
-Por que não simplesmente apagá-los: **parado no ponto de captura a imagem é perfeita.**
-Ali esses triângulos estão de perfil, escondidos atrás das próprias superfícies. Apagá-los
-abre buracos numa vista que não tinha defeito nenhum — testei, e fica pior. O borrão
-nasce só quando a câmera sai do ponto.
-
-Então eles escurecem conforme você se afasta: intactos na origem, sombra a 1,6 m. E
-escurecem em vez de sumir, porque um furo na esfera deixaria ver a parede oposta através
-dele. No quarto de teste são 2,6% da malha, e o painel informa isso em vez de deixar a
-sombra sem explicação.
-
-**A solução de verdade é capturar de mais pontos.** O que um ponto não viu, o vizinho vê,
-e o sistema já encadeia pontos. Um cômodo com móvel no meio pede dois ou três.
-
-## Corrigir cenas antigas
-
-O pipeline ganhou nivelamento e reconstrução de teto no meio do caminho. Cenas montadas
-antes disso ficaram com o horizonte torto e com o **leque de cunhas** no teto — riscos
-escuros que convergem no zênite, muito visíveis no modo de caminhada, onde a textura
-esticada vira geometria quebrada. As fotos originais já foram apagadas, mas as duas
-correções trabalham sobre o equirretangular pronto.
-
-Botão **Endireitar e refazer o teto** no painel. No quarto de teste:
-
-| | Antes | Depois |
-|---|---|---|
-| Energia de cunha no teto | 22,79 | 6,45 (−72%) |
-| Horizonte fora do prumo | 4,86° | 0,82° |
-| Chão fora do nível (aferição independente) | 3,29° | 1,88° |
-
-A última linha é a verificação que importa: medir o nivelamento com o próprio detector de
-verticais é circular, então o prumo foi conferido ajustando um plano aos pontos de chão do
-mapa de profundidade — um caminho que não compartilha nada com o detector.
-
-Refaz a profundidade junto, porque endireitar gira o panorama e o mapa antigo passaria a
-apontar para as direções erradas.
-
-### Todo caminho de entrada recebe o mesmo tratamento
-
-A costura já aplicava exposição, nivelamento e teto. Os outros dois não:
-
-| Entrada | Exposição | Nivelamento | Teto |
-|---|---|---|---|
-| Costura de fotos | sim | sim | sim |
-| Varredura | sim | sim | **faltava** |
-| Foto 360 pronta | não | **faltava** | **faltava** |
-
-Quem enviava uma foto 360 do modo Panorama do celular não recebia correção nenhuma.
-Agora recebe nivelamento e teto — as duas se protegem sozinhas (o nivelamento ignora
-desvios abaixo de 0,8° e o teto só age quando falta mais de 4° de foto), então uma
-imagem já boa sai intacta. Exposição fica de fora de propósito: o CLAHE é incondicional
-e uma foto já tratada pela câmera só teria a perder.
-
-### O chão não recebe a mesma correção
-
-O leque existe igual no polo inferior, e a mesma função aplicada lá derruba a energia de
-cunha de 28,46 para 3,93. **Mesmo assim foi rejeitada:** o número melhora e a imagem
-piora. O buraco embaixo é maior (55° contra 43°) e ali existe conteúdo real perto da
-câmera — a reconstrução apagou o piso, o tapete e o pé da cama, trocando tudo por um
-disco liso. Teto branco e liso é o caso fácil; chão texturizado não é.
-
-Para o nadir a resposta continua sendo a marca no chão: cobre a área sem informação com
-um logotipo declarado, em vez de inventar piso.
-
-## Metragem
-
-Botão **Medir o ambiente**: estima comprimento, largura e m² a partir do mapa de
-profundidade. Aferido contra o LiDAR do iPhone num quarto real.
-
-| | Real (iPhone) | Medido | Erro |
-|---|---|---|---|
-| Comprimento | 5,26 m | 5,38 m | +2,3% |
-| Largura | 2,58 m | 2,59 m | +0,4% |
-| Área | 13,57 m² | 13,9 m² | +2,4% |
-
-Cada pixel vira ponto 3D; os que estão a ~1,5 m abaixo da câmera são piso. Para cada
-direção o código caminha do chão para fora até o piso acabar, e a um retângulo é ajustado
-ao contorno.
-
-**Por que retângulo, e por que percentil alto.** O polígono de piso sozinho mede *piso
-livre*, não o cômodo: móvel encostado interrompe o piso antes da parede, e aqui isso deu
-7,7 m² — 55% do cômodo. Cômodo é retangular e o móvel só esconde a parede em algumas
-direções, então a extensão usa percentil 96: alcança a parede onde ela está visível e
-ainda descarta ponto solto de profundidade ruim. Percentil 88 mede o móvel (−37%);
-percentil 100 mede o ruído.
-
-O painel mostra os dois números — a metragem e o piso livre.
-
-### Medir e publicar são passos separados
-
-Medir só serve se o número chegar a quem compra. Depois de medir, o painel oferece
-**Publicar**: a metragem fica gravada na cena e passa a aparecer no cartão do tour
-(`13,9 m² em 1 de 1 ambiente(s)`), embaixo de cada miniatura do menu, e como selo na
-lista de imóveis, que soma os ambientes publicados.
-
-A publicação é um passo à parte de propósito. A estimativa tem uns 2% de erro e o
-corretor muitas vezes tem o número da matrícula, que vale mais — por isso o campo ao
-lado do botão é editável e aceita vírgula decimal. Fica gravado se o número foi
-`medido` ou `informado`.
-
-O tour nunca extrapola: se só metade dos ambientes tem metragem, ele diz *"em 2 de 5
-ambiente(s)"* em vez de anunciar um total que não cobre a casa inteira.
-
-### Um episódio que vale registrar
-
-Esta funcionalidade foi **implementada, descartada e restaurada**. A primeira aferição usou
-uma referência de 3,20 × 2,80 m, contra a qual o resultado dava −39% e nenhum ajuste
-salvava. Foi removida com um commit explicando por que não funcionava.
-
-A medição correta (LiDAR) era 5,26 × 2,58. Contra ela, o mesmo código acerta as duas
-dimensões dentro de 2,3%. **O código estava certo; a referência é que estava errada.**
-
-Fica a lição: uma verificação vale o que vale o padrão de comparação. Antes de concluir
-que algo não funciona, confirme contra o que está sendo comparado.
-
-### E uma segunda lição, em sentido contrário
-
-Ao corrigir a cena de teste (nivelamento + teto), a mesma medição caiu de 13,9 para
-8,3 m². O nivelamento foi confirmado como **correto** por aferição independente — logo o
-frágil é a medição, não a correção.
-
-A causa é `_raio()`: a conversão de disparidade para metros usa constantes fixas
-(`1,542` e `0,125`) ajustadas a uma única imagem. A disparidade do modelo é relativa e
-sua distribuição muda a cada imagem, então o deslocamento fixo deforma a geometria de
-modo não uniforme — o comprimento caiu 30% e a largura só 12%. A calibração atual no
-nadir corrige apenas escala, e escala não desfaz deslocamento.
-
-Tentativa de conserto: ajustar os dois coeficientes por imagem, usando o próprio piso
-como régua (um plano a 1,5 m obedece `1/raio = sen(lat)/1,5`, o que é linear em
-disparidade). Os coeficientes saíram estáveis entre as variantes, mas a área piorou em
-todas (−26% a −44%). **Não foi embarcada.**
-
-O padrão que sobra: a largura sai perto do real em toda variante (2,47–2,61 m contra
-2,58), o comprimento é que desaba. Faz sentido — a ponta distante do cômodo é vista em
-ângulo raso, onde profundidade monocular erra mais.
-
-Conclusão honesta: **os +2,4% valiam para aquela imagem específica.** A medição não está
-validada de forma geral, e cena corrigida fica marcada para revisão no painel. Medir
-mais cômodos com LiDAR — quadrado, vazio, em L — continua sendo o que falta.
-
-## Reconstrução do teto
-
-O preenchimento padrão estica a cor de cada coluna para cima. No polo isso vira um leque
-de cunhas — o defeito mais visível ao olhar para cima, e o que motivou este trabalho.
-
-O teto observado é projetado numa vista azimutal (o polo vira o centro, sem a distorção
-do equirretangular), ajusta-se uma superfície suave a ele, e essa superfície é estendida
-para dentro do buraco. Só entram no ajuste os pixels mais claros do anel: o anel contém
-topo de armário e quina escura, e incluir isso puxava o resultado para um disco cinza
-evidente.
-
-Energia de cunha medida no quarto de teste, pelos harmônicos angulares:
-
-| Abordagem | Cunha |
-|---|---|
-| Preenchimento anterior | 50,8 |
-| `cv2.inpaint` (Telea / Navier-Stokes) | ~50 (sem mudança) |
-| **LaMa, 198 MB** | **37,3** |
-| **Extrapolação da superfície** | **2,6** |
-
-**A técnica simples ganhou do modelo de IA por uma margem larga**, e sem 198 MB de
-download nem 4 s de inferência. O LaMa foi baixado, testado nos dois modos de preparo e
-descartado.
-
-Não é invenção de conteúdo: é a continuação da superfície que a própria foto mostra.
-Diferente de gerar piso, que afirmaria algo sobre característica usada na decisão de
-compra.
-
-O limite do buraco é medido **na imagem**, varrendo de cima até aparecer detalhe. Deduzir
-do campo da lente não funciona: a estimativa de foco do OpenCV saía inflada (115°),
-apontando um buraco de 7° quando o real era 44°.
-
-## Marca no chão
-
-Toda foto 360 profissional cobre o ponto exatamente abaixo da câmera: ali fica o tripé,
-o pé de quem fotografou, ou — numa captura de uma fileira só — o preenchimento sintético
-que não alcança o chão.
-
-Medido no quarto de teste: **cerca de 40% da altura do equirretangular é preenchimento**,
-com nitidez praticamente zero nas faixas de topo e base. A marca cobre a parte pior disso
-e ainda reforça a marca de quem publicou.
-
-O disco é desenhado direto no equirretangular: cada pixel da faixa de baixo vira
-coordenada polar no chão — a distância ao polo vira raio, a longitude vira ângulo. É o
-inverso da projeção que o visualizador faz. A borda externa dissolve para não virar um
-círculo recortado.
-
-**Não inventa conteúdo.** Substitui área sem informação por um logotipo declarado.
-Diferente de gerar piso com IA, que afirmaria algo falso sobre uma característica que o
-comprador usa para decidir.
-
-O panorama original fica guardado ao lado (`orig_<arquivo>`), então dá para trocar a logo
-ou desfazer sem recosturar as fotos.
-
-## Nivelamento do horizonte
-
-Quem fotografa com o celular na mão quase nunca fica no prumo. Num panorama torto o chão
-"escorrega" quando o visitante gira — desconforto físico que aparece acima de uns 2°.
-A captura de teste estava **4,9° fora do prumo**.
-
-Como se descobre onde é "para baixo": pelas verticais da própria cena. Batente de porta,
-quina de parede e lateral de armário são verticais reais. Cada linha dessas, vista da
-câmera, define um plano que passa pelo centro óptico; a direção da gravidade está contida
-em todos esses planos ao mesmo tempo. Achar essa direção é achar o prumo — RANSAC sobre
-as normais, refinado com os inliers ponderados pelo comprimento.
-
-Resultado medido: 4,86° → **0,59°**, com 76 das 133 linhas concordando, em 0,7 s.
-No fluxo completo: 5,2° → 0,29°, conferido relendo o arquivo salvo.
-
-**Por que não pela profundidade.** Também dá para estimar ajustando um plano ao piso do
-mapa de profundidade. Testei: deu 19°, contra os 4,9° reais. Profundidade monocular é
-relativa e o ajuste saiu com planaridade 0,22 — ruim demais. As verticais são geometria
-direta e o resultado se verifica sozinho: mede, corrige, mede de novo.
-
-Só acontece em panorama 360 fechado: a rotação trata a imagem como superfície completa,
-e numa faixa parcial o mapeamento seria outro. Abaixo de 0,8° não mexe, para não perder
-nitidez reamostrando à toa. Cena sem quinas (parede lisa) é recusada com explicação, e o
-panorama segue intacto.
-
-## Correção de exposição
-
-Fotografar cômodo tem um problema constante: janela clara contra parede escura. Medindo
-as 16 fotos de um quarto real, o brilho variava de 109,6 a 149,2 entre elas — 40 níveis.
-
-O OpenCV já compensa esse ganho entre fotos, e medi que ele faz bem: o brilho médio do
-panorama sai uniforme. O que sobrava era **perda de detalhe nas sombras**: 11% dos pixels
-esmagados abaixo de 25, sem informação recuperável.
-
-A correção é **local, não global**. Achatar o brilho do panorama inteiro destruiria a
-iluminação real — a parede da janela é mesmo mais clara que o canto. Com CLAHE no canal
-de luminância, a sombra esmagada caiu para 7,2% e o estouro ficou igual (0,02% → 0,08%).
-
-Limite 4,0 foi testado e **piorou**: 15,4% de sombra esmagada, por redistribuir demais.
-Ficou 2,5 com grade 16x8.
-
-## Miniaturas
-
-As listas mostram o panorama num quadradinho de 109x60 — mas carregavam a imagem de
-5807x2903. Num tour de 13 ambientes, **o menu baixava 17 MB antes do visitante clicar em
-nada**.
-
-Cada cena passou a ter uma miniatura de 480px (~15 KB). Abrir o tour caiu de 17,2 MB para
-1,5 MB, uma redução de 91%. As miniaturas que faltam nos imóveis antigos são geradas na
-subida do servidor.
-
-## Limpeza das fotos originais
-
-As fotos enviadas ficam em `data/uploads/` e valem a pena guardar: já foi preciso
-recosturar um ambiente com ajustes melhores. Mas nada as apagava — eram **226 MB** de
-lotes de costuras que falharam ou de cenas já removidas.
-
-Agora cada cena guarda de qual lote veio. Apagar a cena (ou o imóvel) apaga as originais
-junto, e na subida o servidor remove lotes órfãos com mais de 7 dias. O prazo existe
-porque um lote recém-criado pode ser de uma costura ainda na fila.
-
-O mesmo vale para `scenes/`: costura recusada no meio, cena substituída ou profundidade
-de cena já removida deixavam arquivo para trás. A faxina na subida encontrou 1,9 MB assim
-num imóvel com um único ambiente.
-
-## Leads ficam fora do tour público
-
-`GET /api/imoveis/<id>/tour` alimenta o visualizador, que é público por natureza — é o
-link que o corretor manda ao cliente. Essa rota **nunca** devolve `leads_capturados` nem
-`visitas`.
-
-Antes devolvia o tour inteiro: qualquer pessoa com o link lia nome, telefone e e-mail de
-todos os contatos capturados. O painel busca esses dados em `/leads` e `/metricas`.
-
-Não há login por enquanto: quem alcança a porta 5000 edita qualquer imóvel. Enquanto o
-servidor roda só na máquina de vocês, tudo bem; no dia que subir para uma imobiliária
-acessar, autenticação volta a ser o primeiro item.
-
-## Fila de processamento
-
-Costura e profundidade levam de 10 a 25 segundos. Enquanto rodavam dentro da requisição,
-o navegador segurava a conexão aberta o tempo todo — numa rede de celular um proxy corta
-antes do fim, e o corretor via erro **com o panorama já pronto no servidor**.
-
-Agora a requisição devolve um número de tarefa em ~0,3 s e o painel pergunta o andamento
-a cada segundo, mostrando a etapa real: *lendo 16 fotos → alinhando e costurando →
-acabamento das bordas → gravando*.
-
-**Um trabalhador só, de propósito.** A costura consome bastante memória; duas ao mesmo
-tempo derrubariam o processo. Quando há duas na fila, a segunda mostra a posição em vez
-de competir por memória.
-
-Limitação conhecida: as tarefas vivem na memória do processo. Reiniciar o servidor no
-meio de uma costura perde aquele trabalho — as fotos originais continuam em
-`data/uploads/`, mas é preciso reenviar.
-
-## Escrita concorrente
-
-Quase toda rota que escreve faz ler-alterar-gravar no `tour.json`. Sem serializar, duas
-requisições leem a mesma versão e a segunda apaga o que a primeira gravou. **Num teste
-com 40 visitas simultâneas, 27 se perdiam** — e várias devolviam HTTP 500, porque outra
-thread lia o arquivo no meio da gravação e encontrava JSON pela metade.
-
-Basta o corretor mandar o link num grupo de WhatsApp para isso acontecer.
-
-Duas correções:
-
-- **Gravação atômica.** Escreve num arquivo temporário e troca com `os.replace`. Quem lê
-  sempre pega a versão inteira, velha ou nova — nunca metade.
-- **Uma trava por imóvel**, para requisições que escrevem. Leituras seguem em paralelo.
-
-As rotas pesadas (costura, profundidade) **não** seguram a trava enquanto processam, só
-no momento de gravar. Segurando o tempo todo, um visitante esperava 10,7 s para registrar
-a visita. Depois da correção: 26 ms normalmente, 151 ms no pior caso durante uma costura.
-
-Depois: 120 escritas simultâneas, 120 gravadas, zero erros.
-
-## Use 127.0.0.1, não localhost
-
-No Windows, `localhost` resolve para IPv6 (`::1`) primeiro. O servidor escuta só IPv4,
-então cada requisição espera o timeout antes de tentar o endereço certo — medi **2
-segundos por chamada**. Navegadores disfarçam isso; scripts e ferramentas, não.
-
-## Métricas de visita
-
-O tour mede sozinho quanto tempo a visita durou e quanto tempo o visitante passou em
-cada ambiente. O botão **Métricas** no painel mostra visitas, tempo típico, conversão
-em lead, quantos abriram no celular, quantos usaram o modo caminhar, e o ranking de
-ambientes por tempo médio.
-
-Duas decisões que fazem o número valer alguma coisa:
-
-- **A contagem para quando a aba fica escondida.** Um tour aberto e esquecido registraria
-  horas de interesse que não existiram.
-- **O envio usa `sendBeacon`.** A medição só fecha quando o visitante sai, e um `fetch`
-  comum seria cancelado junto com a aba.
-
-Visitas com menos de 3 segundos são descartadas — quem abriu e fechou não é visita.
-O histórico guarda as últimas 500; como o armazenamento é um JSON, guardar tudo
-cresceria sem limite.
-
-Leads e visitas **não vão no ZIP exportado**: é dado da imobiliária, não do cliente que
-recebe o link.
-
-## Marca e descrição
-
-O painel aceita a logo da imobiliária (PNG, JPG, WEBP ou SVG) e um texto de descrição.
-Os dois aparecem no cartão do tour. A logo também é empacotada no ZIP.
-
-## Celular
-
-O painel funciona no telefone: abaixo de 1000px vira coluna única, com o visualizador
-no topo. Isso importa porque a captura acontece com o celular na mão — em três colunas
-fixas, a coluna de "Gerar profundidade" ficava fora da tela.
-
-## Exportar e publicar
-
-O botão **Exportar ZIP** gera um pacote com `index.html`, `tour.json`, as imagens e a
-biblioteca do visualizador. Suba numa hospedagem qualquer e o tour funciona sem Python.
-
-As páginas montam os endereços a partir do imóvel na URL. No ZIP não existe servidor,
-então a exportação injeta um bloco de configuração logo após o `<head>` apontando para
-os arquivos ao lado. Tem que ser antes de qualquer script: o cabeçalho das páginas lê
-essas variáveis na primeira linha.
-
-**Atenção:** o ZIP precisa ser servido por HTTP. Abrir o `index.html` com dois cliques
-não funciona — o navegador bloqueia a leitura do `tour.json` via `file://`.
-
-## Captura em fileiras
-
-Uma volta só (~12 fotos) cobre cerca de 80° na vertical — as paredes ficam reais, mas
-teto e chão são preenchidos por aproximação. Três voltas (~30 fotos: nivelado, inclinado
-~35° para cima e ~35° para baixo) levam a cobertura vertical para ~150°, com teto e chão
-de verdade.
-
-Não existe campo separado para cada fileira: envie todas as fotos juntas. O sistema lê a
-orientação que o OpenCV calculou para cada foto e descobre sozinho quantas fileiras você
-fez, se a volta fechou e qual o vão sem cobertura. Esse diagnóstico aparece no painel e
-define se o panorama vira esfera 2:1 ou fica parcial.
-
-## Guia de captura
-
-O software só entrega um bom 360 se a foto entrar certa. No painel há o botão
-**Guia de captura** com o passo a passo. O resumo:
-
-1. Fique parado no centro do cômodo — você gira, não anda.
-2. Celular na vertical, altura do peito (~150 cm), nivelado.
-3. Foto, gira ~30°, foto. Volta completa: 8 a 12 fotos.
-4. Cada foto repete ~30% da anterior.
-5. Trave foco e exposição.
-
-Sem sobreposição não existe costura possível — é limitação de física, não do software.
+Teste que passa em código quebrado é pior que teste nenhum — dá confiança sem dar
+proteção. Detalhes em [docs/decisoes.md](docs/decisoes.md).
 
 ## Estrutura
 
 ```
 app.py                    servidor Flask e API
+servidor.py / servico.py  produção: waitress, backup automático, supervisão
 stitcher.py               costura OpenCV e diagnóstico de falhas
+profundidade.py           mapa de profundidade (Depth Anything V2, ONNX)
+area.py                   metragem a partir da profundidade
+nivelamento.py            horizonte, pelas verticais da cena
+fundo.py                  camada atrás dos móveis (LaMa)
+repintar.py               repintura de ambiente por vista
+repintor_ia.py            a única parte que fala com fora (Replicate)
+ladrilhos.py              corta o panorama para carregamento parcial
+video.py                  escolhe os quadros de um vídeo que viram panorama
+modelo3d.py               importa OBJ de escaneamento de celular
+maquete3d.py              exporta a geometria para OBJ + MTL
+plantas.py                as plantas dos imóveis sintéticos, como dado
 cena_demo.py              gerador de cena 360 sintética
-static/admin.html         painel de administração
-static/viewer.html        visualizador público do tour
-static/vendor/            Pannellum (visualizador 360, local)
-static/imoveis.html       lista de imóveis
+cena_apartamento.py       apartamento inteiro por traçado de raios
+publicar.py               monta um imóvel a partir de planta renderizada
+tarefas.py                fila de processamento
+backup.py                 criar, listar e restaurar backups
+conta.py / usuarios.py    contas de acesso ao painel
+aviso.py                  avisa o corretor quando um contato chega
+testes.py / mutacoes.py   suíte e teste dos testes
+static/                   painel, visualizador, caminhada, maquete, captura
 data/imoveis/<id>/        um imóvel: tour.json + scenes/
-data/uploads/             fotos originais
-fotos_exemplo_costura/    6 fotos sobrepostas para testar a costura
+docs/                     documentação estendida
 ```
-
-## Nota técnica: OpenCL desligado de propósito
-
-O `stitcher.py` desliga a aceleração por GPU **antes de importar o cv2**, via variável de
-ambiente. Não mexa nisso sem ler o motivo:
-
-O OpenCV usa OpenCL para projetar a esfera. Com muitas fotos isso estoura a memória de
-vídeo, e o erro resultante chama o `terminate handler` — derruba o processo Python inteiro,
-sem exceção que dê para capturar. Do lado do navegador aparece como "Failed to fetch",
-porque o servidor simplesmente sumiu.
-
-`cv2.ocl.setUseOpenCL(False)` **não basta**: a flag é por thread, e o Flask atende cada
-requisição numa thread nova, que voltaria a usar a GPU. Só a variável de ambiente resolve
-no processo todo.
-
-Além de estável, ficou mais rápido: 15 fotos passaram de 28s para 10s.
 
 ## Limitações conhecidas
 
-- A costura roda em CPU e leva de 10 a 25 segundos por ambiente. Em produção isso vira fila.
-- Fotos tiradas andando pelo cômodo (em vez de girar no eixo) não costuram.
-- Não faz reconstrução 3D — o visitante olha em volta de pontos fixos, não caminha
-  livremente. Para isso seria Gaussian Splatting, que exige GPU.
-- Os leads ficam num arquivo JSON. Em produção, banco de dados.
-- Sem autenticação: qualquer um que alcance a porta 5000 edita o tour.
+- A costura roda em CPU e leva de 10 a 25 segundos por ambiente. Em produção isso
+  vira fila.
+- Fotos tiradas **andando** pelo cômodo (em vez de girar no eixo) não costuram —
+  sem sobreposição não existe costura possível.
+- Não faz reconstrução 3D a partir das fotos. O visitante olha em volta de pontos
+  fixos e caminha ~1 metro a partir de cada um; para movimento livre seria
+  Gaussian Splatting, que exige GPU e refotografar andando.
+- **A metragem não está validada de forma geral.** O erro de +2,4% vale para a
+  imagem aferida contra LiDAR; a conversão de disparidade para metros usa
+  constantes ajustadas a uma única imagem. Cena corrigida fica marcada para
+  revisão no painel.
+- Atrás dos móveis não existe informação que a câmera tenha visto — a camada de
+  fundo é conteúdo **gerado por IA**, declarado na tela ao visitante.
+- **A repintura depende de serviço pago.** Sem `REPLICATE_API_TOKEN` o recurso fica
+  indisponível; é o único ponto do projeto que não roda offline.
+- Os leads ficam num arquivo JSON com trava por imóvel. Em produção com volume,
+  banco de dados.
+- As tarefas da fila vivem na memória do processo: reiniciar o servidor no meio de
+  uma costura perde aquele trabalho.
+- Escala só em uma máquina. As travas são `threading.RLock` e a fila é uma thread —
+  crescer é mais thread e mais CPU, não mais processo.
+
+## Licença
+
+[MIT](LICENSE)
