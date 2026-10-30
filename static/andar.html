@@ -16,6 +16,7 @@ const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
 const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 </script>
 <script src="/static/vendor/three.js"></script>
+<script src="/static/lead.js"></script>
 <style>
   :root{ --acento:#e07b39; }
   *{box-sizing:border-box}
@@ -332,6 +333,19 @@ async function iniciar(){
   if ('ontouchstart' in window) $('dpad').style.display = 'grid';
   if (!temPlanta && pontos.length > 1)
     avisar('Defina a planta no painel para caminhar entre os ambientes');
+
+  // Convite de contato, o mesmo das outras duas telas. Aqui a pessoa anda
+  // com o ponteiro preso; o convite automatico espera ela parar, e o botao
+  // fixo fica disponivel o tempo todo.
+  if (window.Lead) Lead.iniciar(Object.assign({
+    imovel: IMOVEL,
+    api: API,
+    titulo_imovel: tour.titulo || '',
+    cor: tour.cor || '',
+    ocupado: () => document.pointerLockElement === renderizador.domElement,
+    aoAbrir: () => { if (document.exitPointerLock) document.exitPointerLock(); },
+  }, tour.lead || {}));
+
   animar();
 }
 

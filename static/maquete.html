@@ -13,6 +13,7 @@ const URL_MAQUETE = window.__MAQUETE__ || ('/api/imoveis/' + IMOVEL + '/maquete'
 const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 </script>
 <script src="/static/vendor/three.js"></script>
+<script src="/static/lead.js"></script>
 <style>
   :root{
     --ground:#edeff2; --surface:#ffffff; --ink:#171a20; --muted:#5a6371;
@@ -2729,6 +2730,21 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     document.getElementById("marcaImovel").textContent = "· " + dados.nome;
     if (!iniciar3d()) return;
     mostrar(0);
+
+    // CONVITE DE CONTATO. A maquete e onde o visitante anda, mede e escolhe o
+    // quarto — e era a unica tela que nao pedia contato nenhum. Quem gostava
+    // fechava a aba, e do outro lado ninguem ficava sabendo.
+    //
+    // ocupado() e o que impede o convite de roubar o ponteiro no meio de um
+    // passo: andando em primeira pessoa, a janela espera. O botao fixo fica,
+    // e e dele que vem o contato de quem percorreu a casa inteira.
+    if (window.Lead) Lead.iniciar(Object.assign({
+      imovel: IMOVEL,
+      api: "/api/imoveis/" + IMOVEL,
+      titulo_imovel: dados.nome,
+      ocupado: () => emPessoa,
+      aoAbrir: () => { if (document.exitPointerLock) document.exitPointerLock(); },
+    }, dados.lead || {}));
   }).catch(() => {
     erro("Este imóvel não tem maquete",
          "A maquete existe para ambiente gerado, que tem paredes e móveis em "

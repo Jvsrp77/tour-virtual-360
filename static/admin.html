@@ -347,6 +347,12 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
       <input type="text" id="leadTitulo">
       <label>Aparece após (segundos)</label>
       <input type="number" id="leadSegundos" min="5" max="300">
+      <!-- Formulário promete retorno; WhatsApp abre conversa agora, e é por
+           ali que a maioria prefere falar. Vazio esconde o botão: número
+           errado é pior que botão nenhum, porque manda o interessado para a
+           conversa de outra pessoa. -->
+      <label>WhatsApp do corretor (só números, com DDI e DDD)</label>
+      <input type="text" id="leadZap" placeholder="5511999998888">
 
       <!-- O contato é gravado de qualquer jeito. O que isto avisa é se ALGUÉM
            fica sabendo: sem SMTP, o lead espera o corretor abrir o painel, e
@@ -547,6 +553,7 @@ async function carregar(){
   $('leadAtivo').checked  = !!(tour.lead && tour.lead.ativo);
   $('leadTitulo').value   = (tour.lead && tour.lead.titulo) || '';
   $('leadSegundos').value = (tour.lead && tour.lead.segundos) || 25;
+  $('leadZap').value      = (tour.lead && tour.lead.whatsapp) || '';
   verAviso();
   desenharCenas();
   if (cenaAtual && !tour.cenas.find(c => c.id === cenaAtual)) cenaAtual = null;
@@ -1473,7 +1480,10 @@ async function salvarTour(){
       preco: $('tPreco').value, cor: $('tCor').value,
       lead: {ativo: $('leadAtivo').checked, titulo: $('leadTitulo').value,
              texto: (tour.lead && tour.lead.texto) || '',
-             segundos: parseInt($('leadSegundos').value) || 25}
+             segundos: parseInt($('leadSegundos').value) || 25,
+             // so digitos: quem digita (11) 99999-8888 nao deveria descobrir
+             // na conversa perdida que o link nao abria
+             whatsapp: ($('leadZap').value || '').replace(/\D/g, '')}
     })});
   await carregar();
   aviso('Dados salvos.', 'ok');

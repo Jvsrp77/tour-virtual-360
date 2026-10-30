@@ -1242,6 +1242,40 @@ MUT = [
      'const FOTOS_NA_MISTURA = 1;',
      'TestMisturaDeFotos'),
 
+    # ------------------------------ o convite de contato nas tres telas
+
+    ('o convite interrompe quem esta andando', 'static/lead.js',
+     "if (sozinho && typeof this.cfg.ocupado === 'function' && this.cfg.ocupado()){",
+     "if (false){",
+     'TestConviteDeContato.test_o_convite_nao_interrompe_quem_esta_andando'),
+
+    ('quem deixou contato num imovel nao e perguntado em outro',
+     'static/lead.js',
+     "return 'lead_ok_' + (this.cfg.imovel || '');",
+     "return 'lead_ok';",
+     'TestConviteDeContato.test_a_marca_de_ja_enviou_e_por_imovel'),
+
+    # numero errado manda o interessado para a conversa de outra pessoa
+    ('numero curto demais vira link de whatsapp', 'static/lead.js',
+     "if (n.length < 10) return '';",
+     "if (false) return '';",
+     'TestConviteDeContato.test_o_whatsapp_so_aparece_com_numero_plausivel'),
+
+    ('o consentimento perde o texto que foi aceito', 'static/lead.js',
+     "dados.consentimento = cada(f, 'aceite').parentNode.innerText.trim();",
+     "dados.consentimento = 'sim';",
+     'TestConviteDeContato.test_o_consentimento_vai_com_o_texto_que_foi_aceito'),
+
+    ('o botao fixo volta a perguntar a quem ja respondeu', 'static/lead.js',
+     "if (this.enviado || this._jaEnviou()) return;",
+     "if (false) return;",
+     'TestConviteDeContato.test_o_botao_fixo_fica_depois_da_janela_passar'),
+
+    ('a maquete volta a nao saber convidar', 'app.py',
+     'dados["lead"] = dict(tour.get("lead") or {})',
+     'dados["lead"] = {}',
+     'TestContatoNaMaquete.test_a_maquete_entrega_a_configuracao_de_contato'),
+
     ('a malha volta a ser grande demais para a lista', 'static/maquete.html',
      'const LADO_DA_FATIA = 1.5;',
      'const LADO_DA_FATIA = 99.0;',

@@ -368,6 +368,12 @@ TOUR_PADRAO = {
         "titulo": "Gostou do imovel?",
         "texto": "Deixe seu contato que um corretor fala com voce.",
         "segundos": 25,
+        # O NUMERO DO CORRETOR, em digitos (55DDDNUMERO). Com ele a tela
+        # oferece "chamar no WhatsApp" ao lado do formulario, e e por ali que
+        # a maioria prefere falar: formulario promete retorno, WhatsApp abre
+        # conversa agora. Vazio esconde o botao — numero errado e pior do que
+        # botao nenhum, porque manda o interessado para a conversa de outro.
+        "whatsapp": "",
     },
     "cenas": [],
     "leads_capturados": [],
@@ -1294,6 +1300,17 @@ def api_maquete():
         cena = por_nome.get(ponto.get("nome")) or {}
         ponto["cena_id"] = cena.get("id")
         ponto["arquivo"] = cena.get("arquivo")
+
+    # A CONFIGURACAO DE CONTATO VEM JUNTO, e precisa vir.
+    #
+    # A captura de contato existia so no visualizador 360. A maquete — que e
+    # onde o visitante anda, mede e escolhe o quarto — nao pedia contato
+    # nenhum: quem gostava do imovel fechava a aba, e do outro lado ninguem
+    # ficava sabendo. Era o funil inteiro terminando em lugar nenhum.
+    #
+    # Vai so o que a tela precisa para montar o convite. Os contatos JA
+    # CAPTURADOS continuam fora daqui, como no tour: eles sao da dona.
+    dados["lead"] = dict(tour.get("lead") or {})
     return jsonify({"ok": True, "maquete": dados})
 
 

@@ -17,6 +17,7 @@ const URL_ANDAR  = window.__ANDAR__  || ('/andar/' + IMOVEL);
 const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 </script>
 <script src="/static/vendor/pannellum.js"></script>
+<script src="/static/lead.js"></script>
 <style>
   :root{ --acento:#e07b39; }
   *{box-sizing:border-box}
@@ -81,19 +82,6 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .aceite{display:flex;gap:9px;align-items:flex-start;margin:10px 0 4px;
     font-size:11.5px;color:#b6bdc7;line-height:1.45;text-align:left;cursor:pointer}
   .aceite input{width:auto;margin:2px 0 0}
-  .lead{position:absolute;inset:0;z-index:30;display:none;align-items:center;
-    justify-content:center;background:rgba(0,0,0,.68);backdrop-filter:blur(4px);padding:20px}
-  .lead .caixa{background:#181b21;border:1px solid rgba(255,255,255,.14);border-radius:14px;
-    padding:26px;max-width:390px;width:100%}
-  .lead h2{margin:0 0 6px;font-size:19px}
-  .lead p{margin:0 0 16px;color:#a9b0ba;font-size:13.5px}
-  .lead input{width:100%;margin-bottom:9px;background:#0f1115;color:#fff;
-    border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:10px 12px;font:inherit}
-  .lead input:focus{outline:none;border-color:var(--acento)}
-  .lead .env{width:100%;background:var(--acento);color:#1a1207;border:none;border-radius:8px;
-    padding:11px;font:inherit;font-weight:700;cursor:pointer;margin-top:5px}
-  .lead .pular{width:100%;background:none;color:#8b929c;border:none;padding:9px;
-    font:inherit;cursor:pointer;margin-top:4px}
 
   /* O Pannellum posiciona o hotspot via transform inline. Por isso a animacao
      fica no <span> interno: animar transform aqui apagaria o posicionamento. */
@@ -178,19 +166,6 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 
 <div class="menu" id="menu"></div>
 
-<div class="lead" id="lead">
-  <div class="caixa">
-    <h2 id="lTitulo">Gostou do imóvel?</h2>
-    <p id="lTexto">Deixe seu contato que um corretor fala com você.</p>
-    <input type="text" id="lNome" placeholder="Seu nome">
-    <input type="tel" id="lTelefone" placeholder="Telefone / WhatsApp">
-    <input type="email" id="lEmail" placeholder="E-mail">
-    <label class="aceite"><input type="checkbox" id="lAceite">
-      <span>Autorizo o contato sobre este imóvel e o guarda dos meus dados para
-      isso. Posso pedir a exclusão a qualquer momento.</span></label>
-    <button class="env" onclick="enviarLead()">Quero falar com um corretor</button>
-    <button class="pular" onclick="fecharLead()">Continuar vendo o tour</button>
-  </div>
 </div>
 
 <script>
@@ -233,12 +208,15 @@ async function iniciar(){
   desenharMenu();
   atualizarBotaoAndar();
 
-  if (tour.lead && tour.lead.ativo){
-    $('lTitulo').textContent = tour.lead.titulo || 'Gostou do imóvel?';
-    $('lTexto').textContent  = tour.lead.texto || '';
-    setTimeout(() => { if (!sessionStorage.getItem('lead_ok')) $('lead').style.display = 'flex'; },
-               (tour.lead.segundos || 25) * 1000);
-  }
+  // O convite de contato mora no lead.js, com a maquete e a caminhada. Ele
+  // morava aqui, escrito a mao, e as outras duas telas nao tinham nenhum —
+  // catorze imoveis publicados, zero contatos capturados.
+  if (window.Lead) Lead.iniciar(Object.assign({
+    imovel: IMOVEL,
+    api: API,
+    titulo_imovel: tour.titulo || '',
+    cor: tour.cor || '',
+  }, tour.lead || {}));
 }
 
 function montarCenas(){
@@ -674,32 +652,6 @@ function giroscopio(){
   else { visor.startOrientation(); $('btGiro').style.borderColor = 'var(--acento)'; }
 }
 
-async function enviarLead(){
-  const dados = {
-    nome: $('lNome').value.trim(),
-    telefone: $('lTelefone').value.trim(),
-    email: $('lEmail').value.trim(),
-    quando: new Date().toLocaleString('pt-BR')
-  };
-  if (!dados.nome || !(dados.telefone || dados.email)){
-    alert('Preencha seu nome e pelo menos um contato.');
-    return;
-  }
-  if (!$('lAceite').checked){
-    alert('Marque a autorização para que possamos entrar em contato.');
-    return;
-  }
-  // guarda o texto que a pessoa aceitou, e não só que houve aceite: ele muda
-  dados.consentimento = $('lAceite').parentNode.innerText.trim();
-  try{
-    await fetch(API + '/leads', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(dados)});
-  }catch(e){ /* versao exportada nao tem servidor: segue o baile */ }
-  sessionStorage.setItem('lead_ok', '1');
-  $('lead').innerHTML = '<div class="caixa"><h2>Obrigado!</h2>' +
-    '<p>Recebemos seu contato. Um corretor vai falar com você em breve.</p>' +
-    '<button class="env" onclick="fecharLead()">Voltar ao tour</button></div>';
-}
 
 // ----------------------------------------------------- medicao da visita
 // O tempo por ambiente so faz sentido se parar de contar quando a aba fica
@@ -739,11 +691,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) enviarVisita();
 });
 addEventListener('pagehide', enviarVisita);
-
-function fecharLead(){
-  sessionStorage.setItem('lead_ok', '1');
-  $('lead').style.display = 'none';
-}
 
 iniciar();
 </script>

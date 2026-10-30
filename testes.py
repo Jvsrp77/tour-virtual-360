@@ -8752,6 +8752,191 @@ class TestMisturaDeFotos(unittest.TestCase):
                         "%.1f m: ele ficaria chapado" % (pior, self.raio))
 
 
+class TestConviteDeContato(unittest.TestCase):
+    """
+    O convite de contato, nas TRÊS telas do visitante.
+
+    POR QUE ISTO EXISTE. O convite morava escrito dentro do visualizador 360.
+    A maquete e a caminhada — que é onde o visitante anda, mede e escolhe o
+    quarto, e onde está todo o trabalho recente — não pediam contato nenhum:
+    quem gostava do imóvel fechava a aba e do outro lado ninguém ficava
+    sabendo. Medido: catorze imóveis publicados, ZERO contatos capturados.
+
+    Copiar o formulário para mais duas páginas resolveria hoje e cobraria
+    depois — três cópias do texto de consentimento, que muda, e três lugares
+    para esquecer de corrigir. Virou um arquivo só, que as três chamam.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        cls.js = io.open(os.path.join("static", "lead.js"),
+                         encoding="utf-8").read()
+        cls.paginas = {}
+        for nome in ("maquete.html", "andar.html", "viewer.html"):
+            cls.paginas[nome] = io.open(os.path.join("static", nome),
+                                        encoding="utf-8").read()
+
+    def test_as_tres_telas_do_visitante_pedem_contato(self):
+        """
+        A tela em que a pessoa passa mais tempo é a que mais tem motivo para
+        perguntar, e era justamente a que não perguntava.
+        """
+        for nome, html in self.paginas.items():
+            self.assertIn('<script src="/static/lead.js"></script>', html,
+                          "%s não carrega o convite" % nome)
+            self.assertIn("Lead.iniciar(", html,
+                          "%s carrega o convite e não o liga" % nome)
+
+    def test_nenhuma_pagina_guarda_a_propria_copia(self):
+        """
+        Duas implementações do mesmo convite significam dois textos de
+        consentimento. Quando um muda e o outro não, a diferença só aparece
+        se alguém for reclamar do dado — tarde demais para consertar.
+        """
+        for nome, html in self.paginas.items():
+            self.assertNotIn("function enviarLead", html,
+                             "%s voltou a ter cópia própria" % nome)
+            self.assertNotIn("sessionStorage.setItem('lead_ok'", html,
+                             "%s voltou a marcar envio por conta própria"
+                             % nome)
+
+    def test_o_convite_nao_interrompe_quem_esta_andando(self):
+        """
+        Na maquete e na caminhada o visitante anda com o ponteiro PRESO na
+        tela. Abrir uma janela por cima rouba o ponteiro no meio do passo, e
+        o que se vê é a casa girando sozinha — o convite viraria o momento
+        pior da visita, logo ele.
+
+        O convite automático espera; o botão fixo continua lá, e é dele que
+        vem o contato de quem percorreu a casa inteira e gostou.
+        """
+        for nome in ("maquete.html", "andar.html"):
+            self.assertIn("ocupado:", self.paginas[nome],
+                          "%s não avisa quando a pessoa está andando" % nome)
+            self.assertIn("exitPointerLock", self.paginas[nome],
+                          "%s não solta o ponteiro ao abrir o convite" % nome)
+        self.assertIn("if (sozinho && typeof this.cfg.ocupado === 'function'"
+                      " && this.cfg.ocupado())", self.js,
+                      "o convite automático deixou de ceder a vez")
+        self.assertIn("setTimeout(function(){ eu.abrir(true); }, 8000);",
+                      self.js, "cedeu a vez e não tenta mais")
+
+    def test_o_botao_fixo_fica_depois_da_janela_passar(self):
+        """
+        A janela aparece uma vez e quem fechou não a vê mais. A vontade de
+        falar com alguém costuma vir DEPOIS de andar pela casa, não antes —
+        sem o botão, esse contato não tem para onde ir.
+        """
+        self.assertIn("leadChamar", self.js)
+        self.assertIn("Falar com um corretor", self.js)
+        self.assertIn("if (this.enviado || this._jaEnviou()) return;", self.js,
+                      "o botão abriria o convite de novo para quem já enviou")
+
+    def test_a_marca_de_ja_enviou_e_por_imovel(self):
+        """
+        Com uma marca só, quem deixasse o contato num imóvel nunca mais veria
+        o convite em nenhum outro — e visitante que compara três casas é
+        justamente o que mais vale a pena perguntar.
+        """
+        self.assertIn("return 'lead_ok_' + (this.cfg.imovel || '');", self.js)
+
+    def test_o_contato_nao_se_perde_se_a_rede_falhar(self):
+        """
+        A pessoa digitou o telefone. Se o envio falhar, mostrar "erro" na
+        cara dela perde o contato duas vezes: o dado e a vontade. A tela
+        agradece, e o contato fica guardado para a próxima visita reenviar.
+        """
+        self.assertIn("_guardarPendente", self.js)
+        self.assertIn("reenviarPendente", self.js)
+        self.assertIn("localStorage.setItem(k, JSON.stringify(dados));",
+                      self.js)
+
+    def test_o_consentimento_vai_com_o_texto_que_foi_aceito(self):
+        """
+        A LGPD pede que o titular saiba AO QUE consentiu, e o texto muda com
+        o tempo. Guardar só "houve aceite" não responde a pergunta que
+        importa depois.
+        """
+        self.assertIn("dados.consentimento = cada(f, 'aceite')"
+                      ".parentNode.innerText.trim();", self.js)
+        self.assertIn("Autorizo o contato sobre este imóvel", self.js)
+
+    def test_o_whatsapp_so_aparece_com_numero_plausivel(self):
+        """
+        Número errado é pior do que botão nenhum: manda o interessado para a
+        conversa de outra pessoa, e ninguém fica sabendo que isso aconteceu.
+
+        E a mensagem leva o nome do IMÓVEL, não o cabeçalho do convite —
+        senão ela sai "Vi o tour virtual de Gostou do imóvel?", na conversa
+        do corretor, com o interessado olhando.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        programa = (
+            "global.window = {};\n"
+            + self.js + "\n"
+            "const L = window.Lead;\n"
+            "const z = c => L._zap.call({cfg: c});\n"
+            "console.log(JSON.stringify({\n"
+            "  vazio: z({}),\n"
+            "  curto: z({whatsapp: '99999'}),\n"
+            "  mascara: z({whatsapp: '(11) 99999-8888', titulo_imovel: 'Casa'}),\n"
+            "  semNome: z({whatsapp: '5511999998888'}),\n"
+            "}));\n")
+        caminho = os.path.join(_TEMP, "zap.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        d = json.loads(r.stdout.strip())
+        self.assertEqual(d["vazio"], "", "sem número, não há botão")
+        self.assertEqual(d["curto"], "", "número curto demais virou link")
+        self.assertIn("wa.me/11999998888", d["mascara"],
+                      "a máscara do telefone não foi removida")
+        self.assertIn("Casa", d["mascara"], "a mensagem não cita o imóvel")
+        self.assertIn("wa.me/5511999998888", d["semNome"])
+
+
+class TestContatoNaMaquete(TestMaquete):
+    """A maquete entregando o que a tela precisa para convidar — e só isso."""
+
+    def test_a_maquete_entrega_a_configuracao_de_contato(self):
+        """
+        Sem isto a maquete não sabe o que escrever no convite, nem o número
+        do corretor: ela cairia no texto padrão do arquivo e o botão de
+        WhatsApp nunca apareceria, por mais que estivesse configurado.
+        """
+        self.dona.put("/api/imoveis/%s/tour" % self.iid, json={
+            "lead": {"ativo": True, "titulo": "Quer ver de perto?",
+                     "texto": "Chame a gente.", "segundos": 40,
+                     "whatsapp": "5511999998888"}})
+        visitante = aplicacao.app.test_client()
+        r = visitante.get("/api/imoveis/%s/maquete" % self.iid)
+        self.assertEqual(r.status_code, 200)
+        lead = r.get_json()["maquete"].get("lead")
+        self.assertIsInstance(lead, dict, "a maquete veio sem o convite")
+        self.assertEqual(lead.get("titulo"), "Quer ver de perto?")
+        self.assertEqual(lead.get("whatsapp"), "5511999998888")
+
+    def test_a_maquete_nao_vaza_os_contatos_ja_capturados(self):
+        """
+        A configuração do convite é pública — ela vira texto na tela de quem
+        visita. Os contatos JÁ CAPTURADOS não são: eles são da dona, e a
+        maquete é aberta a qualquer um com o link.
+        """
+        self.dona.post("/api/imoveis/%s/leads" % self.iid,
+                       json={"nome": "Fulano", "telefone": "11999998888",
+                             "consentimento": "Autorizo."})
+        visitante = aplicacao.app.test_client()
+        bruto = visitante.get(
+            "/api/imoveis/%s/maquete" % self.iid).get_data(as_text=True)
+        self.assertNotIn("leads_capturados", bruto)
+        self.assertNotIn("11999998888", bruto)
+        self.assertNotIn("Fulano", bruto)
+
+
 def limpar():
     shutil.rmtree(_TEMP, ignore_errors=True)
 
