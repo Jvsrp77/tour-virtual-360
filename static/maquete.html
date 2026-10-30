@@ -1220,19 +1220,60 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   let fotos = [];            // {pos: Vector3, tex: Texture}
   let vestidos = [];         // {malha, original}
 
+  // ------------------------------------------- orcamento de textura na placa
+  //
+  // CARREGAVA TODAS AS FOTOS DE UMA VEZ, e isso nao cabe.
+  //
+  // Medido no acervo: 4096 x 2048 por panorama da 33,5 MB na placa, 45 MB com
+  // mipmap. A casa de 520 m2 tem 135 pontos — 6,0 GB. Dez dos dezesseis
+  // imoveis publicados passam de 2 GB. No PC do escritorio passa raspando; no
+  // celular do corretor, que e onde o link e aberto na frente do cliente, a
+  // aba fecha. E o pior jeito de descobrir: na visita.
+  //
+  // Agora so ficam vivas as fotos PERTO DA CAMERA, dentro de um orcamento. O
+  // resto espera em disco. Quando uma foto sai, as malhas que a usavam voltam
+  // a somar zero naquele espaco e caem para as outras — a conta ja estava
+  // pronta para isso, porque o peso de cada foto ja era independente.
+  // O ORCAMENTO NAO E EM NUMERO DE FOTOS, E EM PIXEL — e a primeira tentativa
+  // errou justamente nisso.
+  //
+  // Guardar "as doze mais proximas da camera" funciona a pe e falha de cima:
+  // na orbita a camera esta FORA da casa, as doze saem amontoadas num canto,
+  // e o resto fica chapado. Espalhar as doze pela casa tambem falha, por
+  // outro motivo: doze fotos em 520 m2 ficam a quase sete metros uma da
+  // outra, alem do raio de mistura de cinco — a casa continua chapada, agora
+  // por igual.
+  //
+  // O que a orbita precisa e COBERTURA, nao detalhe: dali a casa inteira cabe
+  // na tela e nenhum pedaco ocupa muitos pixels. Entao de cima entram TODAS
+  // as fotos em resolucao reduzida, e a pe entram as vizinhas em resolucao
+  // cheia. Os dois casos cabem no mesmo orcamento de memoria.
+  const LADO_REDUZIDO = 1024;              // 1024 x 512 por panorama
+  const FOTOS_A_PE = (innerWidth < 820 || "ontouchstart" in window) ? 4 : 8;
+  const TETO_DE_FOTOS_DE_CIMA =
+    (innerWidth < 820 || "ontouchstart" in window) ? 60 : 200;
+
+  let TEX_VAZIA = null;
+
+  function texturaVazia(){
+    if (!TEX_VAZIA){
+      // 1x1 transparente. Espaco sem textura e indefinido no sombreador: em
+      // parte das placas sai preto, e a casa ficaria manchada enquanto as
+      // fotos chegam.
+      TEX_VAZIA = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
+      TEX_VAZIA.needsUpdate = true;
+    }
+    return TEX_VAZIA;
+  }
+
   function carregarFotos(im){
-    fotos.forEach(f => f.tex.dispose());
+    fotos.forEach(f => { if (f.tex) f.tex.dispose(); });
     fotos = [];
-    const base = "/data/" + IMOVEL + "/scenes/";
-    const carregador = new THREE.TextureLoader();
     const cx = -im.larg / 2, cz = -im.fundo / 2;
     (im.pontos || []).forEach(p => {
       if (!p.arquivo) return;
-      const tex = carregador.load(base + p.arquivo, () => { ocioso = false; });
-      tex.flipY = false;                 // linha 0 do arquivo = topo da esfera
-      tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
-      tex.wrapS = THREE.RepeatWrapping;  // a emenda de 0 grau fecha sozinha
-      fotos.push({tex: tex,
+      fotos.push({arquivo: p.arquivo, tex: null, pedindo: false, usada: 0,
+                  usuarios: [],
                   pos: new THREE.Vector3(p.x + cx, (p.andar || 0) + OLHO,
                                          p.z + cz)});
     });
@@ -1273,6 +1314,150 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     return (m && m.color) ? m.color.clone() : new THREE.Color(0xdcd8d2);
   }
 
+  // lado=0 pede a imagem inteira; lado=N reduz para N x N/2 antes de subir
+  // para a placa. A reducao e feita pelo createImageBitmap, que decodifica e
+  // redimensiona de uma vez, sem passar por canvas.
+  //
+  // imageOrientation "none" e obrigatorio: sem ele o navegador pode aplicar a
+  // orientacao do arquivo, e o panorama entraria de cabeca para baixo — o que
+  // na tela aparece como o TETO DA CASA NO CHAO.
+  function pedirFoto(f, lado){
+    lado = lado || 0;
+    if (f.pedindo) return;
+    if (f.tex && f.lado === lado) return;
+    f.pedindo = true;
+    fetch("/data/" + IMOVEL + "/scenes/" + f.arquivo)
+      .then(r => r.blob())
+      .then(b => createImageBitmap(b, lado
+        ? {imageOrientation: "none", resizeWidth: lado,
+           resizeHeight: lado / 2, resizeQuality: "high"}
+        : {imageOrientation: "none"}))
+      .then(bmp => {
+        if (f.tex) f.tex.dispose();
+        const tex = new THREE.Texture(bmp);
+        tex.flipY = false;             // linha 0 do arquivo = topo da esfera
+        tex.colorSpace = THREE.SRGBColorSpace || tex.colorSpace;
+        tex.wrapS = THREE.RepeatWrapping;  // a emenda de 0 grau fecha sozinha
+        tex.needsUpdate = true;
+        f.tex = tex;
+        f.lado = lado;
+        f.pedindo = false;
+        avisarUsuarios(f);
+        ocioso = false;
+      })
+      // O ERRO NAO PODE SER ENGOLIDO. Falha aqui aparece na tela como casa
+      // chapada, que e identica a "ainda nao chegou" e a "nao ha foto" —
+      // sem registro, cada investigacao dessas recomeca do zero.
+      .catch(e => { f.pedindo = false; f.erro = String(e).slice(0, 160); });
+  }
+
+  function soltarFoto(f){
+    if (!f.tex) return;
+    f.tex.dispose();
+    f.tex = null;
+    avisarUsuarios(f);
+  }
+
+  // Cada malha vestida sabe em que espaco esta cada foto. Quando a foto chega
+  // ou sai, so os materiais DELA sao mexidos — varrer as tres mil malhas a
+  // cada troca custaria mais do que a troca.
+  function avisarUsuarios(f){
+    for (const u of f.usuarios){
+      u.uniforms["foto" + u.slot].value = f.tex || texturaVazia();
+      u.uniforms.ativo.value[u.slot] = f.tex ? 1 : 0;
+    }
+  }
+
+  // QUEM FICA VIVO DEPENDE DE COMO SE ESTA OLHANDO, e isso nao e detalhe.
+  //
+  // A PE, "as mais proximas da camera" e exatamente certo: so se ve o que
+  // esta perto, e a lista de cada malha tambem foi escolhida por distancia.
+  //
+  // DE CIMA, e errado. A camera fica FORA da casa, entao as doze mais
+  // proximas dela saem todas amontoadas num canto — visto na tela: a casa de
+  // 520 m2 apareceu com um unico comodo vestido e vinte e dois chapados. Na
+  // orbita se ve a casa INTEIRA, e o que ela precisa nao e detalhe num canto,
+  // e cobertura em todo lugar.
+  //
+  // Entao de cima as fotos sao ESPALHADAS: comeca pela mais central e cada
+  // seguinte e a mais longe de todas as ja escolhidas. Doze fotos bem
+  // distribuidas vestem a casa toda; as mesmas doze amontoadas vestem um
+  // comodo.
+  const _ondeEstou = new THREE.Vector3();
+  let _proximaConferida = 0, _modoAntes = null;
+
+  function cuidarDasFotos(agora){
+    if (!fotos.length || !vestidos.length) return;
+    if (agora < _proximaConferida && emPessoa === _modoAntes) return;
+    _proximaConferida = agora + 400;        // duas ou tres vezes por segundo
+    const trocouModo = emPessoa !== _modoAntes;
+    _modoAntes = emPessoa;
+
+    const antes = fotos.map(f => !!f.tex).join("");
+    if (emPessoa){
+      // A pe: as vizinhas em resolucao cheia, o resto reduzido, nada fora.
+      camera.getWorldPosition(_ondeEstou);
+      const ordem = fotos.slice().sort(
+        (a, b) => a.pos.distanceToSquared(_ondeEstou)
+                - b.pos.distanceToSquared(_ondeEstou));
+      ordem.forEach((f, k) => {
+        if (k < FOTOS_A_PE) pedirFoto(f, 0);
+        else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);
+        else soltarFoto(f);
+      });
+    } else {
+      fotos.forEach((f, k) => {
+        if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);
+        else soltarFoto(f);
+      });
+    }
+    if (trocouModo || antes !== fotos.map(f => !!f.tex).join(""))
+      reatribuirFotos();
+  }
+
+  // OS ESPACOS DE CADA MALHA SAIAM DAS 135 FOTOS; vivas havia 12. Quando
+  // nenhuma das seis escolhidas por uma malha estava carregada, ela somava
+  // zero e caia para a cor chapada — na tela, a casa de 520 m2 aparecia com
+  // um comodo vestido e vinte e dois brancos, e nao havia nada indicando por
+  // que. A lista tem de ser escolhida entre as fotos QUE EXISTEM AGORA.
+  function reatribuirFotos(){
+    const vivas = fotos.filter(f => f.tex || f.pedindo);
+    fotos.forEach(f => { f.usuarios = []; });
+    if (!vivas.length) return;
+    for (const v of vestidos){
+      const u = v.malha.material && v.malha.material.uniforms;
+      if (!u || !u.ativo) continue;
+      const c = v.centro;
+      const noAndar = vivas.filter(f => Math.abs(f.pos.y - c.y) <= 2.0);
+      const lista = (noAndar.length ? noAndar : vivas).slice().sort(
+        (a, b) => a.pos.distanceToSquared(c) - b.pos.distanceToSquared(c))
+        .slice(0, FOTOS_NA_MISTURA);
+      for (let i = 0; i < FOTOS_NA_MISTURA; i++){
+        const f = lista[Math.min(i, lista.length - 1)];
+        u["foto" + i].value = f.tex || texturaVazia();
+        u["origem" + i].value.copy(f.pos);
+        u.ativo.value[i] = (i < lista.length && f.tex) ? 1 : 0;
+        if (i < lista.length) f.usuarios.push({uniforms: u, slot: i});
+      }
+    }
+  }
+
+  // Quanto de foto esta vivo agora. Fica exposto de proposito: o orcamento e
+  // invisivel na tela — quando ele falha, o que se ve e uma casa chapada, que
+  // e identica a "ainda nao vestiu" e a "nao ha foto". Sem uma forma de
+  // perguntar, cada investigacao dessas comeca do zero.
+  window.__fotos = () => ({
+    conhecidas: fotos.length,
+    vivas: fotos.filter(f => f.tex).length,
+    pedindo: fotos.filter(f => f.pedindo).length,
+    malhasVestidas: vestidos.length,
+    erros: fotos.filter(f => f.erro).map(f => f.erro).slice(0, 3),
+    cheias: fotos.filter(f => f.tex && !f.lado).length,
+    reduzidas: fotos.filter(f => f.tex && f.lado).length,
+    mbNaPlaca: Math.round(fotos.reduce((s, f) => s + (f.tex
+      ? (f.lado ? f.lado * f.lado / 2 : 4096 * 2048) * 4 * 1.333 : 0), 0) / 1e6),
+  });
+
   const _centro = new THREE.Vector3();
 
   function vestirDeFoto(ligar){
@@ -1283,6 +1468,11 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
         v.malha.material = v.original;
       });
       vestidos = [];
+      // Os materiais acabaram de ser jogados fora: segurar a lista de quem
+      // usava cada foto manteria viva uma pilha de uniformes mortos, e a
+      // proxima chegada de textura escreveria neles. Vazia tambem a placa:
+      // sem acabamento fotografico, panorama nenhum precisa estar nela.
+      fotos.forEach(f => { f.usuarios = []; soltarFoto(f); });
       ocioso = false;
       return;
     }
@@ -1303,15 +1493,24 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
                                            (_, i) => i < perto.length ? 1 : 0)}};
       for (let i = 0; i < FOTOS_NA_MISTURA; i++){
         // SOBRA SEMPRE RECEBE UMA TEXTURA DE VERDADE, com peso zero. Deixar
-        // o uniforme vazio nao e "slot desligado": o sombreador le as quatro
+        // o uniforme vazio nao e "slot desligado": o sombreador le as seis
         // de qualquer jeito, e amostrar sampler sem textura e indefinido —
         // em parte das placas sai preto, e o imovel com tres pontos ficaria
         // todo manchado de preto.
         const f = perto[Math.min(i, perto.length - 1)];
-        u["foto" + i] = {value: f.tex};
+        u["foto" + i] = {value: f.tex || texturaVazia()};
         u["origem" + i] = {value: f.pos.clone()};
+        // A foto pode ainda nao ter chegado — ou ter sido solta para caber no
+        // orcamento. Enquanto nao estiver na placa, o espaco vale zero, e o
+        // pedaco se vira com as outras.
+        if (!f.tex) u.ativo.value[i] = 0;
+        if (i < perto.length) f.usuarios.push({uniforms: u, slot: i});
       }
-      vestidos.push({malha: malha, original: malha.material});
+      // o centro vai junto: a lista de fotos e refeita quando o conjunto
+      // vivo muda, e recalcular a caixa de 1.689 malhas a cada troca
+      // custaria mais do que a troca
+      vestidos.push({malha: malha, original: malha.material,
+                     centro: _centro.clone()});
       malha.material = new THREE.ShaderMaterial({
         uniforms: u,
         vertexShader: VERTICE_FOTO,
@@ -1548,6 +1747,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     requestAnimationFrame(desenhar);
     const dt = Math.min(0.05, (agora - ultimoQuadro) / 1000 || 0);
     ultimoQuadro = agora;
+    cuidarDasFotos(agora);
 
     if (emPessoa){
       andar(dt);

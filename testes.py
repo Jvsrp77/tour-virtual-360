@@ -8752,6 +8752,170 @@ class TestMisturaDeFotos(unittest.TestCase):
                         "%.1f m: ele ficaria chapado" % (pior, self.raio))
 
 
+class TestOrcamentoDeTextura(unittest.TestCase):
+    """
+    Quanta foto cabe na placa de vídeo.
+
+    POR QUE ISTO EXISTE. A maquete carregava TODAS as fotos de uma vez. Cada
+    panorama tem 4096 x 2048, que dá 33,5 MB na placa e 45 MB com mipmap. A
+    casa de 520 m² tem 135 pontos de captura: 6,0 GB. Medido no acervo
+    publicado, dez dos dezesseis imóveis passavam de 2 GB.
+
+    No PC do escritório passa raspando. No celular do corretor — que é onde o
+    link é aberto, na frente do cliente — a aba fecha. É o pior jeito
+    possível de descobrir um defeito: durante a visita.
+    """
+
+    CHEIA = 4096 * 2048 * 4 * 1.333        # bytes de um panorama na placa
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = io.open(os.path.join("static", "maquete.html"),
+                           encoding="utf-8").read()
+
+    def _num(self, nome):
+        """
+        O maior valor que a constante pode assumir.
+
+        Ela é um ternário por tamanho de tela — `(innerWidth < 820 || toque)
+        ? 4 : 8` — e pegar "o primeiro número depois do igual" devolve 820, a
+        largura da tela. Foi o que este teste fez na primeira versão, e ele
+        acusou sozinho: um orçamento de 6,5 GB que não existia.
+        """
+        trecho = re.search(nome + r" =[^;]*;", self.html).group(0)
+        nums = [float(q) for q in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)",
+                                             trecho.split("?")[-1])]
+        return max(nums)
+
+    def test_a_placa_nao_recebe_mais_o_acervo_inteiro(self):
+        """
+        O número que justifica o trabalho, medido nas plantas do próprio
+        repositório: antes, a planta com mais pontos pedia gigabytes; agora o
+        teto não depende de quantos pontos o imóvel tem.
+        """
+        lado = self._num("const LADO_REDUZIDO")
+        reduzida = lado * (lado / 2) * 4 * 1.333
+        a_pe = self._num("const FOTOS_A_PE")
+        teto = self._num("const TETO_DE_FOTOS_DE_CIMA")
+
+        # 400 PONTOS NO FIM DA LISTA, e nao so as plantas do repositorio.
+        # Elas tem no maximo 49 pontos, e com 49 o teto nunca e alcancado:
+        # arrancar o teto passava batido. O acervo publicado ja tem imovel
+        # com 135, e capturar melhor so aumenta esse numero.
+        pior_antes = pior_depois = 0.0
+        for n in [len(c()["pontos"]) for c in plantas.TODAS] + [400]:
+            pior_antes = max(pior_antes, n * self.CHEIA)
+            # a pé é o caso caro: as vizinhas inteiras MAIS o resto reduzido
+            pior_depois = max(pior_depois,
+                              min(n, a_pe) * self.CHEIA
+                              + min(n, teto) * reduzida)
+        self.assertGreater(pior_antes / 1e9, 2.0,
+                           "a planta com mais pontos deixou de ser cara; "
+                           "este teste perdeu o contraste que o justifica")
+        self.assertLess(pior_depois / 1e9, 1.0,
+                        "o pior caso pede %.1f GB de textura"
+                        % (pior_depois / 1e9))
+
+    def test_as_fotos_entram_sob_demanda_e_nao_de_uma_vez(self):
+        """
+        carregarFotos() registrava uma textura por ponto, e a placa recebia
+        todas. Agora ela só anota onde cada foto foi tirada; quem decide o
+        que sobe é cuidarDasFotos(), olhando de onde se está olhando.
+        """
+        corpo = self.html[self.html.index("  function carregarFotos(im){"):]
+        corpo = corpo[:corpo.index("\n  }")]
+        self.assertNotIn("TextureLoader", corpo,
+                         "carregarFotos voltou a criar textura por ponto")
+        self.assertIn("tex: null", corpo)
+        self.assertIn("cuidarDasFotos(agora);", self.html,
+                      "ninguém cuida do orçamento durante o desenho")
+
+    def test_de_cima_cobre_a_casa_e_a_pe_da_resolucao(self):
+        """
+        São dois problemas diferentes e a primeira tentativa tratou como um.
+
+        "As doze mais próximas da câmera" funciona a pé e falha de cima: na
+        órbita a câmera está FORA da casa e as doze saem amontoadas num
+        canto. Espalhar as doze pela casa falha por outro motivo: doze fotos
+        em 520 m² ficam a quase sete metros uma da outra, além do raio de
+        mistura — a casa continua chapada, agora por igual.
+
+        De cima o que falta é COBERTURA, e dali nenhum pedaço ocupa muitos
+        pixels: entram todas, reduzidas. A pé entram as vizinhas inteiras.
+        """
+        corpo = self.html[self.html.index("  function cuidarDasFotos(agora){"):]
+        corpo = corpo[:corpo.index("\n  }")]
+        self.assertIn("if (emPessoa){", corpo,
+                      "o orçamento não distingue andar de olhar de cima")
+        self.assertIn("pedirFoto(f, 0)", corpo,
+                      "a pé ninguém recebe resolução cheia")
+        # OS DOIS RAMOS, cada um pelo seu texto. Cobrar só "existe
+        # LADO_REDUZIDO em algum lugar" aceitava o ramo de cima intacto com o
+        # de baixo trocado para resolução cheia — e é justamente o de baixo
+        # que multiplica a memória.
+        self.assertIn("if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);",
+                      corpo, "de cima alguém saiu da resolução reduzida")
+        self.assertIn("else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);",
+                      corpo, "a pé o resto saiu da resolução reduzida")
+
+    def test_a_lista_de_cada_malha_sai_das_fotos_que_existem(self):
+        """
+        O defeito que isto conserta, visto na tela: cada malha escolhia suas
+        seis fotos entre as 135 do imóvel, mas só doze estavam carregadas.
+        Quando nenhuma das seis estava viva, a malha somava zero e caía para
+        a cor chapada — a casa de 520 m² apareceu com um cômodo vestido e
+        vinte e dois brancos, sem nada na tela explicando por quê.
+        """
+        self.assertIn("function reatribuirFotos(){", self.html)
+        corpo = self.html[self.html.index("  function reatribuirFotos(){"):]
+        corpo = corpo[:corpo.index("\n  }")]
+        self.assertIn("fotos.filter(f => f.tex || f.pedindo)", corpo,
+                      "a lista voltou a sair de fotos que não estão na placa")
+        self.assertIn("reatribuirFotos();", self.html)
+
+    def test_a_foto_reduzida_nao_entra_de_cabeca_para_baixo(self):
+        """
+        createImageBitmap pode aplicar a orientação gravada no arquivo. Num
+        panorama equirretangular isso aparece como O TETO DA CASA NO CHÃO —
+        e, pior, só nos navegadores que respeitam a marca, o que faz o
+        defeito sumir justamente na máquina de quem for investigar.
+        """
+        # NOS DOIS CAMINHOS: a reduzida e a inteira. Cobrar uma ocorrência
+        # só aceitava arrancar a marca do caminho reduzido, que é o que a
+        # órbita usa — e a órbita é a primeira tela que se vê.
+        self.assertIn('{imageOrientation: "none", resizeWidth: lado,',
+                      self.html,
+                      'a reduzida perdeu a marca de orientação')
+        self.assertIn(': {imageOrientation: "none"}', self.html,
+                      'a inteira perdeu a marca de orientação')
+        self.assertIn("tex.flipY = false;", self.html)
+
+    def test_a_foto_solta_libera_a_placa_de_verdade(self):
+        """
+        Trocar a referência não devolve memória: sem dispose, a textura antiga
+        fica na placa até o navegador decidir, e o orçamento vira enfeite.
+        """
+        corpo = self.html[self.html.index("  function soltarFoto(f){"):]
+        corpo = corpo[:corpo.index("\n  }")]
+        self.assertIn("f.tex.dispose();", corpo)
+        self.assertIn("f.tex = null;", corpo)
+        self.assertIn("avisarUsuarios(f);", corpo,
+                      "soltou a textura e deixou as malhas apontando para ela")
+
+    def test_da_para_perguntar_quanto_esta_na_placa(self):
+        """
+        O orçamento é invisível na tela: quando ele falha, o que se vê é uma
+        casa chapada — idêntica a "ainda não chegou" e a "não há foto". Sem
+        uma forma de perguntar, cada investigação dessas recomeça do zero.
+        Esta custou duas.
+        """
+        self.assertIn("window.__fotos = () => ({", self.html)
+        for campo in ("conhecidas", "vivas", "cheias", "reduzidas",
+                      "mbNaPlaca", "erros"):
+            self.assertIn(campo + ":", self.html,
+                          "o diagnóstico não diz %s" % campo)
+
+
 class TestConviteDeContato(unittest.TestCase):
     """
     O convite de contato, nas TRÊS telas do visitante.

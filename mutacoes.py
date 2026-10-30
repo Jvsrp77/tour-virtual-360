@@ -1242,6 +1242,43 @@ MUT = [
      'const FOTOS_NA_MISTURA = 1;',
      'TestMisturaDeFotos'),
 
+    # -------------------------- quanta foto cabe na placa de video
+
+    ('a placa volta a receber o acervo inteiro', 'static/maquete.html',
+     'const TETO_DE_FOTOS_DE_CIMA =\n    (innerWidth < 820 || "ontouchstart" in window) ? 60 : 200;',
+     'const TETO_DE_FOTOS_DE_CIMA = 99999;',
+     'TestOrcamentoDeTextura.test_a_placa_nao_recebe_mais_o_acervo_inteiro'),
+
+    ('de cima volta a carregar em resolucao cheia', 'static/maquete.html',
+     'else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);',
+     'else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, 0);',
+     'TestOrcamentoDeTextura.test_de_cima_cobre_a_casa_e_a_pe_da_resolucao'),
+
+    # sem isto o panorama pode entrar virado, e o teto aparece no chao — so
+    # nos navegadores que respeitam a marca do arquivo
+    ('o panorama reduzido entra de cabeca para baixo', 'static/maquete.html',
+     'imageOrientation: "none", resizeWidth: lado,',
+     'resizeWidth: lado',
+     'TestOrcamentoDeTextura'
+     '.test_a_foto_reduzida_nao_entra_de_cabeca_para_baixo'),
+
+    ('a lista da malha ignora o que esta carregado', 'static/maquete.html',
+     'const vivas = fotos.filter(f => f.tex || f.pedindo);',
+     'const vivas = fotos.slice();',
+     'TestOrcamentoDeTextura'
+     '.test_a_lista_de_cada_malha_sai_das_fotos_que_existem'),
+
+    ('soltar a foto nao devolve a memoria', 'static/maquete.html',
+     '    f.tex.dispose();\n    f.tex = null;',
+     '    f.tex = null;',
+     'TestOrcamentoDeTextura.test_a_foto_solta_libera_a_placa_de_verdade'),
+
+    ('a foto volta a subir toda de uma vez', 'static/maquete.html',
+     'fotos.push({arquivo: p.arquivo, tex: null, pedindo: false, usada: 0,',
+     'fotos.push({arquivo: p.arquivo, tex: new THREE.Texture(), pedindo: false, usada: 0,',
+     'TestOrcamentoDeTextura'
+     '.test_as_fotos_entram_sob_demanda_e_nao_de_uma_vez'),
+
     # ------------------------------ o convite de contato nas tres telas
 
     ('o convite interrompe quem esta andando', 'static/lead.js',
