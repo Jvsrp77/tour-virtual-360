@@ -41,6 +41,9 @@ os.makedirs(os.environ["TOUR_DADOS"], exist_ok=True)
 import app as aplicacao           # noqa: E402
 import servico                    # noqa: E402
 import servidor                   # noqa: E402
+import tunel                     # noqa: E402
+import coerencia                 # noqa: E402
+import reprojetar                # noqa: E402
 import aviso                      # noqa: E402
 import maquete3d                  # noqa: E402
 import modelo3d                   # noqa: E402
@@ -8750,6 +8753,281 @@ class TestMisturaDeFotos(unittest.TestCase):
         self.assertLess(pior, self.raio,
                         "há piso a %.2f m da foto mais próxima, e o raio é "
                         "%.1f m: ele ficaria chapado" % (pior, self.raio))
+
+
+class TestEnderecoFixo(unittest.TestCase):
+    """
+    O link do imóvel precisa abrir amanhã.
+
+    POR QUE ISTO EXISTE. O tour rodava atrás de um túnel "rápido" do
+    Cloudflare — o que levanta sem conta e devolve um endereço sorteado, do
+    feitio `pressing-randy-limitation-robert.trycloudflare.com`. O endereço
+    muda a cada reinício, o túnel cai sozinho em algumas horas, e aquele nome
+    num WhatsApp parece golpe.
+
+    O efeito disso não aparece em teste nenhum e nem na tela: aparece no
+    cliente dizendo que o link não abre, dias depois, quando ninguém mais
+    lembra que o servidor foi reiniciado.
+    """
+
+    def setUp(self):
+        self.antes = {k: os.environ.get(k) for k in
+                      ("TOUR_TUNEL", "TOUR_TUNEL_DOMINIO", "TOUR_TUNEL_NOME")}
+        for k in self.antes:
+            os.environ.pop(k, None)
+
+    def tearDown(self):
+        for k, v in self.antes.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_sem_configuracao_o_servidor_sobe_assim_mesmo(self):
+        """
+        Rodar só na rede local é modo de uso legítimo. Derrubar o servidor
+        porque o túnel não subiu trocaria um problema por um pior: ninguém
+        acessa, nem de perto.
+        """
+        self.assertFalse(tunel.configurado())
+        self.assertIsNone(tunel.subir(8000, relatar=lambda t: None))
+
+    def test_o_recado_diz_o_que_falta_e_como_resolver(self):
+        """
+        Recado vago aqui custa caro: quem descobre que o túnel não subiu
+        normalmente descobre pelo cliente.
+        """
+        self.assertIn("TOUR_TUNEL", tunel.por_que_nao())
+        os.environ["TOUR_TUNEL"] = "cloudflare"
+        self.assertIn("TOUR_TUNEL_DOMINIO", tunel.por_que_nao())
+        os.environ["TOUR_TUNEL"] = "inventado"
+        self.assertIn("inventado", tunel.por_que_nao())
+
+    def test_o_tunel_rapido_nao_e_uma_opcao(self):
+        """
+        `cloudflared tunnel --url` sozinho é justamente o túnel que sorteia o
+        endereço. O comando tem de usar o túnel NOMEADO, que foi apontado ao
+        domínio uma vez e não muda mais.
+        """
+        os.environ["TOUR_TUNEL"] = "cloudflare"
+        os.environ["TOUR_TUNEL_DOMINIO"] = "tour.exemplo.com"
+        cmd = tunel._comando(8000)
+        self.assertIn("run", cmd, "não está usando o túnel nomeado")
+        self.assertIn("tour", cmd)
+        self.assertNotIn("trycloudflare", " ".join(cmd))
+
+    def test_o_ngrok_recebe_o_dominio_reservado(self):
+        os.environ["TOUR_TUNEL"] = "ngrok"
+        os.environ["TOUR_TUNEL_DOMINIO"] = "casa.ngrok-free.app"
+        self.assertIn("--domain=casa.ngrok-free.app", tunel._comando(8000))
+        self.assertEqual(tunel.endereco(), "https://casa.ngrok-free.app")
+
+    def test_nenhum_token_passa_por_aqui(self):
+        """
+        O token é do dono e fica guardado pelo próprio cloudflared/ngrok no
+        perfil da máquina. Se ele passasse por uma variável lida aqui, ele
+        acabaria num log, num print de erro ou num commit.
+        """
+        import ast
+        bruto = io.open("tunel.py", encoding="utf-8").read()
+        # SO O CODIGO, sem docstring nem comentario: o arquivo EXPLICA
+        # que nao toca em credencial, e a explicacao contem as palavras
+        # que o teste procura. A primeira versao reprovou justamente o
+        # texto que documenta a regra.
+        arvore = ast.parse(bruto)
+        for no in ast.walk(arvore):
+            if (isinstance(no, ast.Expr)
+                    and isinstance(no.value, ast.Constant)
+                    and isinstance(no.value.value, str)):
+                no.value.value = ""
+        codigo = ast.unparse(arvore).lower()
+        for proibido in ("token", "authtoken", "senha", "secret"):
+            self.assertNotIn(proibido, codigo,
+                             "tunel.py toca em credencial: %r" % proibido)
+
+    def test_o_servidor_liga_a_marca_do_cookie_com_tunel(self):
+        """
+        Com túnel, quem termina o HTTPS é o Cloudflare ou o ngrok. Sem a
+        marca, o cookie de sessão viaja sem proteção — e isso não dá erro
+        nenhum na tela, que é o que o torna fácil de esquecer.
+        """
+        fonte = io.open("servidor.py", encoding="utf-8").read()
+        self.assertIn("if tunel.configurado():", fonte)
+        self.assertIn('os.environ["TOUR_ATRAS_DE_PROXY"] = "1"', fonte)
+        self.assertIn("tunel.subir(porta)", fonte)
+
+
+class TestCoerenciaEntreCenas(unittest.TestCase):
+    """
+    Uma cena repintada, a casa inteira coerente.
+
+    POR QUE ISTO EXISTE. Cada panorama era repintado pela IA por conta
+    própria. O modelo não sabe que a parede da sala vista do ponto 3 é a
+    MESMA parede vista do ponto 7: ele inventa uma tábua boa para cada foto,
+    e são tábuas diferentes. Enquanto cada cena era mostrada sozinha isso
+    passava. Depois que a maquete passou a MISTURAR as fotos vizinhas num
+    mesmo pedaço de parede, as duas versões aparecem juntas, e o que se vê é
+    um fantasma na faixa onde elas se encontram.
+
+    A saída não é pedir coerência ao modelo: é não perguntar duas vezes.
+    Repinta-se uma cena e as outras recebem a aparência dela por geometria.
+    De quebra sai mais barato, e por muito: no sobrado de 49 pontos, uma
+    chamada de API em vez de 49.
+    """
+
+    def test_a_propagacao_vai_do_centro_para_fora(self):
+        """
+        A ORDEM É O QUE FAZ O SOCORRO FUNCIONAR. Indo do centro para fora,
+        quando chega a vez de uma cena todas as mais próximas da mestra já
+        estão prontas — e são justamente elas as que mais têm chance de ter
+        enxergado o que falta. Em ordem arbitrária, metade dos buracos seria
+        inventada por falta de vizinha pronta, e a casa voltaria a ser
+        incoerente: em manchas, em vez de inteira.
+        """
+        origens = [(0, 1.5, 0), (9, 1.5, 0), (1, 1.5, 0), (4, 1.5, 0)]
+        self.assertEqual(coerencia.ordem_de_propagacao(origens, 0), [2, 3, 1])
+
+    def test_o_socorro_so_usa_o_que_a_vizinha_enxergava(self):
+        """
+        Uma cena pronta só pode emprestar o que ela própria viu. Emprestando
+        o que ela também tinha como buraco, o remendo levaria para a frente
+        exatamente o pixel inventado que se quer evitar.
+        """
+        alvo = np.zeros((4, 4, 3), np.uint8)
+        furo = np.zeros((4, 4), bool)
+        furo[0:2, :] = True                      # metade de cima e buraco
+
+        vizinha = np.full((4, 4, 3), 200, np.uint8)
+        furo_dela = np.zeros((4, 4), bool)
+        furo_dela[0, :] = True                   # ela nao viu a 1a linha
+
+        antes = reprojetar.levar
+        try:
+            reprojetar.levar = lambda *a, **k: (vizinha, furo_dela)
+            saida, sobrou = coerencia.socorrer(
+                alvo, furo, None, (0, 1.5, 0),
+                [(vizinha, None, (1.0, 1.5, 0))])
+        finally:
+            reprojetar.levar = antes
+
+        self.assertTrue((saida[1] == 200).all(), "não aproveitou o que dava")
+        self.assertTrue((saida[0] == 0).all(),
+                        "copiou pixel que a vizinha também não tinha")
+        self.assertTrue(sobrou[0].all(), "deu o buraco por resolvido")
+        self.assertFalse(sobrou[1].any())
+
+    def test_o_socorro_ignora_vizinha_longe_demais(self):
+        """
+        Reprojetar de muito longe estica o pixel até borrar, e borrado
+        coerente ainda é borrado.
+        """
+        alvo = np.zeros((4, 4, 3), np.uint8)
+        furo = np.ones((4, 4), bool)
+        antes = reprojetar.levar
+        chamou = []
+        try:
+            reprojetar.levar = lambda *a, **k: (chamou.append(1),
+                                                (alvo, furo))[1]
+            longe = (coerencia.ALCANCE_DO_SOCORRO + 1.0, 1.5, 0)
+            coerencia.socorrer(alvo, furo, None, (0, 1.5, 0),
+                               [(alvo, None, longe)])
+        finally:
+            reprojetar.levar = antes
+        self.assertEqual(chamou, [], "foi buscar cor a %.0f m"
+                         % (coerencia.ALCANCE_DO_SOCORRO + 1.0))
+
+    def test_inventar_nao_encosta_no_que_ja_estava_bom(self):
+        """
+        O preenchimento clássico é o último recurso, e tem de ficar DENTRO do
+        buraco: espalhar para fora apagaria pixel que veio da mestra, que é o
+        único pixel garantidamente coerente da imagem.
+        """
+        img = np.zeros((16, 16, 3), np.uint8)
+        img[:, :] = (40, 90, 160)
+        furo = np.zeros((16, 16), bool)
+        furo[7:9, 7:9] = True
+        saida = coerencia.inventar(img.copy(), furo)
+        import cv2
+        fora = ~cv2.dilate(furo.astype(np.uint8), np.ones((5, 5), np.uint8),
+                           iterations=1).astype(bool)
+        self.assertTrue((saida[fora] == img[fora]).all(),
+                        "o preenchimento vazou para fora do buraco")
+
+    def test_sem_buraco_a_imagem_passa_intacta(self):
+        img = np.random.RandomState(7).randint(0, 255, (8, 8, 3), np.uint8)
+        saida = coerencia.inventar(img.copy(), np.zeros((8, 8), bool))
+        self.assertTrue((saida == img).all())
+
+    def test_a_mestra_nao_e_tocada(self):
+        """
+        Ela é a única cena que a IA pintou. Reprojetar sobre ela seria pagar
+        pela coerência e jogar fora a referência.
+        """
+        h, w = 16, 32
+        panos = [np.full((h, w, 3), c, np.uint8) for c in (10, 20, 30)]
+        disps = [np.full((h, w), 0.5, np.float32) for _ in range(3)]
+        origens = [(0, 1.5, 0), (0.4, 1.5, 0), (0.8, 1.5, 0)]
+        feitos = coerencia.propagar(panos, disps, origens, 0,
+                                    relatar=lambda t: None)
+        self.assertIs(feitos[0], panos[0], "a mestra foi reescrita")
+        self.assertEqual(len(feitos), 3)
+
+    def test_uma_chamada_de_api_e_nao_uma_por_ponto(self):
+        """
+        É o ganho que paga o trabalho, além da coerência: no sobrado de 49
+        pontos, US$ 0,03 em vez de US$ 1,47.
+        """
+        fonte = io.open("coerencia.py", encoding="utf-8").read()
+        self.assertEqual(fonte.count("repintar.repintar("), 1,
+                         "há mais de uma chamada de repintura")
+        self.assertIn("--reaproveitar", fonte,
+                      "sem como reaproveitar, cada tentativa custa de novo")
+
+
+class TestCorDaParedeDaMaquete(unittest.TestCase):
+    """
+    A parede da casa não segue o tema da interface.
+
+    POR QUE ISTO EXISTE. A cor da parede saía de --surface, que é a cor do
+    painel do aplicativo. No tema claro isso dá parede branca e está certo.
+    No tema escuro --surface é #1b1f26, e a maquete passava a ter parede
+    quase preta: de cima ainda se lia a planta, mas A PÉ o visitante entrava
+    numa caverna.
+
+    MEDIDO lendo os pixels da tela, em primeira pessoa com o acabamento
+    fotográfico desligado: luminância média 36 de 255, com 88% dos pixels
+    entre 16 e 31. Com a cor própria, 200.
+
+    Parede de casa é clara porque casa é pintada de claro, e isso não muda
+    porque o painel do aplicativo está escuro.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = io.open(os.path.join("static", "maquete.html"),
+                           encoding="utf-8").read()
+
+    def test_a_parede_tem_cor_propria_e_nao_a_do_painel(self):
+        self.assertIn('getPropertyValue("--parede-maquete")', self.html)
+        self.assertNotIn('getPropertyValue("--surface").trim() || "#ffffff"',
+                         self.html, "a parede voltou a seguir o painel")
+
+    def test_a_parede_continua_clara_no_tema_escuro(self):
+        """
+        Não basta ter cor própria: se o tema escuro a redefinir para um tom
+        escuro, a caverna volta e o teste de cima continua passando.
+        """
+        achadas = re.findall(r"--parede-maquete:\s*#([0-9a-fA-F]{6})",
+                             self.html)
+        self.assertGreaterEqual(len(achadas), 3,
+                                "falta a cor em algum dos temas (claro, "
+                                "media query escura e data-theme escuro)")
+        for cor in achadas:
+            r, v, a = (int(cor[0:2], 16), int(cor[2:4], 16), int(cor[4:6], 16))
+            luz = 0.2126 * r + 0.7152 * v + 0.0722 * a
+            self.assertGreater(luz, 160,
+                               "#%s tem luminância %.0f: parede escura "
+                               "demais para se andar dentro" % (cor, luz))
 
 
 class TestOrcamentoDeTextura(unittest.TestCase):

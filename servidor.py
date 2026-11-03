@@ -31,6 +31,8 @@ from waitress import serve
 
 import app as aplicacao
 import backup
+import tunel
+import tunel
 
 
 def _backup_periodico(horas):
@@ -67,6 +69,14 @@ def despejar():
 def main():
     porta = int(os.environ.get("TOUR_PORTA", "8000"))
     endereco = os.environ.get("TOUR_ENDERECO", "0.0.0.0")
+
+    # QUEM TERMINA O HTTPS E O TUNEL, e o servidor passa a ficar atras de um
+    # proxy. Ligar isto a mao sempre que se liga o tunel e pedir para esquecer
+    # — e o que se esquece aqui e a marca de seguro do cookie de sessao, que
+    # nao da erro nenhum na tela: so viaja sem protecao.
+    if tunel.configurado():
+        os.environ["TOUR_ATRAS_DE_PROXY"] = "1"
+
     # costura e profundidade seguram uma thread por dezenas de segundos; o resto
     # e leve. Sobra folga para o visitante enquanto o corretor processa.
     threads = int(os.environ.get("TOUR_THREADS", "16"))
@@ -89,6 +99,10 @@ def main():
               % (horas, backup.GUARDAR, backup.PASTA_BACKUPS))
     else:
         print("  backup automatico DESLIGADO (TOUR_BACKUP_HORAS=0)")
+
+    tunel.subir(porta)
+
+    tunel.subir(porta)
 
     print("")
     despejar()

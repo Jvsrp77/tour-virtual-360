@@ -28,3 +28,16 @@ antigo2_fotos_*/
 
 # Saída de execução que não pertence ao repositório
 *.err
+
+# capturas do sobrado: saem do tracador como as demais, e sao binarios
+# grandes. Quatro deles entraram no historico por engano antes desta linha
+# existir — `git rm --cached` os tira do indice sem apagar do disco.
+fotos_sobrado/
+
+# material posto de lado antes de re-renderizar ou re-capturar (reversivel).
+# O padrao antigo so pegava `antigo_fotos_*`, e as pastas passaram a ser
+# nomeadas `antigo_<imovel>_<data>` — 300 MB ficavam de fora do ignore.
+antigo_*/
+descartado_*/
+original_*/
+repintura/

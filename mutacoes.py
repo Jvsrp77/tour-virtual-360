@@ -1242,6 +1242,43 @@ MUT = [
      'const FOTOS_NA_MISTURA = 1;',
      'TestMisturaDeFotos'),
 
+    ('a parede da maquete volta a seguir o tema', 'static/maquete.html',
+     'getPropertyValue("--parede-maquete").trim() || "#f3f1ed");',
+     'getPropertyValue("--surface").trim() || "#ffffff");',
+     'TestCorDaParedeDaMaquete.test_a_parede_tem_cor_propria_e_nao_a_do_painel'),
+
+    # cor propria nao basta: redefinida escura no tema escuro, a caverna volta
+    ('a parede fica escura no tema escuro', 'static/maquete.html',
+     '      --parede-maquete:#d9d5ce;',
+     '      --parede-maquete:#1b1f26;',
+     'TestCorDaParedeDaMaquete.test_a_parede_continua_clara_no_tema_escuro'),
+
+    # ---------------------------------- o link do imovel abre amanha
+
+    # `tunnel --url` sozinho e justamente o tunel que SORTEIA o endereco: o
+    # link que o corretor mandou ontem para de abrir, e ninguem avisa
+    ('volta o tunel que sorteia o endereco', 'tunel.py',
+     'return ["cloudflared", "tunnel", "run", "--url", alvo, c["nome"]]',
+     'return ["cloudflared", "tunnel", "--url", alvo]',
+     'TestEnderecoFixo.test_o_tunel_rapido_nao_e_uma_opcao'),
+
+    ('o ngrok perde o dominio reservado', 'tunel.py',
+     'return ["ngrok", "http", "--domain=" + c["dominio"], str(porta),',
+     'return ["ngrok", "http", str(porta),',
+     'TestEnderecoFixo.test_o_ngrok_recebe_o_dominio_reservado'),
+
+    ('o tunel sobe calado sem dominio', 'tunel.py',
+     '    if not c["dominio"]:',
+     '    if False:',
+     'TestEnderecoFixo.test_o_recado_diz_o_que_falta_e_como_resolver'),
+
+    # sem a marca o cookie de sessao viaja sem protecao, e isso nao da erro
+    # nenhum na tela — e o que torna facil de esquecer
+    ('o cookie de sessao perde a marca de seguro', 'servidor.py',
+     '    if tunel.configurado():\n        os.environ["TOUR_ATRAS_DE_PROXY"] = "1"',
+     '    if False:\n        os.environ["TOUR_ATRAS_DE_PROXY"] = "1"',
+     'TestEnderecoFixo.test_o_servidor_liga_a_marca_do_cookie_com_tunel'),
+
     # -------------------------- quanta foto cabe na placa de video
 
     ('a placa volta a receber o acervo inteiro', 'static/maquete.html',
@@ -1420,10 +1457,30 @@ def _restaurar(arq, orig, nome):
     Gritar aqui nao e exagero. Se a restauracao falhar e o script seguir calado,
     o proximo a rodar os testes vai ver vermelho num codigo que nunca escreveu,
     ou pior: vai ver verde porque a protecao que o teste cobre foi a que sumiu.
+
+    E CONFERIR E LER DE VOLTA, nao e gravar com sucesso. A funcao prometia
+    conferencia e so olhava se a gravacao deu erro. Aconteceu quatro vezes
+    nesta pasta: `_gravar` devolveu True, o arquivo ficou mutado assim mesmo,
+    e o script seguiu calado. Duas das vezes o estrago ficou dias no disco —
+    uma delas tirou a trava de leitura do tour do app.py, outra deixou o
+    servico.py achando que QUALQUER processo da maquina era o servidor. A
+    pasta fica no OneDrive, que segura o arquivo enquanto sincroniza, e uma
+    corrida mexe no mesmo arquivo dezenas de vezes seguidas.
     """
     if _gravar(arq, orig):
         _esquecer_bytecode(arq)
-        return True
+        try:
+            with io.open(arq, encoding="utf-8") as f:
+                agora = f.read()
+        except OSError as erro:
+            agora = None
+            print("  !! nao consegui reler %s para conferir (%s)" % (arq, erro))
+        # a comparacao ignora fim de linha: o _gravar normaliza para \n, e
+        # isso nao e sabotagem — e o conteudo que precisa bater
+        if agora is not None and agora.replace("\r\n", "\n") == orig.replace(
+                "\r\n", "\n"):
+            return True
+        print("  !! %s NAO VOLTOU AO ORIGINAL depois de gravar" % arq)
     print("")
     print("  " + "!" * 74)
     print("  !! %s FICOU MUTADO PELA MUTACAO %r" % (arq, nome))

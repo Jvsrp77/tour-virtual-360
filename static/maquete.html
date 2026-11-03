@@ -19,6 +19,14 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     --ground:#edeff2; --surface:#ffffff; --ink:#171a20; --muted:#5a6371;
     --line:#c7cdd6; --accent:#e07b39; --accent-fraco:rgba(224,123,57,.14);
     --ceu-topo:#dfe4ea; --ceu-base:#eef0f3;
+    /* A PAREDE DA CASA NAO SEGUE O TEMA DA INTERFACE.
+       Ela seguia --surface, e no tema escuro --surface e #1b1f26: a
+       maquete passava a ter parede quase preta. De cima ainda se
+       entendia a planta; a pe, medido na tela, 88% dos pixels ficavam
+       com luminancia entre 16 e 31 de 255 — o visitante entrava numa
+       caverna. Parede de casa e clara porque casa e pintada de claro,
+       e isso nao muda porque o painel do aplicativo esta escuro. */
+    --parede-maquete:#f3f1ed;
     --sombra:0 1px 2px rgba(20,25,35,.06), 0 8px 24px rgba(20,25,35,.07);
     --fonte:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -29,6 +37,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       --ground:#13161b; --surface:#1b1f26; --ink:#e7ebf1; --muted:#949dab;
       --line:#2b323c; --accent:#f08d4b; --accent-fraco:rgba(240,141,75,.16);
       --ceu-topo:#10131a; --ceu-base:#1a1f27;
+      --parede-maquete:#d9d5ce;
       --sombra:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.35);
     }
   }
@@ -37,6 +46,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     --ground:#13161b; --surface:#1b1f26; --ink:#e7ebf1; --muted:#949dab;
     --line:#2b323c; --accent:#f08d4b; --accent-fraco:rgba(240,141,75,.16);
     --ceu-topo:#10131a; --ceu-base:#1a1f27;
+    --parede-maquete:#d9d5ce;
     --sombra:0 1px 2px rgba(0,0,0,.4), 0 8px 26px rgba(0,0,0,.35);
   }
 
@@ -919,7 +929,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
     // paredes e mobiliario
     const corParede = new THREE.Color(getComputedStyle(document.documentElement)
-      .getPropertyValue("--surface").trim() || "#ffffff");
+      .getPropertyValue("--parede-maquete").trim() || "#f3f1ed");
     imovel.caixas.forEach((c, iCaixa) => {
       const p = c.p;
       const eParede = c.m === "parede";
