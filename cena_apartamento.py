@@ -224,6 +224,42 @@ def _relevo_da_vista(d, abaixo, chao):
         banda = np.sin(1.9 / np.maximum(abaixo[:, 0], 0.025))
         return chao * (1.0 + 0.055 * banda)[:, None]
 
+    if VISTA == "campo":
+        # A LINHA DE ARVORES. Campo era a UNICA vista sem relevo: o chao
+        # descia do horizonte ao verde num degrade liso, e degrade liso o
+        # olho le como PAREDE PINTADA — que e exatamente o que a janela
+        # existe para desmentir. E campo nao e caso raro: sao 7 das 8
+        # plantas do acervo, entao a vista sem relevo era a REGRA.
+        #
+        # A silhueta e a mesma ideia da cidade, mas organica: ondas de
+        # periodos que nao se encaixam, para o olho nao achar o padrao.
+        az = np.arctan2(d[:, 0], d[:, 2])
+        # A FAIXA PRECISA SER VISIVEL DA JANELA. Com 0,03 a mata ocupava
+        # menos de dois graus abaixo do horizonte — por um vao de janela
+        # aquilo e uma linha de um pixel, e nao muda nada.
+        topo = (0.055 + 0.018 * np.sin(az * 3.0 + 0.4)
+                + 0.010 * np.sin(az * 8.0 + 1.9)
+                + 0.005 * np.sin(az * 19.0))
+
+        # MASSA MACIA, E NAO SILHUETA. A primeira versao usava recorte duro,
+        # como a cidade, e saiu MAIS marcada que ela: medido, recorte 29,3
+        # contra 18,3 da cidade e ondulacao 3,25 contra 2,47 do mar. Campo
+        # virou a vista mais dramatica das tres, que e o oposto do que campo
+        # e — e, pior, comeu a diferenca entre as tres, que e justamente o
+        # que faz cada uma ser reconhecivel.
+        #
+        # Arvore nao tem aresta: a borda entra como rampa, e o escurecimento
+        # ao longo dela e de poucos por cento. O que se quer aqui nao e
+        # desenho, e so tirar o degrade liso que fazia a janela parecer
+        # parede pintada.
+        peso = np.clip((topo - abaixo[:, 0]) / 0.035, 0.0, 1.0)
+        if (peso > 0).any():
+            chao = chao.copy()
+            tom = 0.88 + 0.05 * np.sin(az * 11.0 + 0.7)
+            escurece = 1.0 - peso * (1.0 - tom)
+            chao *= escurece[:, None]
+        return chao
+
     if VISTA == "cidade":
         # A silhueta. Predios de alturas diferentes conforme o azimute, e o
         # raio que passa por baixo do topo bate em predio, nao em chao. Sem
@@ -303,8 +339,32 @@ def _ceu(d):
     # a subida ao zenite e mais rapida que a descida ao chao: e assim que um
     # ceu real se comporta visto de dentro de casa, com o horizonte lavado
     ceu = horizonte * (1.0 - acima ** 0.55) + zenite * (acima ** 0.55)
+
+    # NUVEM. Ceu liso e o maior denunciante da janela: nenhum ceu de verdade
+    # e um degrade perfeito, e o olho sabe disso antes de saber por que. A
+    # parede ao lado, depois da repintura, tem gratil, veio e sujeira; o vao
+    # ao lado dela nao tinha NADA, e era isso que fazia a janela parecer
+    # colada.
+    #
+    # Nao sao nuvens: sao senos somados em periodos que nao se encaixam. Nao
+    # precisa ser nuvem — precisa so nao ser liso.
+    _az = np.arctan2(d[:, 0], d[:, 2])
+    _alt = np.arcsin(np.clip(dy, -1.0, 1.0))
+    _n = (0.50 * np.sin(_az * 2.3 + _alt * 5.1)
+          + 0.30 * np.sin(_az * 5.7 - _alt * 3.3 + 1.7)
+          + 0.20 * np.sin(_az * 11.3 + _alt * 9.7 + 0.4))
+    # some perto do horizonte, onde o ceu de verdade e lavado pela bruma
+    _nuvem = (np.clip(_n - 0.18, 0.0, 1.0) * 0.6
+              * np.clip(acima[:, 0] * 7.0, 0.0, 1.0))
+    ceu = (ceu * (1.0 - _nuvem[:, None])
+           + np.array([252, 250, 247], np.float32) * _nuvem[:, None])
     chao = horizonte * (1.0 - abaixo ** 0.8) + terreno * (abaixo ** 0.8)
     chao = _relevo_da_vista(d, abaixo, chao)
+    # NAO HA FAIXA DE BRUMA AQUI, e houve por um tempo. A ideia era lavar a
+    # cor junto ao horizonte, como o ar faz com o que esta longe. Medindo, ela
+    # mudava no maximo 8,9 niveis de 255 e so dentro de dois graus da linha:
+    # o degrade acima ja converge para o tom do horizonte exatamente ali,
+    # entao a bruma repintava o que ja estava pintado. Saiu.
     return np.where(dy[:, None] > 0.0, ceu, chao)
 
 
@@ -552,9 +612,20 @@ def _textura(material, p, face, cor, dirs=None, casca=False):
             trav = np.abs(q[:, 1] - (y0 + y1) / 2.0) < 0.030
             moldura = ((eixo < a0 + 0.06) | (eixo > a1 - 0.06)
                        | (q[:, 1] < y0 + 0.06) | (q[:, 1] > y1 - 0.06))
+            # O CAIXILHO ERA UMA COR SO, e cor unica num perfil de aluminio
+            # le como desenho: perfil de verdade tem a aba de cima pegando
+            # luz e a de baixo na sombra, e e esse contraste que diz ao olho
+            # que aquilo tem espessura. Tres tons custam o mesmo que um.
+            claro = np.array([152, 154, 156], np.float32)
             escuro = np.array([116, 118, 120], np.float32)
+            sombra = np.array([88, 90, 93], np.float32)
             idx = np.nonzero(dentro)[0]
             saida[idx[meio | trav | moldura]] = escuro
+            # montante e travessa ficam a frente do vidro e recebem a luz do
+            # comodo; a aba de baixo da moldura fica virada para o piso
+            saida[idx[meio | trav]] = claro
+            saida[idx[q[:, 1] > y1 - 0.06]] = claro
+            saida[idx[q[:, 1] < y0 + 0.06]] = sombra
     return saida
 
 

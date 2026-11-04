@@ -2088,9 +2088,23 @@ class TestPlantasSinteticas(unittest.TestCase):
             suave = np.convolve(col, np.ones(21) / 21.0, "same")
             return float(np.abs(col - suave)[20:-20].std())
 
-        self.assertGreater(self._vista("mar", ondula), 1.0, "a agua saiu lisa")
-        self.assertLess(self._vista("campo", ondula), 0.2,
-                        "o campo ganhou onda que nao devia ter")
+        no_mar = self._vista("mar", ondula)
+        no_campo = self._vista("campo", ondula)
+        self.assertGreater(no_mar, 1.0, "a agua saiu lisa")
+        # CAMPO DEIXOU DE SER ZERO, e o contrato mudou junto.
+        #
+        # Ele era o controle: a unica vista sem relevo nenhum. Isso provava
+        # que a onda e do mar, mas cobrava um preco que nao estava medido —
+        # campo e 7 das 8 plantas do acervo, entao a vista da REGRA era um
+        # degrade liso, e degrade liso o olho le como parede pintada, que e
+        # exatamente o defeito que a janela veio resolver.
+        #
+        # O que importa continua valendo e passa a ser cobrado assim: a onda
+        # do mar tem de ser MARCADAMENTE mais forte que o que quer que o
+        # campo tenha. Medido: 2,47 contra 0,90.
+        self.assertGreater(no_mar, no_campo * 2.0,
+                           "a onda do mar (%.2f) deixou de se distinguir do "
+                           "campo (%.2f)" % (no_mar, no_campo))
 
     def test_a_cidade_tem_silhueta_e_o_campo_nao(self):
         """
@@ -2106,10 +2120,17 @@ class TestPlantasSinteticas(unittest.TestCase):
         def recorte():
             return float(cena_apartamento._ceu(d).mean(axis=1).std())
 
-        self.assertGreater(self._vista("cidade", recorte), 5.0,
-                           "a cidade saiu chapada")
-        self.assertLess(self._vista("campo", recorte), 0.5,
-                        "o campo ganhou predio")
+        na_cidade = self._vista("cidade", recorte)
+        no_campo = self._vista("campo", recorte)
+        self.assertGreater(na_cidade, 5.0, "a cidade saiu chapada")
+        # Campo passou a ter linha de mata, mas ela e MASSA MACIA: borda em
+        # rampa e escurecimento de poucos por cento. A primeira versao dela
+        # usava recorte duro como o da cidade e saiu mais marcada que a
+        # propria cidade — 29,3 contra 18,3 —, o que apagava a diferenca
+        # entre as duas vistas. Medido agora: 18,3 contra 3,2.
+        self.assertGreater(na_cidade, no_campo * 3.0,
+                           "a silhueta da cidade (%.2f) deixou de se "
+                           "distinguir do campo (%.2f)" % (na_cidade, no_campo))
 
     def test_a_planta_escolhe_a_vista_e_a_omissao_vale_campo(self):
         """
@@ -8965,6 +8986,90 @@ class TestEnderecoFixo(unittest.TestCase):
         self.assertIn("if tunel.configurado():", fonte)
         self.assertIn('os.environ["TOUR_ATRAS_DE_PROXY"] = "1"', fonte)
         self.assertIn("tunel.subir(porta)", fonte)
+
+
+class TestJanelaNaoPareceDesenho(unittest.TestCase):
+    """
+    O que se vê pela janela.
+
+    POR QUE ISTO EXISTE. Depois que o panorama passou a ser repintado por IA,
+    a parede ao redor ficou fotográfica — gratil, veio, sujeira — e a janela
+    continuou como o traçador a desenha: um degradê chapado com uma cruz
+    cinza por cima. Lado a lado, o vão parece COLADO sobre a foto, e janela é
+    o que vende luz e vista num anúncio de imóvel.
+
+    Eram três coisas, e as três foram medidas antes de mexer.
+    """
+
+    def _dirs(self, azimutes, elevacoes):
+        """Um leque de direções como o que se enxerga por um vão."""
+        A, E = np.meshgrid(np.radians(azimutes), np.radians(elevacoes))
+        return np.stack([np.cos(E) * np.sin(A), np.sin(E),
+                         np.cos(E) * np.cos(A)], -1).reshape(-1, 3).astype(
+                             np.float32)
+
+    def test_o_campo_tem_relevo_como_o_mar_e_a_cidade(self):
+        """
+        campo era a ÚNICA vista sem relevo: o chão descia do horizonte ao
+        verde num degradê liso, e degradê liso o olho lê como PAREDE PINTADA
+        — que é exatamente o que a janela existe para desmentir.
+
+        E não é caso raro: são 7 das 8 plantas do acervo. A vista sem relevo
+        era a regra, não a exceção.
+        """
+        antes = cena_apartamento.VISTA
+        try:
+            cena_apartamento.VISTA = "campo"
+            # mesma elevação, azimutes diferentes: só o relevo muda isto
+            d = self._dirs(np.linspace(-30, 30, 120), [-3.0])
+            cor = cena_apartamento._ceu(d)
+            espalhamento = float(cor.std(axis=0).mean())
+        finally:
+            cena_apartamento.VISTA = antes
+        self.assertGreater(espalhamento, 1.0,
+                           "o chão do campo é liso ao longo do azimute: "
+                           "espalhamento %.2f" % espalhamento)
+
+    def test_o_ceu_varia_com_o_azimute_e_nao_so_com_a_altura(self):
+        """
+        Céu liso é o maior denunciante da janela: nenhum céu de verdade é um
+        degradê perfeito, e o olho sabe disso antes de saber por quê. Sem
+        nuvem, duas direções com a MESMA altura tinham exatamente a mesma
+        cor, e aí o vão vira um papel colado.
+        """
+        antes = cena_apartamento.VISTA
+        try:
+            cena_apartamento.VISTA = "campo"
+            d = self._dirs(np.linspace(-60, 60, 200), [18.0])
+            cor = cena_apartamento._ceu(d)
+            espalhamento = float(cor.std(axis=0).mean())
+        finally:
+            cena_apartamento.VISTA = antes
+        self.assertGreater(espalhamento, 0.5,
+                           "o céu é o mesmo em todo azimute: espalhamento "
+                           "%.2f" % espalhamento)
+
+    def test_o_caixilho_tem_espessura_e_nao_uma_cor_so(self):
+        """
+        Uma cor única num perfil de alumínio lê como desenho: perfil de
+        verdade tem a aba de cima pegando luz e a de baixo na sombra, e é
+        esse contraste que diz ao olho que aquilo tem espessura.
+        """
+        fonte = io.open("cena_apartamento.py", encoding="utf-8").read()
+        trecho = fonte[fonte.index("# caixilho: duas folhas"):]
+        trecho = trecho[:trecho.index("return saida")]
+        tons = re.findall(r"np\.array\(\[(\d+), (\d+), (\d+)\]", trecho)
+        self.assertGreaterEqual(len(set(tons)), 3,
+                                "o caixilho voltou a ter uma cor só: %s"
+                                % tons)
+        # E OS TRES TONS TEM DE SER USADOS. Conferir so que eles EXISTEM
+        # aceitava arrancar as atribuicoes e deixar as definicoes para tras:
+        # o caixilho voltava a ter uma cor so, e as variaveis ficavam ali,
+        # mortas, jurando que estava tudo certo. A mutacao passou batida por
+        # isso.
+        for nome in ("claro", "sombra"):
+            self.assertIn("= " + nome, trecho,
+                          "o tom %r e definido e nunca usado" % nome)
 
 
 class TestCalotaDoPanorama(unittest.TestCase):

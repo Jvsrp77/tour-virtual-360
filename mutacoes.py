@@ -1253,6 +1253,29 @@ MUT = [
      '      --parede-maquete:#1b1f26;',
      'TestCorDaParedeDaMaquete.test_a_parede_continua_clara_no_tema_escuro'),
 
+    # ------------------------------------------- a janela nao e desenho
+
+    # campo e 7 das 8 plantas: sem relevo, a vista da regra e um degrade
+    # liso, e degrade liso o olho le como parede pintada
+    ('o campo volta a nao ter relevo', 'cena_apartamento.py',
+     '    if VISTA == "campo":\n',
+     '    if False:\n',
+     'TestJanelaNaoPareceDesenho.test_o_campo_tem_relevo_como_o_mar_e_a_cidade'),
+
+    ('o ceu volta a ser liso', 'cena_apartamento.py',
+     "    _nuvem = (np.clip(_n - 0.18, 0.0, 1.0) * 0.6\n"
+     "              * np.clip(acima[:, 0] * 7.0, 0.0, 1.0))",
+     "    _nuvem = np.zeros_like(_n)",
+     'TestJanelaNaoPareceDesenho'
+     '.test_o_ceu_varia_com_o_azimute_e_nao_so_com_a_altura'),
+
+    ('o caixilho volta a ter uma cor so', 'cena_apartamento.py',
+     "            saida[idx[meio | trav]] = claro\n"
+     "            saida[idx[q[:, 1] > y1 - 0.06]] = claro\n"
+     "            saida[idx[q[:, 1] < y0 + 0.06]] = sombra",
+     "            pass",
+     'TestJanelaNaoPareceDesenho.test_o_caixilho_tem_espessura_e_nao_uma_cor_so'),
+
     # ------------------------------------- a calota do zenite e do nadir
 
     # repetida ate o polo, cada coluna vira um raio — e no polo todos os
