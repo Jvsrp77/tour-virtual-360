@@ -273,17 +273,54 @@ def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05):
         # borrao horizontal largo: sem ele cada coluna vira uma listra
         espalhado = cv2.GaussianBlur(cor_da_coluna[None, :, :], (0, 0),
                                      max(1.0, largura * 0.02))[0]
-        tapa = np.repeat(espalhado[None, :, :], furo.shape[0], axis=0)
+
+        # A CALOTA TEM DE FECHAR NUM PONTO, e repetida ela nao fechava.
+        #
+        # `espalhado` e uma cor por coluna. Repetida ate o polo, cada coluna
+        # vira um RAIO: a mesma cor esticada da borda ao alto, e o que se ve
+        # de dentro do visor e um leque de fatias saindo do zenite. Pior que
+        # feio, e impossivel: no polo TODOS os azimutes se encontram no mesmo
+        # ponto, entao nao cabe ali mais de uma cor — a imagem estava pedindo
+        # que um pixel tivesse mil cores, e o que sai e um redemoinho.
+        #
+        # Agora a cor caminha da borda ate o polo: na borda ela e a da coluna,
+        # que e o que continua a parede logo abaixo; no polo e a media de
+        # todas, que e uma cor so, como tem de ser. O expoente adianta a
+        # convergencia, para o leque sumir antes de chegar ao alto.
+        media = espalhado.mean(axis=0)
+        n = furo.shape[0]
+        borda = float(np.median(fonte[validas])) if validas.any() else n / 2.0
+        linhas = np.arange(n, dtype=np.float32)
+        if alto:
+            t = 1.0 - np.clip(linhas / max(borda, 1.0), 0.0, 1.0)
+        else:
+            t = np.clip((linhas - borda) / max(n - 1.0 - borda, 1.0), 0.0, 1.0)
+        t = (t ** 1.5)[:, None, None]
+        tapa = (espalhado[None, :, :] * (1.0 - t)
+                + media[None, None, :] * t)
 
         # O FURO E DILATADO ANTES DE BORRAR. Sem isso a transicao acontece
         # exatamente sobre a fronteira serrilhada, e o serrilhado aparece como
         # fileira de triangulos. Dilatado, a mistura comeca ja DENTRO da area
         # coberta — onde o teto e uniforme de qualquer jeito.
-        raio = max(3, int(altura * 0.02))
+        #
+        # MAS A DILATACAO ERA LARGA DEMAIS, e o preco disso nao estava medido.
+        # Com dilatacao de 2% da altura e esfumado de 5%, a transicao se
+        # espalhava por quase 13 graus de latitude ALEM do furo. Medido numa
+        # cena do acervo, com a mascara de verdade do tecelao: o furo ocupa
+        # 23,3% da imagem e o tapa alterava 34,4% dela — onze pontos
+        # percentuais de teto REPINTADO apagados e trocados por cor media,
+        # chegando ate o horizonte. A calota aparecia quase do dobro do
+        # tamanho que tem, e era isso que se via como mancha cinza no alto.
+        raio = max(3, int(altura * 0.012))
         grosso = cv2.dilate(furo.astype(np.uint8),
                             np.ones((raio, raio), np.uint8))
         peso = cv2.GaussianBlur(grosso.astype(np.float32), (0, 0),
                                 max(1.0, altura * esfumado))[:, :, None]
+        # A RAMPA VOLTA PARA DENTRO DO FURO. O borrao continua existindo — e
+        # ele que esconde o serrilhado —, mas remapeado ele comeca em zero na
+        # fronteira e sobe ja dentro do buraco, em vez de meio para cada lado.
+        peso = np.clip((peso - 0.25) / 0.55, 0.0, 1.0)
         saida[faixa_alvo] = pedaco * (1.0 - peso) + tapa * peso
     return np.clip(saida, 0, 255).astype(np.uint8)
 

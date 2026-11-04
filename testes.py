@@ -44,6 +44,7 @@ import servidor                   # noqa: E402
 import tunel                     # noqa: E402
 import coerencia                 # noqa: E402
 import reprojetar                # noqa: E402
+import repintar                  # noqa: E402
 import aviso                      # noqa: E402
 import maquete3d                  # noqa: E402
 import modelo3d                   # noqa: E402
@@ -2411,6 +2412,115 @@ class TestPreviaDoLink(Base):
     def setUp(self):
         self.cliente = self.conta("dona-previa")
         self.iid = self.imovel(self.cliente, "Casa com quintal")
+
+    def test_a_caminhada_tambem_tem_previa(self):
+        """
+        /andar/ ficou de fora e servia o arquivo estatico cru: o link da
+        caminhada chegava PELADO no WhatsApp. E a caminhada e justamente o
+        que o dono manda quando quer impressionar.
+        """
+        html = self.cliente.get("/andar/%s" % self.iid).get_data(as_text=True)
+        self.assertIn('property="og:title"', html,
+                      "a caminhada voltou a ir sem previa")
+        self.assertIn("Casa com quintal", html)
+
+    def test_o_endereco_canonico_e_o_da_pagina_compartilhada(self):
+        """
+        Era sempre /tour/, nas tres paginas. Quem mandava o link da maquete
+        via a previa declarar que o conteudo mora noutro lugar — e parte dos
+        aplicativos troca o destino por esse, levando a pessoa para uma tela
+        diferente da que lhe mandaram.
+        """
+        # a maquete REDIRECIONA quando o imovel nao tem geometria, e ai nao
+        # ha etiqueta nenhuma para conferir — o imovel de teste precisa de uma
+        geo = {"larg": 6.0, "fundo": 4.0, "pe": 2.7, "caixas": [],
+               "pontos": [], "janelas": [],
+               "zonas": [{"nome": "Sala", "x0": 0, "x1": 6, "z0": 0, "z1": 4,
+                          "m2": 24.0}]}
+        with io.open(aplicacao.arq_maquete(self.iid), "w",
+                     encoding="utf-8") as f:
+            json.dump(geo, f, ensure_ascii=False)
+        for rota in ("tour", "maquete", "andar"):
+            html = self.cliente.get("/%s/%s" % (rota, self.iid)).get_data(
+                as_text=True)
+            linha = next((l for l in html.splitlines() if "og:url" in l), "")
+            self.assertIn("/%s/%s" % (rota, self.iid), linha,
+                          "a previa de /%s aponta para outro lugar" % rota)
+
+    def test_a_capa_prefere_o_esboco_a_miniatura(self):
+        """
+        A miniatura e o panorama equirretangular espremido em 480x240. No
+        WhatsApp aquilo chega como uma tira torta: teto esticado na borda de
+        cima, chao na de baixo. Ninguem reconhece um comodo ali, e a imagem e
+        justamente a parte da previa que faz a pessoa tocar.
+
+        O esboco e 960x540 em perspectiva, no enquadramento em que o panorama
+        abre — parece a foto de um comodo, porque e.
+        """
+        tour = {"cenas": [{"id": "a", "miniatura": "mini_a.jpg",
+                           "arquivo": "a.jpg", "esboco": "esboco_a.jpg"}]}
+        nome, tamanho = aplicacao._capa_da_previa(tour)
+        self.assertEqual(nome, "esboco_a.jpg")
+        self.assertEqual(tamanho, aplicacao.LADO_ESBOCO)
+
+    def test_sem_esboco_a_capa_cai_na_miniatura(self):
+        """Cena antiga nao tem esboco, e previa sem imagem e pior que torta."""
+        nome, tamanho = aplicacao._capa_da_previa(
+            {"cenas": [{"id": "a", "miniatura": "mini_a.jpg",
+                        "arquivo": "a.jpg"}]})
+        self.assertEqual(nome, "mini_a.jpg")
+        self.assertIsNone(tamanho, "miniatura nao tem o tamanho do esboco")
+
+    def test_a_capa_e_a_vista_que_a_dona_escolheu_para_abrir(self):
+        """
+        Preferir o esboco da CENA INICIAL, e nao o da primeira da lista: e a
+        vista que a dona escolheu para abrir o tour. Quando ela estiver ruim
+        — medido no acervo, um esboco abre de cara para uma porta de armario
+        — a previa passa a mostrar isso, e ai da para corrigir o
+        enquadramento em vez de nunca ficar sabendo.
+        """
+        tour = {"cena_inicial": "b",
+                "cenas": [{"id": "a", "esboco": "esboco_a.jpg"},
+                          {"id": "b", "esboco": "esboco_b.jpg"}]}
+        self.assertEqual(aplicacao._capa_da_previa(tour)[0], "esboco_b.jpg")
+
+    def test_o_tamanho_da_imagem_vai_declarado(self):
+        """
+        O robo nao baixa a imagem para descobrir o tamanho. Sem as duas
+        etiquetas, parte dos aplicativos desenha a previa pequena e de lado
+        em vez da faixa larga — a diferenca entre a foto do comodo aparecer e
+        virar um selo de 60 pixels.
+        """
+        html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
+        if 'property="og:image"' not in html:
+            self.skipTest("imóvel de teste ainda não tem cena com imagem")
+        self.assertIn('property="og:image:width"', html)
+        self.assertIn('property="og:image:height"', html)
+
+    def test_a_metragem_vem_da_maquete_quando_a_cena_nao_tem(self):
+        """
+        A segunda linha somava a area das CENAS, e cena de imovel gerado nao
+        traz area: num imovel do acervo a linha inteira saia "9 ambientes em
+        360°", sem um metro quadrado. Quem procura imovel procura metragem —
+        e o primeiro numero que a pessoa le, antes do preco.
+        """
+        geo = {"larg": 6.0, "fundo": 4.0, "pe": 2.7, "caixas": [], "pontos": [],
+               "janelas": [],
+               "zonas": [{"nome": "Sala", "x0": 0, "x1": 6, "z0": 0, "z1": 2,
+                          "m2": 12.0},
+                         {"nome": "Quarto", "x0": 0, "x1": 6, "z0": 2, "z1": 4,
+                          "m2": 9.5}]}
+        with io.open(aplicacao.arq_maquete(self.iid), "w",
+                     encoding="utf-8") as f:
+            json.dump(geo, f, ensure_ascii=False)
+        texto = aplicacao._texto_da_previa({"cenas": [{}, {}]}, self.iid)
+        self.assertIn("21,5 m²", texto)
+        self.assertIn("2 cômodos", texto)
+
+    def test_sem_maquete_a_linha_nao_inventa_metragem(self):
+        """Dizer metragem errada no anúncio é pior que não dizer."""
+        texto = aplicacao._texto_da_previa({"cenas": [{}]}, self.iid)
+        self.assertNotIn("m²", texto)
 
     def test_o_titulo_do_imovel_vai_nas_etiquetas(self):
         html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
@@ -8855,6 +8965,124 @@ class TestEnderecoFixo(unittest.TestCase):
         self.assertIn("if tunel.configurado():", fonte)
         self.assertIn('os.environ["TOUR_ATRAS_DE_PROXY"] = "1"', fonte)
         self.assertIn("tunel.subir(porta)", fonte)
+
+
+class TestCalotaDoPanorama(unittest.TestCase):
+    """
+    O zênite e o nadir, que o repintor não pinta.
+
+    POR QUE ISTO EXISTE. A repintura passa o panorama por um ANEL de seis
+    vistas, e não por uma esfera: as vistas de cima e de baixo custam duas
+    chamadas a mais por cena e o modelo inventa nelas — já pôs galhos de
+    árvore no teto de uma sala. Então as calotas são PREENCHIDAS a partir do
+    anel, e esse preenchimento é a única coisa que o visitante vê quando
+    olha para cima.
+
+    Os dois defeitos que estes testes travam foram medidos numa cena do
+    acervo, com a máscara de verdade do tecelão.
+    """
+
+    def _cena(self, h=256, w=512):
+        """Anel com cor muito diferente por azimute, e calotas vazias."""
+        equi = np.zeros((h, w, 3), np.uint8)
+        for x in range(w):
+            equi[:, x] = (int(255 * x / w), 40, 255 - int(255 * x / w))
+        vazio = np.zeros((h, w), bool)
+        vazio[:int(h * 0.14)] = True
+        vazio[int(h * 0.86):] = True
+        return equi, vazio
+
+    def test_a_calota_fecha_num_ponto_so(self):
+        """
+        No polo TODOS os azimutes se encontram no mesmo ponto, então não cabe
+        ali mais de uma cor. O preenchimento antigo repetia uma cor por
+        COLUNA até o alto: cada coluna virava um raio, e o visor mostrava um
+        leque de fatias girando com a cabeça — a imagem estava pedindo que um
+        pixel tivesse mil cores.
+
+        MEDIDO no caso sintético: espalhamento de cor entre colunas na linha
+        do polo, 48,4 antes e 0,3 depois.
+        """
+        equi, vazio = self._cena()
+        saida = repintar.tapar_polos(equi, vazio).astype(np.float32)
+        no_polo = float(saida[0].std(axis=0).mean())
+        na_borda = float(saida[int(saida.shape[0] * 0.13)].std(axis=0).mean())
+        self.assertLess(no_polo, 3.0,
+                        "o polo tem %.1f de espalhamento: ainda é um leque"
+                        % no_polo)
+        self.assertGreater(na_borda, no_polo * 5,
+                           "a borda perdeu a cor da parede que ela continua")
+
+    def test_a_calota_nao_come_o_que_foi_repintado(self):
+        """
+        A mistura se espalhava quase 13 graus de latitude ALÉM do furo —
+        dilatação de 2% da altura mais esfumado de 5%. Medido com a máscara
+        do tecelão numa cena do acervo: o furo ocupa 23,3% da imagem e o tapa
+        alterava 34,4% dela. Onze pontos percentuais de teto REPINTADO eram
+        apagados e trocados por cor média, e a calota aparecia quase do dobro
+        do tamanho que tem. Agora são 3,2 pontos.
+
+        O esfumado continua existindo: sem ele o recorte serrilhado das
+        vistas vira uma fileira de triângulos girando no visor. O que mudou é
+        que a rampa dele mora DENTRO do furo.
+        """
+        h, w = 256, 512
+        equi = np.random.RandomState(3).randint(60, 200, (h, w, 3), np.uint8)
+        vazio = np.zeros((h, w), bool)
+        vazio[:int(h * 0.14)] = True
+        saida = repintar.tapar_polos(equi, vazio)
+        mudou = (np.abs(saida.astype(np.int16) - equi.astype(np.int16)
+                        ).max(axis=2) > 3)
+        comido = float((mudou & ~vazio).mean())
+        self.assertLess(comido, 0.06,
+                        "%.1f%% da imagem boa foi apagada pela mistura"
+                        % (100 * comido))
+        self.assertTrue(mudou[vazio].mean() > 0.9,
+                        "deixou buraco sem tapar")
+
+    def test_o_esfumado_continua_existindo(self):
+        """
+        Tapar com corte seco deixa uma linha horizontal atravessando o
+        panorama, e no visor essa linha vira um anel girando com a cabeça.
+        """
+        # A CENA PRECISA VARIAR NA VERTICAL. Com cada coluna de cor
+        # constante — que e como a outra cena de teste e montada —, o
+        # preenchimento herda a cor do vizinho e mistura ela com ela mesma:
+        # o esfumado acontece e nao muda pixel nenhum, e o teste reprova
+        # codigo certo. Aqui a cor escurece de cima para baixo, entao
+        # qualquer mistura alem da fronteira aparece.
+        h, w = 256, 512
+        equi = np.zeros((h, w, 3), np.uint8)
+        for y in range(h):
+            k = 0.35 + 0.65 * y / h
+            for c in range(3):
+                equi[y, :, c] = int(255 * k * (0.4 + 0.3 * c))
+        vazio = np.zeros((h, w), bool)
+        vazio[:int(h * 0.14)] = True
+        saida = repintar.tapar_polos(equi, vazio)
+        # QUALQUER mudanca conta: a cena e sintetica, sem JPEG no meio, entao
+        # nao ha ruido para filtrar. Com limiar de 2 niveis o teste reprovava
+        # codigo certo, porque junto a fronteira a mistura muda a cor por
+        # menos de 2 — e mudar pouco ali e exatamente o que se quer.
+        mudou = (np.abs(saida.astype(np.int16) - equi.astype(np.int16)
+                        ).max(axis=2) > 0)
+        # O QUE PROVA O ESFUMADO E O ALCANCE, e so ele.
+        #
+        # Este teste errou duas vezes antes. Olhar a variacao entre linhas
+        # vizinhas passava com corte seco, porque a convergencia ate o polo
+        # ja produz variacao sozinha. Olhar "encostou em algum pixel coberto"
+        # tambem passava, porque a DILATACAO do furo ja toca uma linha alem
+        # dele mesmo sem borrao nenhum.
+        #
+        # O que so o esfumado faz e ESPALHAR a transicao por varias linhas.
+        # Com corte seco ela acaba na linha seguinte a dilatacao.
+        fora = np.where((mudou & ~vazio).any(axis=1))[0]
+        fim_do_furo = int(h * 0.14)
+        alcance = int(fora.max()) - fim_do_furo + 1 if fora.size else 0
+        self.assertGreater(alcance, 3,
+                           "a mistura alcança %d linha(s) além do furo: é "
+                           "corte seco, e a fronteira vira uma linha dura "
+                           "girando no visor" % alcance)
 
 
 class TestCoerenciaEntreCenas(unittest.TestCase):

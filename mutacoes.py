@@ -1253,6 +1253,27 @@ MUT = [
      '      --parede-maquete:#1b1f26;',
      'TestCorDaParedeDaMaquete.test_a_parede_continua_clara_no_tema_escuro'),
 
+    # ------------------------------------- a calota do zenite e do nadir
+
+    # repetida ate o polo, cada coluna vira um raio — e no polo todos os
+    # azimutes sao o mesmo ponto, entao uma cor por coluna e impossivel
+    ('a calota volta a esticar a cor ate o polo', 'repintar.py',
+     "        tapa = (espalhado[None, :, :] * (1.0 - t)\n"
+     "                + media[None, None, :] * t)",
+     "        tapa = np.repeat(espalhado[None, :, :], furo.shape[0], axis=0)",
+     'TestCalotaDoPanorama.test_a_calota_fecha_num_ponto_so'),
+
+    ('a mistura da calota volta a comer teto repintado', 'repintar.py',
+     "        peso = np.clip((peso - 0.25) / 0.55, 0.0, 1.0)",
+     "        peso = np.clip(peso, 0.0, 1.0)",
+     'TestCalotaDoPanorama.test_a_calota_nao_come_o_que_foi_repintado'),
+
+    ('a calota passa a ser tapada com corte seco', 'repintar.py',
+     "        peso = cv2.GaussianBlur(grosso.astype(np.float32), (0, 0),\n"
+     "                                max(1.0, altura * esfumado))[:, :, None]",
+     "        peso = grosso.astype(np.float32)[:, :, None]",
+     'TestCalotaDoPanorama.test_o_esfumado_continua_existindo'),
+
     # ---------------------------------- o link do imovel abre amanha
 
     # `tunnel --url` sozinho e justamente o tunel que SORTEIA o endereco: o

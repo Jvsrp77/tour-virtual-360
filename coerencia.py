@@ -17,8 +17,9 @@ geometria: para cada pixel da cena B descobre-se o ponto do mundo que ele
 enxerga, e vai-se buscar a cor daquele mesmo ponto na cena A. Isso e o
 reprojetar.levar(), que ja existia aqui sem ninguem chamar.
 
-De quebra sai mais barato, e por muito: uma chamada de IA em vez de uma por
-ponto. No sobrado de 49 pontos, US$ 0,03 em vez de US$ 1,47.
+De quebra sai mais barato: uma CENA repintada em vez de 49. Uma cena custa
+SEIS chamadas — o anel tem seis vistas —, entao cerca de US$ 0,18 a US$ 0,03
+por imagem. Repintar o sobrado inteiro seriam US$ 8,82.
 
 O QUE SOBRA SAO OS BURACOS: o que B enxerga e A nao enxergava — atras de um
 movel, dentro de um comodo que A nao via, e as calotas de zenite e nadir que
@@ -110,11 +111,11 @@ def escolher_mestres(origens, quantas):
     a foto real de cada ponto (erro medio por canal, 0 a 255):
 
         mestras   custo   erro   inventado
-           1      $0,03   38,6     33,5%
-           2      $0,06   39,4     34,5%
-           3      $0,09   29,1     28,6%
-           4      $0,12   15,0      9,6%
-           6      $0,18    5,0      7,7%
+           1      $0,18   38,6     33,5%
+           2      $0,36   39,4     34,5%
+           3      $0,54   29,1     28,6%
+           4      $0,72   15,0      9,6%
+           6      $1,08    5,0      7,7%
         sem propagacao nenhuma: 51,2
 
     Duas notas que o numero da e a intuicao nao daria:
@@ -125,7 +126,7 @@ def escolher_mestres(origens, quantas):
 
     E A ECONOMIA NAO E O PONTO. Na proporcao que presta — perto de uma
     mestra para cada duas cenas — o sobrado de 49 pontos custaria uns
-    US$ 0,72 contra US$ 1,47 repintando tudo. Metade do preco e bem-vinda,
+    US$ 4,32 contra US$ 8,82 repintando tudo. Metade do preco e bem-vinda,
     mas quem paga o trabalho e a COERENCIA: repintando cada cena por conta
     propria, o preco e o mesmo de sempre e a parede continua mudando de
     tabua de um ponto para o outro.
@@ -225,8 +226,8 @@ def main():
     p.add_argument("--mestres", type=int, default=1,
                    help="quantas cenas a IA repinta. Uma so nao cobre casa "
                         "grande: medido no sobrado, os cômodos que a mestra "
-                        "nao enxerga saem com 98%% de buraco. Custa US$ 0,03 "
-                        "por mestra.")
+                        "nao enxerga saem com 98%% de buraco. Cada mestra "
+                        "custa seis chamadas, cerca de US$ 0,18.")
     p.add_argument("descricao", nargs="?", default="")
     p.add_argument("--largura", type=int, default=4096)
     p.add_argument("--reaproveitar", action="store_true",

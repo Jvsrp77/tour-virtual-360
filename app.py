@@ -903,25 +903,82 @@ def painel(imovel):
 def visualizador(imovel):
     if not imovel_existe(imovel):
         return redirect("/imoveis")
-    return _com_previa("viewer.html", imovel)
+    return _com_previa("viewer.html", imovel, "/tour/" + imovel)
 
 
-def _texto_da_previa(tour):
+def _medidas_da_maquete(imovel_id):
+    """
+    Metragem e número de cômodos, da geometria.
+
+    A segunda linha da prévia somava a área das CENAS, e cena de imóvel
+    gerado não traz área — num imóvel do acervo a linha inteira saía
+    "9 ambientes em 360°", sem um metro quadrado. Quem procura imóvel
+    procura metragem: é o primeiro número que a pessoa lê, antes do preço.
+    A maquete tem a planta inteira em metros, e custa um arquivo lido.
+    """
+    caminho = arq_maquete(imovel_id)
+    if not os.path.exists(caminho):
+        return 0.0, 0
+    try:
+        with io.open(caminho, encoding="utf-8") as f:
+            zonas = json.load(f).get("zonas") or []
+    except (OSError, ValueError):
+        return 0.0, 0
+    return sum(float(z.get("m2") or 0) for z in zonas), len(zonas)
+
+
+def _texto_da_previa(tour, imovel_id=None):
     """Segunda linha da prévia: o que faz alguém decidir tocar no link."""
     partes = []
     n = len(tour.get("cenas", []))
     if n:
         partes.append("%d ambiente%s em 360°" % (n, "s" if n > 1 else ""))
     metros = sum(c["area"]["m2"] for c in tour.get("cenas", []) if c.get("area"))
+    comodos = 0
+    if not metros and imovel_id:
+        metros, comodos = _medidas_da_maquete(imovel_id)
     if metros:
-        partes.append(("%.1f m²" % metros).replace(".", ","))
+        partes.insert(0, ("%.1f m²" % metros).replace(".", ","))
+    if comodos:
+        partes.insert(1, "%d cômodo%s" % (comodos, "s" if comodos > 1 else ""))
     for campo in ("endereco", "preco"):
         if tour.get(campo):
             partes.append(str(tour[campo]))
     return " · ".join(partes) or "Visita virtual pelo imóvel."
 
 
-def _com_previa(pagina, imovel_id):
+def _capa_da_previa(tour):
+    """
+    A imagem da prévia, que é a parte que faz alguém tocar no link.
+
+    Era a MINIATURA: o panorama equirretangular espremido em 480x240. No
+    WhatsApp aquilo chega como uma tira torta — teto esticado na borda de
+    cima, chão na de baixo, parede puxada nos cantos. Ninguém reconhece um
+    cômodo ali.
+
+    O esboço já existia e é o contrário disso: 960x540 em perspectiva, no
+    enquadramento exato em que o panorama abre. Preferir o da CENA INICIAL,
+    e não o da primeira da lista, tem um motivo a mais: é a vista que a dona
+    escolheu para abrir o tour. Quando ela estiver ruim — medido no acervo, o
+    esboço de uma cena abre de cara para uma porta de armário — a prévia
+    passa a mostrar isso, e aí dá para corrigir o enquadramento em vez de
+    nunca ficar sabendo.
+    """
+    cenas = tour.get("cenas", [])
+    inicial = tour.get("cena_inicial")
+    ordem = ([c for c in cenas if c.get("id") == inicial]
+             + [c for c in cenas if c.get("id") != inicial])
+    for cena in ordem:
+        if cena.get("esboco"):
+            return cena["esboco"], LADO_ESBOCO
+    for cena in ordem:
+        for campo in ("miniatura", "arquivo"):
+            if cena.get(campo):
+                return cena[campo], None
+    return None, None
+
+
+def _com_previa(pagina, imovel_id, caminho_proprio=None):
     """
     Serve a página do tour com as etiquetas de prévia já no HTML.
 
@@ -943,10 +1000,13 @@ def _com_previa(pagina, imovel_id):
 
     tour = carregar_tour(imovel_id)
     titulo = tour.get("titulo") or "Tour virtual"
-    descricao = _texto_da_previa(tour)
+    descricao = _texto_da_previa(tour, imovel_id)
     raiz = request.url_root.rstrip("/")
-    capa = next((c.get("miniatura") or c.get("arquivo")
-                 for c in tour.get("cenas", []) if c.get("arquivo")), None)
+    capa, tamanho = _capa_da_previa(tour)
+    # O ENDERECO CANONICO E O DA PAGINA COMPARTILHADA. Era sempre /tour/, e
+    # entao quem mandava o link da maquete via a previa dizer que o conteudo
+    # morava noutro lugar — parte dos aplicativos troca o destino por esse.
+    proprio = caminho_proprio or ("/tour/" + imovel_id)
 
     etiquetas = [
         '<meta property="og:type" content="website">',
@@ -954,8 +1014,8 @@ def _com_previa(pagina, imovel_id):
         '<meta property="og:locale" content="pt_BR">',
         '<meta property="og:title" content="%s">' % escape(titulo),
         '<meta property="og:description" content="%s">' % escape(descricao),
-        '<meta property="og:url" content="%s/tour/%s">' % (escape(raiz),
-                                                           escape(imovel_id)),
+        '<meta property="og:url" content="%s%s">' % (escape(raiz),
+                                                     escape(proprio)),
         '<meta name="description" content="%s">' % escape(descricao),
     ]
     if capa:
@@ -963,6 +1023,14 @@ def _com_previa(pagina, imovel_id):
         imagem = "%s/data/%s/scenes/%s" % (raiz, imovel_id, capa)
         etiquetas += [
             '<meta property="og:image" content="%s">' % escape(imagem),
+            # O ROBO NAO BAIXA A IMAGEM PARA DESCOBRIR O TAMANHO. Sem estas
+            # duas, parte dos aplicativos desenha a previa pequena, de lado,
+            # em vez da faixa larga — que e a diferenca entre a foto do
+            # comodo aparecer e virar um selo de 60 pixels.
+            ] + ([
+            '<meta property="og:image:width" content="%d">' % tamanho[0],
+            '<meta property="og:image:height" content="%d">' % tamanho[1],
+            ] if tamanho else []) + [
             '<meta name="twitter:card" content="summary_large_image">',
             '<meta name="twitter:image" content="%s">' % escape(imagem),
         ]
@@ -982,7 +1050,10 @@ def _com_previa(pagina, imovel_id):
 def andar(imovel):
     if not imovel_existe(imovel):
         return redirect("/imoveis")
-    return send_from_directory("static", "andar.html")
+    # COM PREVIA, como as outras duas. Esta ficou de fora e o link da
+    # caminhada chegava pelado no WhatsApp — e a caminhada e justamente o
+    # que o dono manda quando quer impressionar.
+    return _com_previa("andar.html", imovel, "/andar/" + imovel)
 
 
 @app.route("/maquete/<imovel>")
@@ -990,7 +1061,7 @@ def maquete(imovel):
     """A vista 3D do imovel: a mesma geometria do tour, vista por fora."""
     if not imovel_existe(imovel) or not tem_maquete(imovel):
         return redirect("/tour/" + imovel if imovel_existe(imovel) else "/imoveis")
-    return _com_previa("maquete.html", imovel)
+    return _com_previa("maquete.html", imovel, "/maquete/" + imovel)
 
 
 @app.route("/capturar/<imovel>")
