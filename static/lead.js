@@ -223,6 +223,13 @@
     try {
       fetch(alvo, {method: 'POST', headers: {'Content-Type': 'application/json'},
                    body: JSON.stringify(dados)})
+        // OLHA A RESPOSTA, e nao so se a rede respondeu. fetch() so rejeita
+        // quando nao chega resposta nenhuma: um 429 do freio de envios
+        // RESOLVE normalmente, e a versao anterior disto marcava o contato
+        // como entregue e nunca mais tentava. O visitante via "Obrigado" e
+        // o corretor nunca recebia — a pior forma de perder um lead, porque
+        // ninguem fica sabendo que houve um.
+        .then(function(r){ if (!r.ok) eu._guardarPendente(dados); })
         .catch(function(){ eu._guardarPendente(dados); });
     } catch (e) { this._guardarPendente(dados); }
     pronto();

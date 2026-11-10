@@ -1220,7 +1220,16 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       // da casca — fica com a cor chapada da maquete. Antes ela recebia o
       // que o panorama mostrasse naquela direcao, que e o comodo do outro
       // lado da parede: de fora, a casa aparecia vestida por dentro.
-      if (s < 1e-6){ gl_FragColor = vec4(corBase, 1.0); return; }
+      // O CORTE E ZERO, E NAO "UM NUMERO PEQUENO". Era s < 1e-6, e o peso
+      // cai com a SEXTA potencia da distancia: a 3,4 m de uma foto ele vale
+      // 7e-7. Ou seja, toda superficie a mais de 3,3 m da foto mais proxima
+      // (3,2 m se vista de lado) saia bege liso — e nao aos 5 m do raio. O
+      // limite era razoavel com o expoente 2 que a mistura usava no comeco;
+      // quando o expoente subiu para 6, para tirar o borrao, ninguem o
+      // revisou. Na tela: um paredao bege no meio da sala, com a borda em
+      // arco, que e a curva onde o peso cruza o corte. A media ponderada nao
+      // liga para a escala dos pesos, entao 1e-10 serve tanto quanto 1.
+      if (s <= 0.0){ gl_FragColor = vec4(corBase, 1.0); return; }
       vec3 c = ${Array.from({length: FOTOS_NA_MISTURA},
         (_, i) => "w" + i + " * amostra(foto" + i + ", origem" + i + ")")
         .join("\n             + ")};
@@ -1488,7 +1497,19 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     }
     if (vestidos.length) return;         // ja esta vestida
     const alvos = [];
-    [grupoObra, grupoMoveis].forEach(g => g && g.traverse(o => {
+    // SO A CASCA VESTE A FOTO: piso, parede, janela. O MOVEL FICA SOLIDO.
+    //
+    // A foto era colada tambem nos moveis, e era isso que fazia a sala parecer
+    // papelao amassado. Projecao so da certo em superficie que a foto VIU
+    // daquele ponto e que tem a forma que ela mostra: parede e piso sao
+    // planos de verdade. O movel nao — a foto repintada mostra uma mesa de
+    // um formato, a geometria tem outro, e o tampo recebia pedacos de imagem
+    // esticados enquanto as pernas recebiam listras. Pior: com tudo coberto
+    // pela mesma textura borrada, nao se distingue movel de parede.
+    //
+    // Solido, o movel aparece como objeto, com a cor e o ladrilho do proprio
+    // material, iluminado pela cena, em frente a uma casca fotografica.
+    [grupoObra].forEach(g => g && g.traverse(o => {
       if (o.isMesh) alvos.push(o);
     }));
     alvos.forEach(malha => {
@@ -1530,6 +1551,15 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     ocioso = false;
   }
 
+  function ligarMinimapa(){
+    const tela2 = $("minimapa");
+    if (!tela2 || tela2.dataset.ligado) return;
+    tela2.dataset.ligado = "1";
+    tela2.style.cursor = "pointer";
+    tela2.title = "Clique para ir até aqui";
+    tela2.addEventListener("click", clicarNoMinimapa);
+  }
+
   function aplicarChaves(){
     vestirDeFoto($("chFoto") && $("chFoto").checked);
     grupoMoveis.visible = $("chMoveis").checked;
@@ -1560,7 +1590,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       const dica = $("dicaPessoa");
       if (emPessoa && dica) dica.textContent = preso
         ? "Mouse livre para olhar · W A S D anda · Shift corre · Esc solta"
-        : "W A S D ou setas para andar · clique para o mouse livre · Esc sai";
+        : "W A S D ou setas para andar · clique no mapa para ir · clique para o mouse livre · Esc sai";
     });
 
     // changedTouches, e nao touches[0]: com dois dedos na tela (um no manche,
@@ -1768,6 +1798,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       atualizarRegua();
       renderizador.render(cena, camera);
       desenharMinimapa();
+      ligarMinimapa();
       return;
     }
 
@@ -2048,8 +2079,8 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     const dica = $("dicaPessoa");
     if (dica) dica.textContent = emPessoa
       ? (temToque()
-          ? "Manche embaixo para andar · arraste na tela para olhar"
-          : "W A S D ou setas para andar · clique para o mouse livre · Esc sai")
+          ? "Manche embaixo para andar · arraste na tela para olhar · toque no mapa para ir"
+          : "W A S D ou setas para andar · clique no mapa para ir · clique para o mouse livre · Esc sai")
       : "Entra na altura dos olhos (1,50 m), a mesma da câmera do tour.";
     const onde = $("ondeEstou");
     if (onde) onde.hidden = !emPessoa;
@@ -2503,6 +2534,72 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     ctx.lineTo(x + Math.cos(ang - 2.5) * 5, z + Math.sin(ang - 2.5) * 5);
     ctx.closePath();
     ctx.fill();
+  }
+
+  // ------------------------------------------------- clicar no minimapa
+  //
+  // O mapa ja dizia ONDE se esta. Faltava ele servir para IR.
+  //
+  // Andando a pe, atravessar a casa custa segundos de W segurado olhando
+  // parede — e e justamente quando alguem quer comparar dois comodos que
+  // esse custo aparece. Clicar no comodo da lista lateral ja levava, mas a
+  // lista nao diz onde o comodo FICA; o mapa diz, e e nele que a pessoa ja
+  // esta olhando para se localizar.
+  //
+  // A semantica e a mesma do clique no comodo, de proposito: a pe LEVA, de
+  // fora DESTACA. Dois gestos iguais com intencoes opostas confundem, e
+  // aqui eles ja estavam resolvidos assim.
+
+  // De pixel do mapa para metro da planta. E o inverso exato do px()/pz()
+  // do desenho; manter a conta aqui separada deixaria os dois divergirem na
+  // primeira vez que o tamanho do mapa mudasse.
+  function doMinimapa(ev){
+    const tela2 = $("minimapa");
+    const im = imoveis[atual];
+    if (!tela2 || !im) return null;
+    const r = tela2.getBoundingClientRect();
+    const L = tela2.width, A = tela2.height, margem = 6;
+    const esc = Math.min((L - margem * 2) / im.larg, (A - margem * 2) / im.fundo);
+    const ox = (L - im.larg * esc) / 2, oz = (A - im.fundo * esc) / 2;
+    // o canvas pode estar desenhado maior ou menor que seus pixels
+    const cx2 = (ev.clientX - r.left) * (L / r.width);
+    const cz2 = (ev.clientY - r.top) * (A / r.height);
+    return {x: (cx2 - ox) / esc, z: (cz2 - oz) / esc};
+  }
+
+  function zonaNoPonto(im, x, z){
+    return (im.zonas || []).find(q => x >= q.x0 && x <= q.x1
+                                 && z >= q.z0 && z <= q.z1) || null;
+  }
+
+  function clicarNoMinimapa(ev){
+    const im = imoveis[atual];
+    const p = doMinimapa(ev);
+    if (!im || !p) return;
+    const zona = zonaNoPonto(im, p.x, p.z);
+    if (!emPessoa){
+      if (zona) selecionar(zona.nome);
+      return;
+    }
+    if (!zona) return;              // clicou fora da planta: nao e destino
+
+    // O LUGAR CLICADO, SE COUBER UM CORPO ALI; senao o lugar mais folgado do
+    // comodo em que se clicou. Teleportar para dentro de um armario porque o
+    // dedo encostou dois pixels ao lado seria pior do que nao levar.
+    const antes = pessoa.piso;
+    pessoa.piso = zona.andar || 0;
+    const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;
+    let destino = (livre(x, z) && folgaEm(x, z) > RAIO_CORPO * 1.4)
+      ? {x: x, z: z, piso: pessoa.piso} : lugarMaisFolgado(im, zona);
+    pessoa.piso = antes;
+    if (!destino) return;
+
+    pessoa.piso = destino.piso;
+    pessoa.pos.set(destino.x, destino.piso + OLHO, destino.z);
+    acomodarOlho(0, true);          // chegada e salto: nada de olho subindo
+    pessoa.giro = olharMaisAberto(destino.x, destino.z);
+    mostrarOnde();
+    ocioso = false;
   }
 
   // ------------------------------------------------- tela cheia e imagem

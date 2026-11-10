@@ -491,8 +491,8 @@ MUT = [
 
     # a busca do lugar deixa de olhar o andar do comodo
     ("busca de lugar no andar errado", "static/maquete.html",
-     "    pessoa.piso = zona.andar || 0;",
-     "    pessoa.piso = pessoa.piso;",
+     "    pessoa.piso = zona.andar || 0;\n    try {",
+     "    pessoa.piso = pessoa.piso;\n    try {",
      "TestAndarNaMaquete.test_a_busca_do_lugar_no_comodo_usa_o_andar_certo"),
 
     ("comodo inventado cai no primeiro da lista", "static/maquete.html",
@@ -1360,6 +1360,86 @@ MUT = [
      'TestOrcamentoDeTextura'
      '.test_as_fotos_entram_sob_demanda_e_nao_de_uma_vez'),
 
+    # ------------------------------------ o acabamento fotografico legivel
+
+    # 1e-6 cai a 3,3 m com o expoente 6: paredao bege no meio da sala
+    ('o corte do bege volta a ser um numero pequeno', 'static/maquete.html',
+     'if (s <= 0.0){ gl_FragColor = vec4(corBase, 1.0); return; }',
+     'if (s < 1e-6){ gl_FragColor = vec4(corBase, 1.0); return; }',
+     'TestAcabamentoFotograficoLegivel'
+     '.test_o_corte_do_bege_e_zero_e_nao_um_numero_pequeno'),
+
+    ('o movel volta a vestir a foto', 'static/maquete.html',
+     '    [grupoObra].forEach(g => g && g.traverse(o => {',
+     '    [grupoObra, grupoMoveis].forEach(g => g && g.traverse(o => {',
+     'TestAcabamentoFotograficoLegivel'
+     '.test_so_a_casca_veste_a_foto_e_o_movel_fica_solido'),
+
+    # ------------------------------------- o minimapa leva ate o comodo
+
+    # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem
+    # converter, o clique cai deslocado e leva para o comodo vizinho
+    ('o clique ignora o tamanho em que o mapa foi desenhado',
+     'static/maquete.html',
+     '    const cx2 = (ev.clientX - r.left) * (L / r.width);',
+     '    const cx2 = (ev.clientX - r.left);',
+     'TestMinimapaClicavel'
+     '.test_o_clique_volta_ao_metro_de_onde_o_desenho_partiu'),
+
+    ('o clique do mapa deixa de achar o comodo', 'static/maquete.html',
+     '    return (im.zonas || []).find(q => x >= q.x0 && x <= q.x1\n'
+     '                                 && z >= q.z0 && z <= q.z1) || null;',
+     '    return (im.zonas || [])[0] || null;',
+     'TestMinimapaClicavel.test_a_zona_clicada_e_a_que_contem_o_ponto'),
+
+    ('de fora o clique no mapa deixa de destacar', 'static/maquete.html',
+     '      if (zona) selecionar(zona.nome);',
+     '      if (zona) return;',
+     'TestMinimapaClicavel.test_a_pe_leva_e_de_fora_destaca'),
+
+    # procurar lugar no quarto de cima com o pe no terreo testa contra a
+    # mobilia errada: foi assim que o dono ficou preso no sobrado
+    ('o clique no mapa procura lugar no andar errado', 'static/maquete.html',
+     '    pessoa.piso = zona.andar || 0;\n'
+     '    const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;',
+     '    const x = p.x - im.larg / 2, z = p.z - im.fundo / 2;',
+     'TestMinimapaClicavel'
+     '.test_o_destino_cabe_um_corpo_e_usa_o_andar_do_comodo'),
+
+    ('o mapa passa a empilhar um ouvinte por quadro', 'static/maquete.html',
+     '    if (!tela2 || tela2.dataset.ligado) return;',
+     '    if (!tela2) return;',
+     'TestMinimapaClicavel.test_o_clique_e_ligado_uma_vez_so'),
+
+    # ------------------------------- o freio dos envios publicos
+
+    ('o contato volta a entrar sem freio', 'app.py',
+     '    if _envio_rapido_demais(_origem(), "leads"):',
+     '    if False:',
+     'TestFreioDosEnviosPublicos.test_enxurrada_de_contatos_e_recusada'),
+
+    ('a visita volta a entrar sem freio', 'app.py',
+     '    if _envio_rapido_demais(_origem(), "visitas"):',
+     '    if False:',
+     'TestFreioDosEnviosPublicos.test_a_visita_tem_folga_maior_que_o_contato'),
+
+    # fosse por imovel, qualquer um calaria a captura de um anuncio alheio
+    ('o freio passa a travar todo mundo junto', 'app.py',
+     '    chave = (origem, rota)',
+     '    chave = rota',
+     'TestFreioDosEnviosPublicos.test_uma_origem_nao_cala_a_captura_da_outra'),
+
+    # 200 faz o visitante ver "Obrigado" e o corretor nunca receber
+    ('o envio recusado responde 200', 'app.py',
+     '                        "Espere um minuto e tente de novo."}), 429',
+     '                        "Espere um minuto e tente de novo."}), 200',
+     'TestFreioDosEnviosPublicos.test_o_envio_recusado_responde_429_e_nao_200'),
+
+    ('a pagina deixa de olhar a resposta do envio', 'static/lead.js',
+     '        .then(function(r){ if (!r.ok) eu._guardarPendente(dados); })\n',
+     '',
+     'TestFreioDosEnviosPublicos.test_a_pagina_guarda_o_contato_quando_e_recusado'),
+
     # ------------------------------ o convite de contato nas tres telas
 
     ('o convite interrompe quem esta andando', 'static/lead.js',
@@ -1415,8 +1495,8 @@ MUT = [
      'TestMisturaDeFotos.test_foto_atras_da_superficie_nao_opina'),
 
     ('a casa volta a aparecer vestida por dentro', 'static/maquete.html',
-     'if (s < 1e-6){ gl_FragColor = vec4(corBase, 1.0); return; }',
-     'if (s < 1e-6){ s = 1e-6; }',
+     'if (s <= 0.0){ gl_FragColor = vec4(corBase, 1.0); return; }',
+     'if (s <= 0.0){ s = 1e-6; }',
      'TestMisturaDeFotos.test_superficie_que_nenhuma_foto_enxerga_fica_chapada'),
 
     ('a parede de cima veste a foto de baixo', 'static/maquete.html',

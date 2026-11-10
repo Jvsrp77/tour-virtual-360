@@ -496,8 +496,17 @@ class TestConcorrencia(Base):
         def envia(n):
             try:
                 c = self.app.test_client()
+                # CADA VISITANTE COM SEU ENDERECO. O teste manda 40 contatos
+                # ao mesmo tempo para provar que gravacao concorrente nao
+                # perde nenhum — e quarenta visitantes de verdade vem de
+                # quarenta enderecos, nao de um. Com todos saindo do mesmo,
+                # o freio de envios (6 por minuto por origem) recusa 36 e o
+                # teste acusa perda de dado que nao houve: o que houve foi o
+                # freio funcionando.
                 r = c.post("/api/imoveis/%s/leads" % iid,
-                           json={"nome": "visitante %d" % n, "telefone": str(n)})
+                           json={"nome": "visitante %d" % n, "telefone": str(n)},
+                           environ_base={"REMOTE_ADDR": "10.0.%d.%d"
+                                         % (n // 250, n % 250)})
                 codigos.append(r.status_code)
             except Exception as e:
                 falhas.append("%s: %s" % (type(e).__name__, e))
@@ -9525,6 +9534,408 @@ class TestOrcamentoDeTextura(unittest.TestCase):
                       "mbNaPlaca", "erros"):
             self.assertIn(campo + ":", self.html,
                           "o diagnóstico não diz %s" % campo)
+
+
+class TestAcabamentoFotograficoLegivel(unittest.TestCase):
+    """
+    A sala vestida de foto precisa ser legível: casca fotográfica, móveis
+    sólidos, e nenhum paredão bege no meio.
+
+    POR QUE ISTO EXISTE. O dono abriu a maquete a pé e escreveu: "parece uns
+    borrões, fica feio o ambiente, não sei distinguir entre os objetos e
+    móveis". Eram dois defeitos, e os dois eram meus.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+        cls.raio = float(re.search(r"RAIO_DA_MISTURA = ([\d.]+)",
+                                   cls.html).group(1))
+
+    def _superficies(self, p, passo=0.5):
+        """Pontos nas faces e no topo das caixas, e no piso de cada cômodo."""
+        pts = []
+        for c in p["caixas"]:
+            x0, y0, z0, x1, y1, z1 = c[:6]
+            for y in np.arange(y0 + 0.05, y1, passo):
+                for x in np.arange(x0, x1 + 1e-6, passo):
+                    pts += [(x, y, z0), (x, y, z1)]
+                for z in np.arange(z0, z1 + 1e-6, passo):
+                    pts += [(x0, y, z), (x1, y, z)]
+            for x in np.arange(x0, x1 + 1e-6, passo):
+                for z in np.arange(z0, z1 + 1e-6, passo):
+                    pts.append((x, y1, z))
+        for z in p["zonas"]:
+            base = cena_apartamento.base_da_zona(z)
+            for x in np.arange(z[1], z[2], passo):
+                for w in np.arange(z[3], z[4], passo):
+                    pts.append((x, base, w))
+        return pts
+
+    def test_o_corte_do_bege_e_zero_e_nao_um_numero_pequeno(self):
+        """
+        Era `s < 1e-6`, e o peso de cada foto cai com a SEXTA potência da
+        distância: a 3,4 m ele vale 7e-7. Toda superfície a mais de 3,3 m da
+        foto mais próxima — 3,2 m se vista de lado — saía bege liso, e não aos
+        5 m do raio. O limite era razoável com o expoente 2 do começo; quando
+        o expoente subiu para 6, para tirar o borrão, ninguém o revisou. Na
+        tela: um paredão bege no meio da sala, com a borda em arco, que é a
+        curva onde o peso cruza o corte.
+
+        Mede nas plantas do acervo: de todos os pontos de superfície que
+        TÊM uma foto dentro do raio, quantos o corte antigo mandava para o
+        bege, e quantos o novo manda.
+        """
+        antigo = novo = dentro_total = 0
+        for construir in plantas.TODAS:
+            p = construir()
+            fotos = np.array([(q[1], cena_apartamento.base_do_ponto(q)
+                               + cena_apartamento.OLHO, q[2])
+                              for q in p["pontos"]])
+            pts = np.array(self._superficies(p))
+            d = np.linalg.norm(pts[:, None, :] - fotos[None, :, :], axis=-1)
+            w = np.maximum(0.0, 1.0 / np.maximum(d, 0.30)
+                           - 1.0 / self.raio) ** 6
+            soma = w.sum(axis=1)
+            dentro = d.min(axis=1) < self.raio       # alguma foto ao alcance
+            dentro_total += int(dentro.sum())
+            antigo += int((dentro & (soma < 1e-6)).sum())
+            novo += int((dentro & (soma <= 0.0)).sum())
+        self.assertGreater(antigo, 0,
+                           "o corte antigo deixou de errar nas plantas; este "
+                           "teste perdeu o contraste que o justifica")
+        self.assertEqual(novo, 0,
+                         "%d de %d pontos com foto ao alcance ainda saem "
+                         "bege" % (novo, dentro_total))
+        self.assertIn("if (s <= 0.0){ gl_FragColor = vec4(corBase, 1.0);"
+                      " return; }", self.html,
+                      "o sombreador não usa o corte nulo")
+        # `if (s < 1e-6)` e nao so "s < 1e-6": o comentario que explica o
+        # defeito cita o numero, e a primeira versao desta asserção reprovou
+        # a propria explicacao. E assertFalse em vez de assertNotIn, que
+        # despeja a pagina inteira (136 KB) na mensagem de erro.
+        self.assertFalse("if (s < 1e-6)" in self.html,
+                         "o corte absoluto voltou ao sombreador")
+
+    def test_so_a_casca_veste_a_foto_e_o_movel_fica_solido(self):
+        """
+        A foto era colada nos móveis também, e era isso que fazia a sala
+        parecer papelão amassado. Projeção só dá certo em superfície que a
+        foto VIU daquele ponto e que tem a forma que ela mostra: parede e
+        piso são planos de verdade. O móvel não — a foto repintada mostra uma
+        mesa de um formato, a geometria tem outro, e o tampo recebia pedaços
+        de imagem esticados enquanto as pernas recebiam listras.
+
+        Pior: com tudo coberto pela mesma textura borrada, não se distingue
+        móvel de parede. Sólido, o móvel aparece como objeto, com a cor e o
+        ladrilho do próprio material.
+        """
+        corpo = self.html[self.html.index("  function vestirDeFoto(ligar){"):]
+        corpo = corpo[:corpo.index("\n  }")]
+        self.assertNotIn("grupoMoveis", corpo,
+                         "o móvel voltou a vestir a foto")
+        self.assertIn("[grupoObra].forEach(g => g && g.traverse(o => {",
+                      corpo, "a casca deixou de ser vestida")
+
+    def test_o_comentario_nao_fecha_o_sombreador(self):
+        """
+        O GLSL mora num template literal do JavaScript. Uma crase num
+        comentário DENTRO dele fecha a string no meio e derruba a página
+        inteira com "Unexpected identifier" — foi o que aconteceu ao
+        documentar o corte do bege, e só aparece no navegador.
+        """
+        for nome in ("VERTICE_FOTO", "FRAGMENTO_FOTO"):
+            ini = self.html.index("const %s = `" % nome) + len(
+                "const %s = `" % nome)
+            fim = self.html.index("`;", ini)
+            self.assertNotIn("`", self.html[ini:fim],
+                             "crase dentro do GLSL de %s" % nome)
+
+
+class TestMinimapaClicavel(unittest.TestCase):
+    """
+    Tocar no minimapa leva até o cômodo.
+
+    POR QUE ISTO EXISTE. O mapa já dizia ONDE se está, e a pé atravessar a
+    casa custa segundos de W segurado olhando parede — justamente quando
+    alguém quer comparar dois cômodos. A lista lateral já levava, mas não diz
+    onde o cômodo FICA; o mapa diz, e é nele que a pessoa já está olhando.
+
+    O erro que mais se esconde aqui é a conta do clique: o canvas tem 168x126
+    pixels e pode ser DESENHADO em outro tamanho (em celular quase sempre é).
+    Sem converter, o clique cai deslocado e leva para o cômodo vizinho — e na
+    tela de quem desenvolveu, onde os dois tamanhos coincidem, isso não
+    aparece.
+    """
+
+    CONTA = "const esc = Math.min((L - margem * 2) / im.larg, (A - margem * 2) / im.fundo);"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+        p = next(f() for f in plantas.TODAS if f()["pasta"] == "apto_compacto")
+        cls.im = {"larg": p["larg"], "fundo": p["fundo"],
+                  "zonas": [{"nome": z[0], "x0": z[1], "x1": z[2],
+                             "z0": z[3], "z1": z[4]} for z in p["zonas"]]}
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _rodar(self, programa, nome):
+        caminho = os.path.join(_TEMP, nome)
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def _pixel_do_ponto(self, x, z, L=168, A=126, margem=6):
+        """A mesma conta do desenho, para dizer ONDE cada ponto cai no mapa."""
+        esc = min((L - margem * 2) / self.im["larg"],
+                  (A - margem * 2) / self.im["fundo"])
+        ox = (L - self.im["larg"] * esc) / 2.0
+        oz = (A - self.im["fundo"] * esc) / 2.0
+        return ox + x * esc, oz + z * esc
+
+    def test_o_clique_volta_ao_metro_de_onde_o_desenho_partiu(self):
+        """
+        O inverso exato do px()/pz() do desenho, com o canvas DESENHADO em
+        tamanho diferente do seu. A tela abaixo é o dobro e deslocada, que é
+        o que acontece com o mapa dentro do painel de um celular.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        pontos = [(1.0, 1.0), (4.5, 3.8), (8.0, 7.0), (6.3, 0.8)]
+        cliques = []
+        for x, z in pontos:
+            px, pz = self._pixel_do_ponto(x, z)
+            cliques.append({"clientX": 10 + px * 2.0, "clientY": 20 + pz * 2.0})
+        d = self._rodar(
+            "const imoveis = [" + json.dumps(self.im) + "];\n"
+            "const atual = 0;\n"
+            "const tela = {width: 168, height: 126, getBoundingClientRect(){"
+            " return {left: 10, top: 20, width: 336, height: 252}; }};\n"
+            "const $ = id => id === 'minimapa' ? tela : null;\n"
+            + self._trecho("  function doMinimapa(ev){") + "\n"
+            "console.log(JSON.stringify(" + json.dumps(cliques)
+            + ".map(c => doMinimapa(c))));\n", "minimapa.mjs")
+        for (x, z), got in zip(pontos, d):
+            self.assertAlmostEqual(got["x"], x, places=4,
+                                   msg="x do clique saiu deslocado")
+            self.assertAlmostEqual(got["z"], z, places=4,
+                                   msg="z do clique saiu deslocado")
+
+    def test_a_zona_clicada_e_a_que_contem_o_ponto(self):
+        """
+        O centro de cada cômodo tem de cair nele mesmo, e fora da planta não
+        pode cair em cômodo nenhum — clicar na margem do mapa não é destino.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        centros = [{"x": (z["x0"] + z["x1"]) / 2.0,
+                    "z": (z["z0"] + z["z1"]) / 2.0} for z in self.im["zonas"]]
+        fora = [{"x": -1.0, "z": -1.0}, {"x": 99.0, "z": 3.0}]
+        d = self._rodar(
+            "const im = " + json.dumps(self.im) + ";\n"
+            + self._trecho("  function zonaNoPonto(im, x, z){") + "\n"
+            "const f = p => { const q = zonaNoPonto(im, p.x, p.z);"
+            " return q ? q.nome : null; };\n"
+            "console.log(JSON.stringify({dentro: "
+            + json.dumps(centros) + ".map(f), fora: "
+            + json.dumps(fora) + ".map(f)}));\n", "zona.mjs")
+        self.assertEqual(d["dentro"], [z["nome"] for z in self.im["zonas"]])
+        self.assertEqual(d["fora"], [None, None])
+
+    def test_desenho_e_clique_usam_a_mesma_escala(self):
+        """
+        O inverso mora num lugar e o desenho em outro. Se alguém mudar a
+        margem ou a escala de UM dos dois, o clique passa a cair deslocado e
+        nenhum teste de matemática percebe — ele roda a conta que está só no
+        inverso. Aqui se cobra que a fórmula apareça nos dois, igual.
+        """
+        self.assertEqual(self.html.count(self.CONTA), 2,
+                         "a escala do minimapa existe em número diferente de "
+                         "dois lugares (desenho e clique)")
+
+    def test_a_pe_leva_e_de_fora_destaca(self):
+        """
+        A mesma semântica do clique no cômodo da lista, de propósito: dois
+        gestos iguais com intenções opostas confundem, e aqui já estavam
+        resolvidos assim.
+        """
+        corpo = self._trecho("  function clicarNoMinimapa(ev){")
+        self.assertIn("if (!emPessoa){", corpo)
+        self.assertIn("if (zona) selecionar(zona.nome);", corpo,
+                      "de fora o clique deixou de destacar o cômodo")
+
+    def test_o_destino_cabe_um_corpo_e_usa_o_andar_do_comodo(self):
+        """
+        Teleportar para dentro de um armário porque o dedo encostou dois
+        pixels ao lado seria pior do que não levar. E livre() responde em
+        função do andar em que se está: procurar lugar no quarto de cima com
+        o pé no térreo testa contra a mobília do térreo — o mesmo erro que já
+        prendeu o dono no sobrado.
+        """
+        corpo = self._trecho("  function clicarNoMinimapa(ev){")
+        self.assertIn("pessoa.piso = zona.andar || 0;", corpo,
+                      "a busca não põe o pé no andar do cômodo clicado")
+        self.assertIn("folgaEm(x, z) > RAIO_CORPO * 1.4", corpo,
+                      "o destino não exige folga para um corpo")
+        self.assertIn("lugarMaisFolgado(im, zona)", corpo,
+                      "sem folga no ponto clicado não há onde cair")
+        self.assertIn("pessoa.piso = antes;", corpo,
+                      "a busca não devolve o andar de origem")
+
+    def test_o_clique_e_ligado_uma_vez_so(self):
+        """
+        O desenho roda a cada quadro. Sem a marca, cada quadro empilharia mais
+        um ouvinte, e um toque viraria dezenas de teletransportes.
+        """
+        corpo = self._trecho("  function ligarMinimapa(){")
+        # A GUARDA INTEIRA, e nao so a palavra. A funcao tambem ATRIBUI
+        # tela2.dataset.ligado logo abaixo, entao cobrar so que o texto
+        # exista aceitava arrancar a guarda e deixar a atribuicao: o mapa
+        # empilhava um ouvinte por quadro e o teste seguia verde.
+        self.assertIn("if (!tela2 || tela2.dataset.ligado) return;", corpo,
+                      "a guarda que impede ligar o mapa duas vezes sumiu")
+        self.assertIn('tela2.addEventListener("click", clicarNoMinimapa);',
+                      corpo)
+        self.assertIn("ligarMinimapa();", self.html)
+
+
+class TestFreioDosEnviosPublicos(Base):
+    """
+    /leads e /visitas são públicas, escrevem no disco e uma delas manda
+    e-mail.
+
+    POR QUE ISTO EXISTE AGORA. As duas sempre foram públicas, e com razão: o
+    visitante precisa das duas, e exigir conta ali seria o mesmo que não ter
+    captura. O que mudou foi o ENDEREÇO. Enquanto o túnel era do tipo rápido
+    e sorteava um nome novo a cada reinício, aquilo era indescobrível na
+    prática. Com domínio fixo o endereço é rastreado, e um robô basta para
+    encher a caixa do corretor, engordar o tour.json e segurar a trava de
+    gravação enquanto visitantes de verdade esperam.
+
+    O freio de força bruta que já existia é só do login.
+    """
+
+    def setUp(self):
+        # o freio e global ao processo: sem limpar, um teste herda a
+        # contagem do anterior e reprova por motivo que nao e dele
+        aplicacao._envios.clear()
+
+    def tearDown(self):
+        aplicacao._envios.clear()
+
+    def test_enxurrada_de_contatos_e_recusada(self):
+        """
+        Seis por minuto é muito para uma pessoa: ela manda um, e no máximo
+        repete porque achou que não foi.
+        """
+        dona = self.conta("dona-enxurrada")
+        iid = self.imovel(dona, "Casa do freio")
+        visitante = aplicacao.app.test_client()
+        corpo = {"nome": "Fulano", "telefone": "11999998888",
+                 "consentimento": "Autorizo."}
+        passaram = 0
+        for _ in range(20):
+            r = visitante.post("/api/imoveis/%s/leads" % iid, json=corpo)
+            if r.status_code == 200:
+                passaram += 1
+        limite = aplicacao.ENVIOS_POR_MINUTO["leads"]
+        self.assertEqual(passaram, limite,
+                         "passaram %d de 20 envios; o limite é %d"
+                         % (passaram, limite))
+
+    def test_o_envio_recusado_responde_429_e_nao_200(self):
+        """
+        A página precisa SABER que não foi, para guardar o contato e
+        reenviar. Respondendo 200, o visitante vê "Obrigado", o corretor
+        nunca recebe, e ninguém fica sabendo que houve um lead — a pior
+        forma de perder um.
+        """
+        dona = self.conta("dona-429")
+        iid = self.imovel(dona, "Casa do 429")
+        visitante = aplicacao.app.test_client()
+        corpo = {"nome": "Fulano", "telefone": "11999998888",
+                 "consentimento": "Autorizo."}
+        for _ in range(aplicacao.ENVIOS_POR_MINUTO["leads"]):
+            visitante.post("/api/imoveis/%s/leads" % iid, json=corpo)
+        r = visitante.post("/api/imoveis/%s/leads" % iid, json=corpo)
+        self.assertEqual(r.status_code, 429)
+        self.assertFalse(r.get_json()["ok"])
+
+    def test_o_freio_nao_descarta_em_silencio(self):
+        """
+        Recusado é diferente de perdido: o que foi recusado não entra na
+        lista, e quem mandou sabe disso e pode tentar de novo.
+        """
+        dona = self.conta("dona-silencio")
+        iid = self.imovel(dona, "Casa silenciosa")
+        visitante = aplicacao.app.test_client()
+        corpo = {"nome": "Fulano", "telefone": "11999998888",
+                 "consentimento": "Autorizo."}
+        for _ in range(20):
+            visitante.post("/api/imoveis/%s/leads" % iid, json=corpo)
+        guardados = dona.get("/api/imoveis/%s/leads" % iid).get_json()["leads"]
+        self.assertEqual(len(guardados), aplicacao.ENVIOS_POR_MINUTO["leads"])
+
+    def test_a_visita_tem_folga_maior_que_o_contato(self):
+        """
+        O visualizador reenvia a visita cada vez que a aba perde e recupera o
+        foco, e trocar de aba é comportamento normal de quem compara imóveis.
+        Com o mesmo limite do contato, o freio puniria uso normal.
+
+        E EXERCITA A ROTA, não só a constante: a primeira versão deste teste
+        comparava os dois números do dicionário e passava com o freio da
+        visita arrancado — o limite continuava maior, e ninguém o aplicava.
+        """
+        self.assertGreater(aplicacao.ENVIOS_POR_MINUTO["visitas"],
+                           aplicacao.ENVIOS_POR_MINUTO["leads"] * 2)
+        dona = self.conta("dona-visitas")
+        iid = self.imovel(dona, "Casa das visitas")
+        visitante = aplicacao.app.test_client()
+        limite = aplicacao.ENVIOS_POR_MINUTO["visitas"]
+        passaram = 0
+        for _ in range(limite + 10):
+            r = visitante.post("/api/imoveis/%s/visita" % iid,
+                               json={"segundos": 5, "ambientes": {}})
+            if r.status_code == 200:
+                passaram += 1
+        self.assertEqual(passaram, limite,
+                         "passaram %d de %d envios de visita; o limite é %d"
+                         % (passaram, limite + 10, limite))
+
+    def test_uma_origem_nao_cala_a_captura_da_outra(self):
+        """
+        A contagem é por origem, como a do login. Fosse por imóvel, qualquer
+        um calaria a captura de um anúncio alheio mandando lixo — trocaria um
+        problema por um pior.
+        """
+        corpo = ("x", "leads")
+        for _ in range(aplicacao.ENVIOS_POR_MINUTO["leads"]):
+            aplicacao._envio_rapido_demais(*corpo)
+        self.assertTrue(aplicacao._envio_rapido_demais("x", "leads"))
+        self.assertFalse(aplicacao._envio_rapido_demais("y", "leads"),
+                         "o freio de uma origem travou outra")
+
+    def test_a_pagina_guarda_o_contato_quando_e_recusado(self):
+        """
+        fetch() só rejeita quando não chega resposta nenhuma: um 429 RESOLVE
+        normalmente. Sem olhar a resposta, a página marcava o contato como
+        entregue e nunca mais tentava.
+        """
+        js = io.open(os.path.join("static", "lead.js"),
+                     encoding="utf-8").read()
+        self.assertIn("if (!r.ok) eu._guardarPendente(dados);", js,
+                      "a página não olha a resposta, só a rede")
 
 
 class TestConviteDeContato(unittest.TestCase):

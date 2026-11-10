@@ -1157,6 +1157,59 @@ def _contar_erro(origem):
                     _tentativas.pop(k, None)
 
 
+# ------------------------------------------- freio dos envios publicos
+#
+# /leads e /visitas sao PUBLICAS por necessidade: o visitante precisa das
+# duas, e exigir conta ali seria o mesmo que nao ter captura. Mas as duas
+# ESCREVEM no tour.json, pegam a trava do imovel e, no caso do lead, ainda
+# disparam um e-mail.
+#
+# Enquanto o endereco mudava a cada reinicio isso era quase teorico: um
+# endereco sorteado do trycloudflare e indescobrivel na pratica. Com dominio
+# FIXO — que e o que o tunel nomeado passou a dar — o endereco e rastreado, e
+# um robo basta para encher a caixa do corretor, engordar o arquivo e, de
+# quebra, segurar a trava de gravacao enquanto visitantes de verdade esperam.
+#
+# O FREIO NAO DESCARTA O ENVIO: recusa com 429 e quem esta do outro lado
+# tenta de novo. Descartar em silencio perderia justamente o lead bom que
+# chegou no minuto errado — e lead perdido nao deixa rastro para ninguem
+# descobrir depois.
+#
+# A contagem e por ORIGEM e por ROTA, como a de login: travar por imovel
+# deixaria qualquer um calar a captura de um anuncio alheio.
+ENVIOS_POR_MINUTO = {"leads": 6, "visitas": 30}
+_envios = {}
+_trava_envios = threading.Lock()
+
+
+def _envio_rapido_demais(origem, rota):
+    """
+    True quando esta origem ja mandou envios demais no ultimo minuto.
+
+    Seis leads por minuto e muito para uma pessoa — ela manda um, e no maximo
+    repete porque achou que nao foi. Visita tem folga maior porque o
+    visualizador reenvia a cada vez que a aba perde e recupera o foco, e
+    trocar de aba varias vezes e comportamento normal de quem compara
+    imoveis.
+    """
+    agora = time.time()
+    limite = ENVIOS_POR_MINUTO.get(rota, 6)
+    chave = (origem, rota)
+    with _trava_envios:
+        quando = [t for t in _envios.get(chave, ()) if agora - t < 60.0]
+        if len(quando) >= limite:
+            _envios[chave] = quando
+            return True
+        quando.append(agora)
+        _envios[chave] = quando
+        # nao deixa o dicionario crescer sem fim com IPs de passagem
+        if len(_envios) > 4000:
+            for k, v in list(_envios.items()):
+                if not v or agora - v[-1] > 120.0:
+                    _envios.pop(k, None)
+    return False
+
+
 def _limpar_erros(origem):
     with _trava_tentativas:
         _tentativas.pop(origem, None)
@@ -2370,6 +2423,8 @@ def api_registrar_visita():
     corretor por onde comecar a conversa: se o cliente ficou 3 minutos na suite,
     e por ali.
     """
+    if _envio_rapido_demais(_origem(), "visitas"):
+        return jsonify({"ok": False, "erro": "Muitos envios seguidos."}), 429
     dados = request.get_json(force=True) or {}
     tour = carregar_tour()
     visitas = tour.setdefault("visitas", [])
@@ -2546,6 +2601,11 @@ def api_registrar_lead():
     Guarda o consentimento junto com o dado, e nao so a marca de que houve: a
     LGPD pede que o titular saiba ao que consentiu, e o texto muda com o tempo.
     """
+    if _envio_rapido_demais(_origem(), "leads"):
+        # 429 e nao 200: a pagina precisa saber que nao foi, para guardar o
+        # contato e reenviar depois
+        return jsonify({"ok": False, "erro": "Muitos envios seguidos. "
+                        "Espere um minuto e tente de novo."}), 429
     tour = carregar_tour()
     dados = request.get_json(force=True)
     visitas = tour.get("visitas", [])
