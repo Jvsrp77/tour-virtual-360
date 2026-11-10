@@ -1421,6 +1421,52 @@ MUT = [
      'float frente = smoothstep(0.35, 0.8, cosf);',
      'TestEsticamentoDaFoto.test_o_corte_nao_deixa_o_raspao_valer_peso_cheio'),
 
+    # ------------------------------------ da maquete para a caminhada
+
+    # sem o filtro de andar, quem esta na sala do sobrado vai para o quarto
+    ('a caminhada ignora o andar do visitante', 'static/maquete.html',
+     '    const noAndar = comCena.filter(p => Math.abs((p.andar || 0) - andar) < 1.2);',
+     '    const noAndar = comCena;',
+     'TestVerEmCaminhada.test_o_ponto_mais_proximo_no_mesmo_andar'),
+
+    ('o ponto mais proximo ignora a profundidade da planta', 'static/maquete.html',
+     '      const q = Math.hypot(p.x - x, p.z - z);',
+     '      const q = Math.hypot(p.x - x, 0);',
+     'TestVerEmCaminhada.test_o_ponto_mais_proximo_no_mesmo_andar'),
+
+    # trocar o nome de um lado so leva ao primeiro ponto, sem erro na tela
+    ('o botao manda um parametro que a caminhada nao le', 'static/maquete.html',
+     'location.href = URL_ANDAR_PG + "?cena=" + encodeURIComponent(cena);',
+     'location.href = URL_ANDAR_PG + "?ponto=" + encodeURIComponent(cena);',
+     'TestVerEmCaminhada.test_o_link_usa_o_parametro_que_a_caminhada_entende'),
+
+    # a pessoa e relativa ao centro da planta; os pontos, nao
+    ('a pe, esquece o deslocamento do eixo x', 'static/maquete.html',
+     'x: pessoa.pos.x + im.larg / 2,',
+     'x: pessoa.pos.x,',
+     'TestVerEmCaminhada.test_a_pe_vale_onde_se_esta_e_de_fora_vale_a_entrada'),
+
+    ('a pe, esquece o deslocamento do eixo z', 'static/maquete.html',
+     'z: pessoa.pos.z + im.fundo / 2,',
+     'z: pessoa.pos.z,',
+     'TestVerEmCaminhada.test_a_pe_vale_onde_se_esta_e_de_fora_vale_a_entrada'),
+
+    ('a pe, ignora o andar de quem esta em cima', 'static/maquete.html',
+     'andar: pessoa.piso}',
+     'andar: 0}',
+     'TestVerEmCaminhada.test_a_pe_vale_onde_se_esta_e_de_fora_vale_a_entrada'),
+
+    ('a pe, trata como se estivesse do lado de fora', 'static/maquete.html',
+     'const aqui = aPe',
+     'const aqui = false',
+     'TestVerEmCaminhada.test_a_pe_vale_onde_se_esta_e_de_fora_vale_a_entrada'),
+
+    ('o botao aparece em imovel sem foto', 'static/maquete.html',
+     '    if (!(im.pontos || []).some(p => p.cena_id)) return;   // sem foto: sem caminhada',
+     '    if (false) return;',
+     'TestVerEmCaminhada'
+     '.test_o_botao_so_aparece_com_foto_e_nunca_em_modelo_importado'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem

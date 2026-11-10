@@ -10008,6 +10008,158 @@ class TestEsticamentoDaFoto(unittest.TestCase):
         self.assertGreater(t(0.9), 0.9)
 
 
+class TestVerEmCaminhada(unittest.TestCase):
+    """
+    O botão que leva da maquete para a caminhada, no ponto mais próximo.
+
+    POR QUE ISTO EXISTE. A maquete é a melhor forma de LER a planta e a
+    caminhada é a melhor forma de VER o imóvel: nela só se anda de um ponto
+    fotografado a outro, e por isso a imagem nunca aparece esticada. Andando
+    livremente pela maquete, com a foto projetada em caixas, há um teto de
+    realismo. Quem quer ver de verdade o cômodo em que está passa para lá.
+
+    O ponto frágil é o CONTRATO entre as duas páginas: a maquete manda
+    ?cena=, e a caminhada tem de ler esse nome. Os dois lados são cobrados.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+        with io.open(os.path.join("static", "andar.html"),
+                     encoding="utf-8") as f:
+            cls.andar = f.read()
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def test_o_ponto_mais_proximo_no_mesmo_andar(self):
+        """
+        A foto do andar de cima, três metros acima, não é "perto" só porque
+        cai no mesmo lugar da planta. Sem o filtro de andar, quem está na sala
+        do sobrado seria levado para o quarto de cima.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        pontos = [
+            {"cena_id": "a", "x": 1.0, "z": 1.0, "andar": 0},
+            {"cena_id": "b", "x": 8.0, "z": 1.0, "andar": 0},
+            {"cena_id": "c", "x": 1.1, "z": 1.05, "andar": 2.95},
+            {"cena_id": "e", "x": 1.1, "z": 9.0, "andar": 0},
+            {"x": 1.1, "z": 1.05, "andar": 0},          # sem cena: ignorada
+        ]
+        consultas = [[1.1, 1.05, 0], [1.1, 1.05, 2.95], [7.5, 1.2, 0]]
+        caminho = os.path.join(_TEMP, "caminhada.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(
+                self._trecho("  function pontoParaCaminhar(pontos, x, z, andar){")
+                + "\nconst pontos = " + json.dumps(pontos) + ";\n"
+                "const r = q => { const p = pontoParaCaminhar(pontos, q[0],"
+                " q[1], q[2]); return p ? p.cena_id : null; };\n"
+                "console.log(JSON.stringify({"
+                "consultas: " + json.dumps(consultas) + ".map(r),"
+                "vazio: pontoParaCaminhar([], 0, 0, 0),"
+                "semCena: pontoParaCaminhar([{x: 1, z: 1}], 0, 0, 0)}));\n")
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        d = json.loads(r.stdout.strip())
+        self.assertEqual(d["consultas"], ["a", "c", "b"],
+                         "o ponto escolhido não é o mais próximo no andar")
+        self.assertIsNone(d["vazio"])
+        self.assertIsNone(d["semCena"], "ponto sem cena virou destino")
+
+    def test_o_link_usa_o_parametro_que_a_caminhada_entende(self):
+        """
+        Os DOIS lados do contrato. A maquete manda ?cena=, e a caminhada
+        procura 'cena' na URL: trocar o nome de um só lado leva o visitante
+        para o primeiro ponto, sem erro nenhum na tela.
+        """
+        corpo = self._trecho("  function irParaCaminhada(){")
+        self.assertIn('URL_ANDAR_PG + "?cena=" + encodeURIComponent(cena)',
+                      corpo)
+        self.assertIn("new URLSearchParams(location.search).get('cena')",
+                      self.andar,
+                      "a caminhada deixou de ler o parâmetro cena")
+
+    def test_a_pe_vale_onde_se_esta_e_de_fora_vale_a_entrada(self):
+        """
+        A decisão que o clique toma, com pessoas em lugares e andares
+        diferentes. A posição da pessoa é relativa ao CENTRO da planta e a dos
+        pontos não: esquecer o deslocamento em um dos eixos leva o visitante
+        para o ponto errado sem erro nenhum, e esquecer o andar leva quem está
+        em cima para a foto do térreo. Cada erro é um destino diferente aqui.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        im = {"larg": 10.0, "fundo": 8.0, "pontos": [
+            {"cena_id": "entrada", "x": 1.0, "z": 1.0, "andar": 0},
+            {"cena_id": "fundos", "x": 9.0, "z": 7.0, "andar": 0},
+            {"cena_id": "lado", "x": 9.0, "z": 1.0, "andar": 0},
+            {"cena_id": "esq", "x": 1.0, "z": 7.0, "andar": 0},
+            {"cena_id": "alto", "x": 9.0, "z": 7.0, "andar": 2.95},
+        ]}
+        sem_foto = {"larg": 5.0, "fundo": 5.0,
+                    "pontos": [{"x": 1.0, "z": 1.0, "andar": 0}]}
+        caminho = os.path.join(_TEMP, "caminhada_a_pe.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(
+                self._trecho("  function pontoParaCaminhar(pontos, x, z, andar){")
+                + "\n"
+                + self._trecho("  function cenaParaCaminhar(im, aPe, pessoa){")
+                + "\nconst im = " + json.dumps(im) + ";\n"
+                "const semFoto = " + json.dumps(sem_foto) + ";\n"
+                "const pe = (im, x, z, piso) => ({pos: {x: x - im.larg / 2,"
+                " z: z - im.fundo / 2}, piso: piso});\n"
+                "console.log(JSON.stringify({\n"
+                "  deFora: cenaParaCaminhar(im, false, pe(im, 8.5, 6.5, 0)),\n"
+                "  aPeNosFundos: cenaParaCaminhar(im, true, pe(im, 8.5, 6.5, 0)),\n"
+                "  aPeNaEsquerda: cenaParaCaminhar(im, true, pe(im, 1.2, 6.8, 0)),\n"
+                "  aPeEmCima: cenaParaCaminhar(im, true, pe(im, 8.5, 6.5, 2.95)),\n"
+                "  semFotoDeFora: cenaParaCaminhar(semFoto, false, pe(semFoto, 1, 1, 0)),\n"
+                "  semFotoAPe: cenaParaCaminhar(semFoto, true, pe(semFoto, 1, 1, 0)),\n"
+                "}));\n")
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        d = json.loads(r.stdout.strip())
+        self.assertEqual(d["deFora"], "entrada",
+                         "de fora, a caminhada tem de abrir na entrada")
+        self.assertEqual(d["aPeNosFundos"], "fundos",
+                         "a pé, não levou ao ponto mais próximo de onde se está")
+        self.assertEqual(d["aPeNaEsquerda"], "esq",
+                         "a pé, não levou ao ponto mais próximo de onde se está")
+        self.assertEqual(d["aPeEmCima"], "alto",
+                         "em cima, levou para a foto do térreo")
+        self.assertIsNone(d["semFotoDeFora"])
+        self.assertIsNone(d["semFotoAPe"])
+
+    def test_o_botao_so_aparece_com_foto_e_nunca_em_modelo_importado(self):
+        """
+        Sem cena fotografada a caminhada não tem para onde ir, e o modelo
+        importado de escaneamento não tem pontos de captura.
+        """
+        self.assertIn('id="btCaminhada"', self.html)
+        self.assertIn("display:none", self.html[self.html.index(
+            'id="btCaminhada"'):][:140], "o botão nasce visível")
+        corpo = self._trecho("  function ligarCaminhada(){")
+        self.assertIn("im.importado", corpo)
+        self.assertIn("if (!(im.pontos || []).some(p => p.cena_id)) return;",
+                      corpo, "o botão aparece em imóvel sem foto")
+        self.assertIn("ligarCaminhada();", self.html)
+
+    def test_a_url_da_caminhada_segue_o_pacote_exportado(self):
+        """
+        No ZIP exportado não há servidor, e a página aponta para o arquivo
+        solto ao lado dela: o endereço da caminhada tem de poder ser trocado
+        como o do tour.
+        """
+        self.assertIn("window.__ANDAR__ || ('/andar/' + IMOVEL)", self.html)
+
+
 class TestMinimapaClicavel(unittest.TestCase):
     """
     Tocar no minimapa leva até o cômodo.

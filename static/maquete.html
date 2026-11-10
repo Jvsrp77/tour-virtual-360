@@ -11,6 +11,7 @@
 const IMOVEL = location.pathname.split('/').filter(Boolean)[1] || '';
 const URL_MAQUETE = window.__MAQUETE__ || ('/api/imoveis/' + IMOVEL + '/maquete');
 const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
+const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 </script>
 <script src="/static/vendor/three.js"></script>
 <script src="/static/lead.js"></script>
@@ -267,6 +268,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       <div class="cartao">
         <p class="rotulo">Visita</p>
         <button class="bt" id="btPessoa" style="width:100%">Entrar no imóvel</button>
+        <button class="bt" id="btCaminhada" style="width:100%;margin-top:8px;display:none">Ver em caminhada</button>
         <p class="nota" id="dicaPessoa" style="margin-top:9px">Entra na altura dos
         olhos (1,50 m), a mesma da câmera do tour.</p>
       </div>
@@ -1655,6 +1657,64 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       });
     });
     ocioso = false;
+  }
+
+  // ------------------------------------------------------ ver em caminhada
+  //
+  // A maquete e a melhor forma de LER a planta; a caminhada e a melhor forma
+  // de VER o imovel. Nela so se anda de um ponto fotografado a outro, e e por
+  // isso que a imagem nunca aparece esticada: cada foto e olhada do lugar
+  // onde foi tirada. Andando livremente pela maquete, com a foto projetada em
+  // caixas, ha um teto de realismo — a geometria simples e a imagem deixam de
+  // combinar quando o olho sai do ponto da foto.
+  //
+  // Entao quem quer ver de verdade o comodo em que esta passa para la, no
+  // ponto fotografado mais proximo.
+
+  function pontoParaCaminhar(pontos, x, z, andar){
+    const comCena = (pontos || []).filter(p => p.cena_id);
+    if (!comCena.length) return null;
+    // so no mesmo andar: a foto de cima, tres metros acima, nao e "perto"
+    const noAndar = comCena.filter(p => Math.abs((p.andar || 0) - andar) < 1.2);
+    const lista = noAndar.length ? noAndar : comCena;
+    let melhor = lista[0], d = Infinity;
+    for (const p of lista){
+      const q = Math.hypot(p.x - x, p.z - z);
+      if (q < d){ d = q; melhor = p; }
+    }
+    return melhor;
+  }
+
+  // Decide a cena da caminhada: a pe, a mais proxima de ONDE SE ESTA (a
+  // posicao da pessoa e relativa ao centro da planta, a dos pontos nao); de
+  // fora, a primeira da lista, que e a entrada. Pura, para ser testada.
+  function cenaParaCaminhar(im, aPe, pessoa){
+    const primeira = (im.pontos || []).find(p => p.cena_id);
+    const aqui = aPe
+      ? {x: pessoa.pos.x + im.larg / 2, z: pessoa.pos.z + im.fundo / 2,
+         andar: pessoa.piso}
+      : (primeira ? {x: primeira.x, z: primeira.z, andar: primeira.andar || 0}
+                  : null);
+    if (!aqui) return null;
+    const p = pontoParaCaminhar(im.pontos, aqui.x, aqui.z, aqui.andar);
+    return p ? p.cena_id : null;
+  }
+
+  function irParaCaminhada(){
+    const im = imoveis[atual];
+    if (!im) return;
+    const cena = cenaParaCaminhar(im, emPessoa, pessoa);
+    if (!cena) return;
+    location.href = URL_ANDAR_PG + "?cena=" + encodeURIComponent(cena);
+  }
+
+  function ligarCaminhada(){
+    const bt = $("btCaminhada");
+    const im = imoveis[atual];
+    if (!bt || !im || im.importado) return;
+    if (!(im.pontos || []).some(p => p.cena_id)) return;   // sem foto: sem caminhada
+    bt.style.display = "";
+    bt.addEventListener("click", irParaCaminhada);
   }
 
   function ligarMinimapa(){
@@ -3143,6 +3203,7 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     document.getElementById("marcaImovel").textContent = "· " + dados.nome;
     if (!iniciar3d()) return;
     mostrar(0);
+    ligarCaminhada();
 
     // CONVITE DE CONTATO. A maquete e onde o visitante anda, mede e escolhe o
     // quarto — e era a unica tela que nao pedia contato nenhum. Quem gostava
