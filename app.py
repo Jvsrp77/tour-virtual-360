@@ -284,6 +284,36 @@ def _fixar_https(resposta):
             "max-age=%d; includeSubDomains" % HSTS_SEGUNDOS)
     return resposta
 
+
+def _raiz_publica():
+    """
+    Endereco base como o visitante o digitou, com o esquema certo.
+
+    ATRAS DE UM TUNEL O ESQUEMA SAI ERRADO. O Cloudflare e o ngrok terminam o
+    HTTPS e falam com o servidor em claro, entao request.url_root chega como
+    http://... mesmo quando o visitante abriu https://.... Tres lugares
+    montavam endereco absoluto a partir dele, e os tres erravam do mesmo
+    jeito:
+
+      - a PREVIA do link: og:image com http:// — parte dos aplicativos recusa
+        imagem em claro, e o link do WhatsApp sai sem foto;
+      - o codigo de EMBED: um iframe http:// dentro de uma pagina https:// e
+        bloqueado como conteudo misto, e o tour nao aparece;
+      - o link do PAINEL no e-mail de aviso de contato.
+
+    So SOBE para https, nunca desce: o cabecalho vem de quem esta na frente do
+    servidor, e aceita-lo para rebaixar uma conexao ja segura nao teria
+    motivo. Subir nao da vantagem a ninguem — o endereco so e escrito na
+    resposta do proprio pedido, nunca guardado nem servido a outro visitante.
+    """
+    esquema = request.scheme
+    proto = request.headers.get("X-Forwarded-Proto", "").split(",")[0]
+    visitante = request.headers.get("CF-Visitor", "").replace(" ", "")
+    if proto.strip().lower() == "https" or '"scheme":"https"' in visitante:
+        esquema = "https"
+    return "%s://%s" % (esquema, request.host)
+
+
 # O tour publicado e o produto: ele fica aberto, e com ele o modo de caminhada,
 # as imagens das cenas e o registro de visita e de lead. Todo o resto — painel,
 # lista, metricas, exportacao e qualquer escrita — exige sessao.
@@ -1001,7 +1031,7 @@ def _com_previa(pagina, imovel_id, caminho_proprio=None):
     tour = carregar_tour(imovel_id)
     titulo = tour.get("titulo") or "Tour virtual"
     descricao = _texto_da_previa(tour, imovel_id)
-    raiz = request.url_root.rstrip("/")
+    raiz = _raiz_publica()
     capa, tamanho = _capa_da_previa(tour)
     # O ENDERECO CANONICO E O DA PAGINA COMPARTILHADA. Era sempre /tour/, e
     # entao quem mandava o link da maquete via a previa dizer que o conteudo
@@ -2629,7 +2659,7 @@ def api_registrar_lead():
     # perder o contato por causa do aviso seria trocar um problema por um pior.
     try:
         aviso.avisar(registro, tour.get("titulo", ""),
-                     link=request.url_root.rstrip("/") + "/painel/" + g.imovel)
+                     link=_raiz_publica() + "/painel/" + g.imovel)
     except Exception:   # o aviso nunca derruba o cadastro do contato
         traceback.print_exc()
     return jsonify({"ok": True})
@@ -2782,7 +2812,7 @@ def api_exportar():
 
 @api.route("/embed")
 def api_embed():
-    base = request.host_url.rstrip("/")
+    base = _raiz_publica()
     codigo = ('<iframe src="' + base + '/tour/' + g.imovel + '" width="100%" '
               'height="520" frameborder="0" allowfullscreen '
               'allow="vr; gyroscope; accelerometer"></iframe>')

@@ -2552,6 +2552,111 @@ class TestPreviaDoLink(Base):
         texto = aplicacao._texto_da_previa({"cenas": [{}]}, self.iid)
         self.assertNotIn("m²", texto)
 
+    def _com_tunel(self, caminho, **cabecalhos):
+        """Um pedido como o servidor o recebe atras de um túnel: em claro."""
+        h = {"Host": "tour.exemplo.com"}
+        h.update(cabecalhos)
+        return self.cliente.get(caminho, headers=h)
+
+    def test_atras_de_tunel_a_previa_sai_em_https(self):
+        """
+        O Cloudflare e o ngrok terminam o HTTPS e falam com o servidor em
+        claro: request.url_root chegava como http:// mesmo com o visitante em
+        https://. Resultado na prévia: og:image em http, que parte dos
+        aplicativos recusa — e o link do WhatsApp sai sem foto, justamente
+        quando alguém mandou o endereço seguro.
+        """
+        self.cliente.post("/api/imoveis/%s/cenas/demo" % self.iid,
+                          json={"nome": "Sala"})
+        for aviso in ({"X-Forwarded-Proto": "https"},
+                      {"CF-Visitor": '{"scheme":"https"}'}):
+            html = self._com_tunel("/tour/%s" % self.iid, **aviso).get_data(
+                as_text=True)
+            url = next(l for l in html.splitlines() if "og:url" in l)
+            img = next(l for l in html.splitlines()
+                       if 'property="og:image"' in l)
+            self.assertIn('content="https://tour.exemplo.com/tour/%s"'
+                          % self.iid, url, "og:url em claro com %s" % aviso)
+            self.assertIn('content="https://tour.exemplo.com/data/', img,
+                          "og:image em claro com %s" % aviso)
+
+    def test_sem_aviso_do_tunel_o_esquema_nao_e_forcado(self):
+        """
+        Rodando local, sem nada na frente, o endereço é http de verdade, e
+        forçar https ali quebraria a prévia de quem testa em 127.0.0.1.
+        """
+        self.cliente.post("/api/imoveis/%s/cenas/demo" % self.iid,
+                          json={"nome": "Sala"})
+        html = self._com_tunel("/tour/%s" % self.iid).get_data(as_text=True)
+        img = next(l for l in html.splitlines() if 'property="og:image"' in l)
+        self.assertIn('content="http://tour.exemplo.com/', img)
+
+    def test_o_aviso_nunca_rebaixa_uma_conexao_segura(self):
+        """
+        O cabeçalho vem de quem está na frente, e aceitá-lo para rebaixar
+        https para http não teria motivo. Só sobe.
+        """
+        r = self.cliente.get("/tour/%s" % self.iid,
+                             base_url="https://tour.exemplo.com",
+                             headers={"X-Forwarded-Proto": "http"})
+        url = next(l for l in r.get_data(as_text=True).splitlines()
+                   if "og:url" in l)
+        self.assertIn('content="https://', url,
+                      "o aviso rebaixou uma conexão que já era segura")
+
+    def test_o_codigo_de_embed_sai_em_https_atras_de_tunel(self):
+        """
+        Um iframe http:// dentro de uma página https:// é bloqueado como
+        conteúdo misto: quem embutisse o tour no site da imobiliária via o
+        espaço em branco, sem erro nenhum na tela.
+        """
+        r = self._com_tunel("/api/imoveis/%s/embed" % self.iid,
+                            **{"X-Forwarded-Proto": "https"})
+        self.assertIn('src="https://tour.exemplo.com/tour/%s"' % self.iid,
+                      r.get_data(as_text=True))
+
+    def test_o_link_do_painel_no_aviso_de_contato_sai_em_https(self):
+        """
+        O e-mail de aviso leva o corretor ao painel. Atrás do túnel o link
+        saía http://, e quem abrisse pelo celular caía numa conexão em claro
+        justamente na tela que pede senha.
+        """
+        capturado = {}
+        antes = aplicacao.aviso.avisar
+        aplicacao.aviso.avisar = lambda *a, **k: capturado.update(k)
+        aplicacao._envios.clear()
+        try:
+            self.cliente.post(
+                "/api/imoveis/%s/leads" % self.iid,
+                json={"nome": "Fulano", "telefone": "11999998888",
+                      "consentimento": "Autorizo."},
+                headers={"Host": "tour.exemplo.com",
+                         "X-Forwarded-Proto": "https"})
+        finally:
+            aplicacao.aviso.avisar = antes
+            aplicacao._envios.clear()
+        self.assertTrue(capturado.get("link", "").startswith(
+            "https://tour.exemplo.com/painel/"),
+            "o link do painel saiu %r" % capturado.get("link"))
+
+    def test_ninguem_monta_endereco_absoluto_a_mao(self):
+        """
+        Os três lugares passaram a usar _raiz_publica(). Um quarto que volte a
+        usar url_root ou host_url repete o defeito sem que nenhum teste o
+        enxergue — ele só aparece atrás de um túnel.
+        """
+        import ast
+        fonte = io.open("app.py", encoding="utf-8").read()
+        # NA ARVORE, e nao no texto: o docstring de _raiz_publica explica o
+        # defeito citando request.url_root, e a primeira versao desta
+        # asserção reprovou a própria explicação.
+        usos = [n.lineno for n in ast.walk(ast.parse(fonte))
+                if isinstance(n, ast.Attribute)
+                and n.attr in ("url_root", "host_url")]
+        self.assertEqual(usos, [],
+                         "linhas que voltaram a montar o endereço cru: %s"
+                         % usos)
+
     def test_o_titulo_do_imovel_vai_nas_etiquetas(self):
         html = self.cliente.get("/tour/%s" % self.iid).get_data(as_text=True)
         self.assertIn('property="og:title"', html)

@@ -1472,6 +1472,35 @@ MUT = [
      '',
      'TestFreioDosEnviosPublicos.test_a_pagina_guarda_o_contato_quando_e_recusado'),
 
+    # -------------------------- o endereco absoluto atras de um tunel
+
+    ('o esquema do tunel deixa de subir para https', 'app.py',
+     "    if proto.strip().lower() == \"https\" or '\"scheme\":\"https\"' in visitante:",
+     '    if False:',
+     'TestPreviaDoLink.test_atras_de_tunel_a_previa_sai_em_https'),
+
+    ('a previa volta ao endereco cru', 'app.py',
+     '    raiz = _raiz_publica()',
+     '    raiz = request.host_url.rstrip("/")',
+     'TestPreviaDoLink.test_atras_de_tunel_a_previa_sai_em_https'),
+
+    ('o embed volta ao endereco cru', 'app.py',
+     '    base = _raiz_publica()',
+     '    base = request.host_url.rstrip("/")',
+     'TestPreviaDoLink.test_o_codigo_de_embed_sai_em_https_atras_de_tunel'),
+
+    ('o link do painel no aviso volta ao endereco cru', 'app.py',
+     'link=_raiz_publica() + "/painel/" + g.imovel)',
+     'link=request.host_url.rstrip("/") + "/painel/" + g.imovel)',
+     'TestPreviaDoLink'
+     '.test_o_link_do_painel_no_aviso_de_contato_sai_em_https'),
+
+    # sem a guarda o aviso do proxy passaria a mandar no esquema
+    ('o esquema passa a vir sempre do cabecalho', 'app.py',
+     '    esquema = request.scheme\n',
+     '    esquema = "http"\n',
+     'TestPreviaDoLink.test_o_aviso_nunca_rebaixa_uma_conexao_segura'),
+
     # ------------------------------ o convite de contato nas tres telas
 
     ('o convite interrompe quem esta andando', 'static/lead.js',
