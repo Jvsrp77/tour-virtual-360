@@ -1326,13 +1326,13 @@ MUT = [
     # -------------------------- quanta foto cabe na placa de video
 
     ('a placa volta a receber o acervo inteiro', 'static/maquete.html',
-     'const TETO_DE_FOTOS_DE_CIMA =\n    (innerWidth < 820 || "ontouchstart" in window) ? 60 : 200;',
+     'const TETO_DE_FOTOS_DE_CIMA = APARELHO_LEVE ? 60 : 200;',
      'const TETO_DE_FOTOS_DE_CIMA = 99999;',
      'TestOrcamentoDeTextura.test_a_placa_nao_recebe_mais_o_acervo_inteiro'),
 
     ('de cima volta a carregar em resolucao cheia', 'static/maquete.html',
-     'else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);',
-     'else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, 0);',
+     'if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);',
+     'if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, 0);',
      'TestOrcamentoDeTextura.test_de_cima_cobre_a_casa_e_a_pe_da_resolucao'),
 
     # sem isto o panorama pode entrar virado, e o teto aparece no chao — so
@@ -1374,6 +1374,38 @@ MUT = [
      '    [grupoObra, grupoMoveis].forEach(g => g && g.traverse(o => {',
      'TestAcabamentoFotograficoLegivel'
      '.test_so_a_casca_veste_a_foto_e_o_movel_fica_solido'),
+
+    # ------------------------------ a nitidez segue o que se ve
+
+    # largura de janela diz o tamanho da JANELA, nao o da memoria
+    ('o aparelho leve volta a ser largura de janela', 'static/maquete.html',
+     'const APARELHO_LEVE = "ontouchstart" in window\n                        || (navigator.deviceMemory || 8) < 4;',
+     'const APARELHO_LEVE = innerWidth < 820;',
+     'TestNitidezDaMaquete.test_celular_e_aparelho_e_nao_largura_de_janela'),
+
+    ('o orcamento nitido nunca sobe foto nenhuma', 'static/maquete.html',
+     'if (custo <= sobra){ escolhido = d; sobra -= custo; break; }',
+     'if (false){ escolhido = d; sobra -= custo; break; }',
+     'TestNitidezDaMaquete'
+     '.test_o_orcamento_compra_o_degrau_mais_alto_que_couber'),
+
+    ('o apartamento inteiro deixa de caber nitido no desktop',
+     'static/maquete.html',
+     'const MB_NITIDO = APARELHO_LEVE ? 200 : 400;',
+     'const MB_NITIDO = APARELHO_LEVE ? 200 : 100;',
+     'TestNitidezDaMaquete'
+     '.test_o_orcamento_compra_o_degrau_mais_alto_que_couber'),
+
+    ('a fila volta a olhar so para a camera', 'static/maquete.html',
+     'const ALCANCES_DA_VISTA = [0, 2.5, 5.0];',
+     'const ALCANCES_DA_VISTA = [0];',
+     'TestNitidezDaMaquete'
+     '.test_a_fila_e_pelo_que_se_ve_e_nao_pelo_que_esta_perto'),
+
+    ('a tela pequena paga o degrau de 4096', 'static/maquete.html',
+     'return preciso > 2400 ? [0, 2048] : [2048];',
+     'return [0, 2048];',
+     'TestNitidezDaMaquete.test_os_degraus_acompanham_o_tamanho_da_tela'),
 
     # ------------------------------------- o minimapa leva ate o comodo
 

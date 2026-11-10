@@ -9415,7 +9415,8 @@ class TestOrcamentoDeTextura(unittest.TestCase):
         """
         lado = self._num("const LADO_REDUZIDO")
         reduzida = lado * (lado / 2) * 4 * 1.333
-        a_pe = self._num("const FOTOS_A_PE")
+        # o orcamento e o EXTRA acima do piso, em MB, e nao um numero de fotos
+        extra = self._num("const MB_NITIDO") * 1e6
         teto = self._num("const TETO_DE_FOTOS_DE_CIMA")
 
         # 400 PONTOS NO FIM DA LISTA, e nao so as plantas do repositorio.
@@ -9425,10 +9426,9 @@ class TestOrcamentoDeTextura(unittest.TestCase):
         pior_antes = pior_depois = 0.0
         for n in [len(c()["pontos"]) for c in plantas.TODAS] + [400]:
             pior_antes = max(pior_antes, n * self.CHEIA)
-            # a pé é o caso caro: as vizinhas inteiras MAIS o resto reduzido
+            # a pé é o caso caro: o piso de todas MAIS o orçamento nítido
             pior_depois = max(pior_depois,
-                              min(n, a_pe) * self.CHEIA
-                              + min(n, teto) * reduzida)
+                              min(n, teto) * reduzida + extra)
         self.assertGreater(pior_antes / 1e9, 2.0,
                            "a planta com mais pontos deixou de ser cara; "
                            "este teste perdeu o contraste que o justifica")
@@ -9467,16 +9467,14 @@ class TestOrcamentoDeTextura(unittest.TestCase):
         corpo = corpo[:corpo.index("\n  }")]
         self.assertIn("if (emPessoa){", corpo,
                       "o orçamento não distingue andar de olhar de cima")
-        self.assertIn("pedirFoto(f, 0)", corpo,
-                      "a pé ninguém recebe resolução cheia")
-        # OS DOIS RAMOS, cada um pelo seu texto. Cobrar só "existe
-        # LADO_REDUZIDO em algum lugar" aceitava o ramo de cima intacto com o
-        # de baixo trocado para resolução cheia — e é justamente o de baixo
-        # que multiplica a memória.
+        self.assertIn("resolucoes(", corpo,
+                      "a pé a resolução não sai do orçamento")
+        self.assertIn("pedirFoto(f, lados[k])", corpo,
+                      "a pé ninguém recebe a resolução que o orçamento deu")
+        # o ramo de CIMA, pelo seu texto: cobrar só "existe LADO_REDUZIDO
+        # em algum lugar" aceitava ele trocado para resolução cheia.
         self.assertIn("if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);",
                       corpo, "de cima alguém saiu da resolução reduzida")
-        self.assertIn("else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);",
-                      corpo, "a pé o resto saiu da resolução reduzida")
 
     def test_a_lista_de_cada_malha_sai_das_fotos_que_existem(self):
         """
@@ -9652,6 +9650,142 @@ class TestAcabamentoFotograficoLegivel(unittest.TestCase):
             fim = self.html.index("`;", ini)
             self.assertNotIn("`", self.html[ini:fim],
                              "crase dentro do GLSL de %s" % nome)
+
+
+class TestNitidezDaMaquete(unittest.TestCase):
+    """
+    As fotos nítidas são as que se VEEM, e o orçamento é em MB.
+
+    POR QUE ISTO EXISTE. Ao limitar a memória de vídeo, as fotos nítidas
+    passaram a ser as quatro (ou oito) MAIS PRÓXIMAS DA CÂMERA, e as outras
+    ficavam a um quarto da resolução. Dois erros dentro disso, e o dono viu
+    os dois como "borrões":
+
+    - "aparelho leve" era largura de janela < 820 px. Uma janela de
+      computador estreita virava celular, e só quatro das nove fotos de um
+      apartamento ficavam nítidas;
+    - cada pedaço de parede é pintado pelas fotos tiradas perto DELE, e a
+      parede do fundo, a cinco metros de quem olha, caía entre as reduzidas.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _trecho(self, cabeca):
+        corpo = self.html[self.html.index(cabeca):]
+        return corpo[:corpo.index("\n  }") + 4]
+
+    def _linha(self, nome):
+        return re.search(r"  const %s = [^\n]+" % nome, self.html).group(0)
+
+    def _rodar(self, programa, nome):
+        caminho = os.path.join(_TEMP, nome)
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(programa)
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        return json.loads(r.stdout.strip())
+
+    def _mb_no_desktop(self):
+        trecho = re.search(r"const MB_NITIDO =[^;]*;", self.html).group(0)
+        return max(float(q) for q in re.findall(r"\d+(?:\.\d+)?",
+                                                trecho.split("?")[-1]))
+
+    def test_o_orcamento_compra_o_degrau_mais_alto_que_couber(self):
+        """
+        400 MB compram os nove panoramas do apartamento inteiro em 4096; 200
+        compram quatro em 4096 e três em 2048; sem orçamento, ninguém cai
+        abaixo do piso. Contar fotos (4 ou 8) não distinguia os casos, e é a
+        diferença entre ver o apartamento nítido ou só o canto onde se está.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        casos = [[9, self._mb_no_desktop(), [0, 2048]],
+                 [9, 200, [0, 2048]],
+                 [9, 0, [0, 2048]],
+                 [3, 400, [2048]]]
+        d = self._rodar(
+            self._linha("LADO_REDUZIDO") + "\n" + self._linha("LADO_ORIGINAL")
+            + "\n" + self._trecho("  function mbDe(lado){") + "\n"
+            + self._trecho("  function resolucoes(quantas, extraMB, degraus){")
+            + "\nconsole.log(JSON.stringify(" + json.dumps(casos)
+            + ".map(c => resolucoes(c[0], c[1], c[2]))));\n", "nitidez1.mjs")
+        self.assertEqual(d[0], [0] * 9,
+                         "o apartamento inteiro não cabe nítido no desktop")
+        self.assertEqual(d[1], [0, 0, 0, 0, 2048, 2048, 2048, 1024, 1024])
+        self.assertEqual(d[2], [1024] * 9, "alguém caiu abaixo do piso")
+        self.assertEqual(d[3], [2048] * 3)
+
+    def test_a_fila_e_pelo_que_se_ve_e_nao_pelo_que_esta_perto(self):
+        """
+        Quatro fotos num corredor, câmera olhando para a ponta: a da ponta
+        (D) está a 6 m e por distância à câmera seria a ÚLTIMA. É a que pinta
+        a parede do fundo, então tem de entrar entre as primeiras. De costas
+        para ela, volta a ser a última.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        def foto(n, x, z):
+            return {"n": n, "pos": {"x": x, "y": 1.5, "z": z}}
+        lista = [foto("A", 0, 0), foto("B", 1, 0), foto("C", 0.5, 1),
+                 foto("D", 6, 0)]
+        d = self._rodar(
+            self._linha("ALCANCES_DA_VISTA").replace("const", "const", 1)
+            + "\n" + self._trecho(
+                "  function ordemPelaVista(lista, x, y, z, dx, dz){")
+            + "\nconst l = " + json.dumps(lista) + ";\n"
+            "const nomes = o => o.map(f => f.n);\n"
+            "console.log(JSON.stringify({"
+            "frente: nomes(ordemPelaVista(l, 0, 1.5, 0, 1, 0)),"
+            "costas: nomes(ordemPelaVista(l, 0, 1.5, 0, -1, 0))}));\n",
+            "nitidez2.mjs")
+        self.assertEqual(d["frente"], ["A", "B", "D", "C"],
+                         "a foto do fundo não entrou entre as primeiras")
+        self.assertEqual(d["costas"][-1], "D",
+                         "de costas para o fundo, a foto dele deveria ser a "
+                         "última")
+
+    def test_os_degraus_acompanham_o_tamanho_da_tela(self):
+        """
+        O palco mostra 42 graus de campo de visão: quanto mais estreito, mais
+        pixels por grau a imagem precisa. Um palco de 700 px pede ~17 px/grau
+        e o panorama de 4096 tem 11,4; em tela pequena o degrau de 4096 não
+        se paga, e o de 2048 basta.
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        casos = [[700, 1.0], [200, 1.0], [1400, 1.75]]
+        d = self._rodar(
+            "const innerWidth = 1200;\nlet renderizador, camera;\n"
+            + self._trecho("  function degrausDaTela(){") + "\n"
+            "console.log(JSON.stringify(" + json.dumps(casos) + ".map(c => {"
+            "renderizador = {domElement: {clientWidth: c[0]}};"
+            "camera = {fov: 42, aspect: c[1]};"
+            "return degrausDaTela(); })));\n", "nitidez3.mjs")
+        self.assertEqual(d, [[0, 2048], [2048], [0, 2048]])
+
+    def test_celular_e_aparelho_e_nao_largura_de_janela(self):
+        """
+        Largura de janela diz o tamanho da JANELA, não o da memória. Toque e
+        pouca memória declarada dizem o aparelho.
+        """
+        trecho = re.search(r"const APARELHO_LEVE =[^;]*;", self.html).group(0)
+        self.assertIn('"ontouchstart" in window', trecho)
+        self.assertIn("deviceMemory", trecho)
+        self.assertFalse("innerWidth" in trecho,
+                         "aparelho leve voltou a depender da largura da "
+                         "janela")
+
+    def test_a_pe_usa_a_fila_pela_vista_e_o_orcamento_em_mb(self):
+        corpo = self._trecho("  function cuidarDasFotos(agora){")
+        self.assertIn("ordemPelaVista(fotos", corpo)
+        self.assertIn("resolucoes(", corpo)
+        self.assertIn("pedirFoto(f, lados[k])", corpo)
 
 
 class TestMinimapaClicavel(unittest.TestCase):

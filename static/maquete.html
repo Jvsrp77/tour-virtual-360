@@ -1268,9 +1268,31 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // as fotos em resolucao reduzida, e a pe entram as vizinhas em resolucao
   // cheia. Os dois casos cabem no mesmo orcamento de memoria.
   const LADO_REDUZIDO = 1024;              // 1024 x 512 por panorama
-  const FOTOS_A_PE = (innerWidth < 820 || "ontouchstart" in window) ? 4 : 8;
-  const TETO_DE_FOTOS_DE_CIMA =
-    (innerWidth < 820 || "ontouchstart" in window) ? 60 : 200;
+  // O QUE E "APARELHO LEVE", E O QUE NAO E.
+  //
+  // Era a largura da janela (< 820 px), e isso errava num caso comum: uma
+  // janela de computador mais estreita que 820 px — metade da tela, com a
+  // lista do lado — virava "celular". A pagina trocava o orcamento para o de
+  // aparelho fraco e deixava so QUATRO das nove fotos de um apartamento
+  // nitidas; as outras cinco ficavam a um quarto da resolucao, e o visitante
+  // via a imagem borrada sem nada que explicasse por que.
+  //
+  // Largura de janela diz o tamanho da JANELA, nao o da memoria. Toque e
+  // pouca memoria declarada dizem o aparelho.
+  const APARELHO_LEVE = "ontouchstart" in window
+                        || (navigator.deviceMemory || 8) < 4;
+
+  // O ORCAMENTO E EM MB, NAO EM NUMERO DE FOTOS. E o que sobra ALEM do piso
+  // de 1024 px que todo panorama mantem: com ele se compra resolucao para
+  // quem vem primeiro na fila, do degrau mais alto que couber.
+  //
+  // 400 MB compra nove panoramas inteiros em 4096 — o apartamento todo —, e
+  // 200 compra quatro em 4096 mais tres em 2048. Contar fotos (4 ou 8) nao
+  // distinguia os dois casos, e e justamente a diferenca entre ver o
+  // apartamento nitido ou so o canto onde se esta.
+  const MB_NITIDO = APARELHO_LEVE ? 200 : 400;
+  const TETO_DE_FOTOS_DE_CIMA = APARELHO_LEVE ? 60 : 200;
+  const LADO_ORIGINAL = 4096;
 
   let TEX_VAZIA = null;
 
@@ -1403,7 +1425,75 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
   // distribuidas vestem a casa toda; as mesmas doze amontoadas vestem um
   // comodo.
   const _ondeEstou = new THREE.Vector3();
+  const _olhando = new THREE.Vector3();
   let _proximaConferida = 0, _modoAntes = null;
+
+  // Quanto um panorama de LADO pixels de largura custa na placa, em MB, com
+  // mipmap. 0 e o original.
+  function mbDe(lado){
+    const l = lado || LADO_ORIGINAL;
+    return l * (l / 2) * 4 * 1.333 / 1e6;
+  }
+
+  // Em que resolucao cada foto vai, da primeira da fila para a ultima.
+  //
+  // Todo panorama tem o piso (LADO_REDUZIDO), garantido. O orcamento extra
+  // sobe quem vem primeiro, do degrau mais alto que ainda couber — e quando
+  // acaba, o resto fica no piso. Nunca abaixo dele: foto sem textura e casa
+  // chapada.
+  function resolucoes(quantas, extraMB, degraus){
+    const piso = mbDe(LADO_REDUZIDO);
+    let sobra = extraMB;
+    const saida = [];
+    for (let i = 0; i < quantas; i++){
+      let escolhido = LADO_REDUZIDO;
+      for (const d of degraus){
+        const custo = mbDe(d) - piso;
+        if (custo <= sobra){ escolhido = d; sobra -= custo; break; }
+      }
+      saida.push(escolhido);
+    }
+    return saida;
+  }
+
+  // Quais degraus a TELA pede. O palco mostra 42 graus de campo de visao, e
+  // quanto mais estreito ele e, mais pixels por grau a imagem precisa ter: um
+  // palco de 700 px pede ~17 px/grau, e o panorama de 4096 so tem 11,4. Em
+  // tela pequena o degrau de 4096 nao se paga, e o de 2048 basta.
+  function degrausDaTela(){
+    const larg = renderizador.domElement.clientWidth || innerWidth;
+    const hfov = 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360)
+                               * camera.aspect);
+    const preciso = larg * (2 * Math.PI / hfov);     // pixels em 360 graus
+    return preciso > 2400 ? [0, 2048] : [2048];
+  }
+
+  // A FILA E PELO QUE SE VE, NAO PELO QUE ESTA PERTO.
+  //
+  // As fotos nitidas eram as mais proximas da CAMERA. Mas cada pedaco de
+  // parede e pintado pelas fotos tiradas perto DELE, e a parede do fundo da
+  // cozinha fica a cinco metros de quem olha: as fotos dela estavam longe da
+  // camera, caiam entre as reduzidas, e a parede saia borrada enquanto o
+  // balcao ao lado do visitante saia nitido.
+  //
+  // Procura-se quem esta perto de tres pontos a frente do olhar — aqui, a
+  // 2,5 m e a 5 m — e as listas se intercalam, para que cada distancia tenha
+  // direito a sua melhor foto antes de qualquer uma ter a segunda.
+  const ALCANCES_DA_VISTA = [0, 2.5, 5.0];
+
+  function ordemPelaVista(lista, x, y, z, dx, dz){
+    const listas = ALCANCES_DA_VISTA.map(a => {
+      const ax = x + dx * a, az = z + dz * a;
+      return lista.slice().sort((p, q) =>
+        ((p.pos.x - ax) ** 2 + (p.pos.y - y) ** 2 + (p.pos.z - az) ** 2)
+        - ((q.pos.x - ax) ** 2 + (q.pos.y - y) ** 2 + (q.pos.z - az) ** 2));
+    });
+    const visto = new Set(), saida = [];
+    for (let i = 0; i < lista.length; i++)
+      for (const l of listas)
+        if (!visto.has(l[i])){ visto.add(l[i]); saida.push(l[i]); }
+    return saida;
+  }
 
   function cuidarDasFotos(agora){
     if (!fotos.length || !vestidos.length) return;
@@ -1414,14 +1504,17 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
 
     const antes = fotos.map(f => !!f.tex).join("");
     if (emPessoa){
-      // A pe: as vizinhas em resolucao cheia, o resto reduzido, nada fora.
+      // A pe: nitido o que se ve, no degrau mais alto que o orcamento pagar.
       camera.getWorldPosition(_ondeEstou);
-      const ordem = fotos.slice().sort(
-        (a, b) => a.pos.distanceToSquared(_ondeEstou)
-                - b.pos.distanceToSquared(_ondeEstou));
+      camera.getWorldDirection(_olhando);
+      const tam = Math.hypot(_olhando.x, _olhando.z) || 1;
+      const ordem = ordemPelaVista(fotos, _ondeEstou.x, _ondeEstou.y,
+                                   _ondeEstou.z, _olhando.x / tam,
+                                   _olhando.z / tam);
+      const lados = resolucoes(Math.min(ordem.length, TETO_DE_FOTOS_DE_CIMA),
+                               MB_NITIDO, degrausDaTela());
       ordem.forEach((f, k) => {
-        if (k < FOTOS_A_PE) pedirFoto(f, 0);
-        else if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);
+        if (k < lados.length) pedirFoto(f, lados[k]);
         else soltarFoto(f);
       });
     } else {
@@ -1472,7 +1565,9 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
     malhasVestidas: vestidos.length,
     erros: fotos.filter(f => f.erro).map(f => f.erro).slice(0, 3),
     cheias: fotos.filter(f => f.tex && !f.lado).length,
-    reduzidas: fotos.filter(f => f.tex && f.lado).length,
+    medias: fotos.filter(f => f.tex && f.lado && f.lado !== LADO_REDUZIDO)
+                 .length,
+    reduzidas: fotos.filter(f => f.tex && f.lado === LADO_REDUZIDO).length,
     mbNaPlaca: Math.round(fotos.reduce((s, f) => s + (f.tex
       ? (f.lado ? f.lado * f.lado / 2 : 4096 * 2048) * 4 * 1.333 : 0), 0) / 1e6),
   });
