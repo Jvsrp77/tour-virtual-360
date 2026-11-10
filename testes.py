@@ -8792,6 +8792,8 @@ class TestMisturaDeFotos(unittest.TestCase):
         cozinha — defeito que a escolha por malha não tinha.
         """
         corpo = self._trecho("    float peso(vec3 o, float lig){")
+        self.assertIn("float frente = smoothstep(", corpo,
+                      "o peso perdeu o termo de orientacao")
         self.assertIn("dot(vNormalM, normalize(v))", corpo,
                       "o peso não olha mais para que lado a superfície aponta")
         self.assertIn("vNormalM = normalize(mat3(modelMatrix) * normal);",
@@ -9891,6 +9893,119 @@ class TestNitidezDaMaquete(unittest.TestCase):
         self.assertIn("ordemPelaVista(fotos", corpo)
         self.assertIn("resolucoes(", corpo)
         self.assertIn("pedirFoto(f, lados[k])", corpo)
+
+
+class TestEsticamentoDaFoto(unittest.TestCase):
+    """
+    A foto projetada na parede não pode aparecer esticada.
+
+    POR QUE ISTO EXISTE. O dono abriu a maquete a pé e escreveu: "as imagens
+    ficam retorcidas, distorcidas, na verdade". Na captura, faixas horizontais
+    esticadas na parede da direita, quase borrão de movimento.
+
+    Uma foto projetada numa superfície aparece esticada por 1/cos do ângulo
+    entre a normal e o raio que sai da foto: foto quase paralela à parede
+    estica a imagem ao longo dela. O peso antigo dava peso cheio a partir de
+    uns 20 graus de raspão (esticamento de 3x) e a distância decidia sozinha.
+    """
+
+    RAIO = 5.0
+
+    @classmethod
+    def setUpClass(cls):
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+        m = re.search(r"float frente = smoothstep\(([\d.]+), ([\d.]+), cosf\)"
+                      r"(?: \* cosf \* cosf)?;", cls.html)
+        cls.corte = (float(m.group(1)), float(m.group(2)))
+        cls.com_cos2 = "cosf * cosf" in m.group(0)
+
+    def _superficies(self, p, passo=0.5):
+        """Casca (parede) e piso: o que veste a foto. Com a normal de cada ponto."""
+        pts = []
+        for c in p["caixas"]:
+            if c[6] != "parede":
+                continue
+            x0, y0, z0, x1, y1, z1 = c[:6]
+            for y in np.arange(y0 + 0.2, y1, passo):
+                for x in np.arange(x0, x1 + 1e-6, passo):
+                    pts += [(x, y, z0, 0, 0, -1), (x, y, z1, 0, 0, 1)]
+                for z in np.arange(z0, z1 + 1e-6, passo):
+                    pts += [(x0, y, z, -1, 0, 0), (x1, y, z, 1, 0, 0)]
+        for z in p["zonas"]:
+            base = cena_apartamento.base_da_zona(z)
+            for x in np.arange(z[1], z[2], passo):
+                for w in np.arange(z[3], z[4], passo):
+                    pts.append((x, base, w, 0, 1, 0))
+        return np.array(pts)
+
+    def _esticado(self, a, b, com_cos2):
+        """% da casca com esticamento medio > 2x, nas seis fotos mais proximas."""
+        esticados = visiveis = 0
+        for nome in ("apto_compacto", "sobrado", "mansao"):
+            p = next(f() for f in plantas.TODAS if f()["pasta"] == nome)
+            fotos = np.array([(q[1], cena_apartamento.base_do_ponto(q)
+                               + cena_apartamento.OLHO, q[2])
+                              for q in p["pontos"]])
+            pts = self._superficies(p)
+            P, N = pts[:, :3], pts[:, 3:]
+            v = fotos[None, :, :] - P[:, None, :]
+            d = np.linalg.norm(v, axis=-1)
+            cos = (v * N[:, None, :]).sum(axis=-1) / np.maximum(d, 1e-6)
+            o = np.argsort(d, axis=1)[:, :6]
+            d6 = np.take_along_axis(d, o, axis=1)
+            c6 = np.take_along_axis(cos, o, axis=1)
+            perto = np.maximum(0.0, 1.0 / np.maximum(d6, 0.30)
+                               - 1.0 / self.RAIO) ** 6
+            t = np.clip((c6 - a) / (b - a), 0.0, 1.0)
+            w = t * t * (3.0 - 2.0 * t) * perto
+            if com_cos2:
+                w = w * np.maximum(c6, 0.0) ** 2
+            s = w.sum(axis=1)
+            ref = (np.clip(c6 / 0.35, 0, 1) ** 2 * (3 - 2 * np.clip(
+                c6 / 0.35, 0, 1)) * perto).sum(axis=1) > 0
+            est = (w / np.maximum(c6, 0.05)).sum(axis=1) / np.maximum(s, 1e-300)
+            ok = ref & (s > 0)
+            visiveis += int(ref.sum())
+            esticados += int((ok & (est > 2.0)).sum())
+        return 100.0 * esticados / max(visiveis, 1)
+
+    def test_o_peso_pune_o_angulo_raso(self):
+        """
+        Medido nas plantas (apartamento compacto, sobrado e mansão): o peso
+        antigo deixava ~20% da casca esticada mais de 2x; o novo, menos de 12%.
+        Lê o corte e o expoente do PRÓPRIO sombreador, para a conta daqui não
+        divergir da que roda no navegador.
+        """
+        antes = self._esticado(0.0, 0.35, False)
+        agora = self._esticado(self.corte[0], self.corte[1], self.com_cos2)
+        self.assertGreater(antes, 15.0,
+                           "o peso antigo deixou de esticar nas plantas; "
+                           "este teste perdeu o contraste que o justifica")
+        self.assertLess(agora, 12.0,
+                        "%.1f%% da casca esticada mais de 2x (era %.1f%%)"
+                        % (agora, antes))
+
+    def test_o_corte_nao_deixa_o_raspao_valer_peso_cheio(self):
+        """
+        smoothstep(0, 0,35) já dava peso cheio a 20 graus de raspão. O corte
+        tem de começar acima disso.
+        """
+        self.assertGreaterEqual(self.corte[0], 0.30,
+                                "o corte volta a aceitar foto de raspão")
+        self.assertTrue(self.com_cos2,
+                        "o cosseno ao quadrado saiu do peso: a distância "
+                        "volta a decidir sozinha")
+
+    def test_foto_atras_ou_de_raspao_nao_opina(self):
+        """Peso zero para cos <= corte: nem atrás da superfície, nem raspando."""
+        t = lambda c: float(np.clip((c - self.corte[0])
+                                    / (self.corte[1] - self.corte[0]), 0, 1))
+        self.assertEqual(t(-0.5), 0.0)
+        self.assertEqual(t(0.0), 0.0)
+        self.assertEqual(t(self.corte[0]), 0.0)
+        self.assertGreater(t(0.9), 0.9)
 
 
 class TestMinimapaClicavel(unittest.TestCase):

@@ -1407,6 +1407,20 @@ MUT = [
      'return [0, 2048];',
      'TestNitidezDaMaquete.test_os_degraus_acompanham_o_tamanho_da_tela'),
 
+    # ----------------------------- a foto nao pode aparecer esticada
+
+    # sem o corte e o cosseno, a distancia decide sozinha e a foto de raspao
+    # ganha da de frente so por estar mais perto
+    ('o angulo raso volta a valer peso cheio', 'static/maquete.html',
+     'float frente = smoothstep(0.35, 0.8, cosf) * cosf * cosf;',
+     'float frente = smoothstep(0.0, 0.35, cosf);',
+     'TestEsticamentoDaFoto.test_o_peso_pune_o_angulo_raso'),
+
+    ('o cosseno sai do peso por angulo', 'static/maquete.html',
+     'float frente = smoothstep(0.35, 0.8, cosf) * cosf * cosf;',
+     'float frente = smoothstep(0.35, 0.8, cosf);',
+     'TestEsticamentoDaFoto.test_o_corte_nao_deixa_o_raspao_valer_peso_cheio'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem
@@ -1551,7 +1565,7 @@ MUT = [
      'TestMisturaDeFotos.test_o_peso_zera_no_raio_e_nao_so_encolhe'),
 
     ('foto atras da parede volta a opinar', 'static/maquete.html',
-     'float frente = smoothstep(0.0, 0.35, dot(vNormalM, normalize(v)));',
+     'float frente = smoothstep(0.35, 0.8, cosf) * cosf * cosf;',
      'float frente = 1.0;',
      'TestMisturaDeFotos.test_foto_atras_da_superficie_nao_opina'),
 

@@ -1208,7 +1208,18 @@ const URL_TOUR_PG = window.__VOLTAR__  || ('/tour/' + IMOVEL);
       float d = max(length(v), 0.30);
       float perto = max(0.0, 1.0 / d - 1.0 / raio);
       float p3 = perto * perto * perto;
-      float frente = smoothstep(0.0, 0.35, dot(vNormalM, normalize(v)));
+      float cosf = dot(vNormalM, normalize(v));
+      // O ANGULO DA FOTO CONTA, E CONTAVA POUCO. Uma foto projetada numa
+      // superficie aparece esticada por 1 / cos do angulo entre a normal e o
+      // raio que sai da foto: foto quase paralela a parede estica a imagem ao
+      // longo dela, e e a faixa horizontal que se ve na tela. O peso antigo,
+      // smoothstep de 0 a 0,35, dava peso cheio a partir de uns 20 graus de
+      // raspao — esticamento de 3x — e a distancia decidia sozinha. Medido
+      // nas plantas: 20,4% da casca saia esticada mais de 2x. Com o corte em
+      // 0,35 a 0,8 e o cosseno ao quadrado, 8,2%, sem aumentar a mistura
+      // entre fotos. A foto de frente e mais longe passa a ganhar da de
+      // raspao e mais perto.
+      float frente = smoothstep(0.35, 0.8, cosf) * cosf * cosf;
       return lig * frente * p3 * p3;
     }
 
