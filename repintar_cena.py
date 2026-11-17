@@ -87,11 +87,24 @@ def main():
                    help="quantas das 8 direcoes repintar (0 = todas). Comece "
                         "com 1: uma imagem basta para ver se o visual presta, "
                         "e a costura so importa depois que ele prestar")
+    p.add_argument("--original-da-repintura", dest="da_repintura",
+                   action="store_true",
+                   help="ler o panorama ORIGINAL de repintura/<pasta>_<ponto>"
+                        "_antes.jpg, e nao de fotos_<pasta>/ponto_N.jpg. Serve "
+                        "para recompor (com --reaproveitar, de graca) uma cena "
+                        "cujo ponto_N.jpg ja foi trocado pelo resultado da "
+                        "repintura: sem isto o resultado viraria o original")
     p.set_defaults(anel=True)
     a = p.parse_args()
 
     base = os.path.join(AQUI, "fotos_" + a.pasta)
-    equi = ler_imagem(os.path.join(base, "ponto_%d.jpg" % a.ponto))
+    # O original sai de ponto_N.jpg — ate esse arquivo ser trocado pelo
+    # resultado da repintura. Dai em diante o original verdadeiro e o _antes.
+    origem = (os.path.join(AQUI, "repintura",
+                           "%s_%d_antes.jpg" % (a.pasta, a.ponto))
+              if a.da_repintura
+              else os.path.join(base, "ponto_%d.jpg" % a.ponto))
+    equi = ler_imagem(origem)
     if equi is None:
         raise SystemExit("nao achei o panorama do ponto %d" % a.ponto)
     disp = np.load(os.path.join(base, "dist_%d.npy" % a.ponto))
@@ -181,7 +194,11 @@ def main():
                                     lado=a.lado)
     novo = np.clip(novo, 0, 255).astype(np.uint8)
     if vazio.any():
-        novo = repintar.tapar_polos(novo, vazio)
+        # a cor da calota vem do anel; o desenho do piso e do forro, do proprio
+        # anel REPINTADO, espelhado na borda (o render original pode ter outro
+        # material: porcelanato que a repintura virou madeira)
+        novo = repintar.tapar_polos(
+            novo, vazio, detalhe=repintar.espelhar_calota(novo, vazio))
         print("calotas preenchidas pela cor do anel: %.1f%% do panorama"
               % (100.0 * vazio.mean()))
 
@@ -208,7 +225,10 @@ def main():
 
     antes = os.path.join(saida, "%s_%d_antes.jpg" % (a.pasta, a.ponto))
     depois = os.path.join(saida, "%s_%d_depois.jpg" % (a.pasta, a.ponto))
-    gravar_imagem(antes, equi)
+    # com o original vindo do _antes, regravar o _antes o recomprimiria
+    # em JPEG a cada recomposicao
+    if not a.da_repintura:
+        gravar_imagem(antes, equi)
     gravar_imagem(depois, novo)
     print("\ngravados:\n  %s\n  %s" % (antes, depois))
     print("  e, por vista: %s_%d_vista_N (antes), _guia_N, _nova_N (depois)"

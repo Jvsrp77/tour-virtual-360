@@ -1696,6 +1696,49 @@ MUT = [
      'if (performance.now() - comeco > 1200) break;',
      'TestOclusaoDaFoto.test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos'),
 
+    # ----------------------------- a calota de baixo: sem anel, com desenho
+
+    ('a calota volta a ser misturada com o preto', 'repintar.py',
+     '        pedaco = np.where(furo[:, :, None], tapa, pedaco)\n',
+     '',
+     'TestCalotaComTextura.test_a_calota_nao_escurece_contra_a_borda_do_furo'),
+
+    ('o desenho do original nao chega a calota', 'repintar.py',
+     '            tapa = tapa + alta[faixa_alvo]',
+     '            tapa = tapa',
+     'TestCalotaComTextura.test_o_detalhe_do_original_da_desenho_a_calota_sem_mudar_o_tom'),
+
+    ('o detalhe leva o tom do original inteiro', 'repintar.py',
+     '        alta = base - cv2.GaussianBlur(base, (0, 0),',
+     '        alta = base - 0 * cv2.GaussianBlur(base, (0, 0),',
+     'TestCalotaComTextura.test_o_detalhe_do_original_da_desenho_a_calota_sem_mudar_o_tom'),
+
+    ('a repintura nao passa o piso espelhado como detalhe', 'repintar_cena.py',
+     'novo, vazio, detalhe=repintar.espelhar_calota(novo, vazio))',
+     'novo, vazio)',
+     'TestCalotaComTextura.test_a_repintura_empresta_o_desenho_do_piso_repintado'),
+
+    ('recompor regrava e recomprime o _antes', 'repintar_cena.py',
+     '    if not a.da_repintura:\n        gravar_imagem(antes, equi)',
+     '    if True:\n        gravar_imagem(antes, equi)',
+     'TestCalotaComTextura.test_a_repintura_empresta_o_desenho_do_piso_repintado'),
+
+    ('o espelho reflete para o lado errado', 'repintar.py',
+     '        origem = np.clip(2 * borda - linhas, 0, n - 1)',
+     '        origem = np.clip(linhas, 0, n - 1)',
+     'TestCalotaComTextura.test_o_espelho_enche_o_furo_com_o_reflexo_da_borda'),
+
+    ('o espelho usa a mesma borda para todas as colunas', 'repintar.py',
+     '        borda = fonte[colunas]\n',
+     '        borda = np.full_like(colunas, int(np.median(fonte)))\n',
+     'TestCalotaComTextura.test_o_espelho_enche_o_furo_com_o_reflexo_da_borda'),
+
+    ('o espelho mexe no que esta fora do furo', 'repintar.py',
+     '        saida[base + linhas, colunas] = equi[base + origem, colunas]',
+     '        saida[base + linhas, colunas] = equi[base + origem, colunas]\n'
+     '        saida[:, :1] = 0',
+     'TestCalotaComTextura.test_o_espelho_enche_o_furo_com_o_reflexo_da_borda'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem

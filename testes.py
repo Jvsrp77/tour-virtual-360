@@ -9306,6 +9306,148 @@ class TestCalotaDoPanorama(unittest.TestCase):
                            "girando no visor" % alcance)
 
 
+class TestCalotaComTextura(unittest.TestCase):
+    """
+    A calota de baixo não pode ser um anel escuro nem um borrão liso.
+
+    POR QUE ISTO EXISTE. Na maquete, o piso logo abaixo de cada foto saía como
+    um HEXÁGONO escuro e borrado. Dois defeitos, medidos num panorama do
+    acervo:
+
+    1. Dentro do furo o `repintar` deixa ZERO, e a rampa de peso só chega a 1 a
+       uns 14 graus do polo, enquanto o furo começa a 20,7: no meio a calota era
+       misturada com PRETO. Luminância logo fora do furo, 117,6; logo dentro,
+       rente à borda, 67,8 (42% mais escuro); no fundo do furo, 116,5. O
+       hexágono era um anel, com o miolo no tom certo.
+    2. Tirado o anel, sobrava um borrão liso em estrela: a calota é uma cor só
+       convergindo para o polo, sem nenhum desenho de piso.
+
+    Os testes anteriores usavam uma cena sintética cujo furo NÃO era preto, e
+    por isso nunca viram o primeiro.
+    """
+
+    H, W = 256, 512
+
+    def _cena(self, tom=150):
+        equi = np.full((self.H, self.W, 3), tom, np.uint8)
+        vazio = np.zeros((self.H, self.W), bool)
+        vazio[:int(self.H * 0.14)] = True
+        vazio[int(self.H * 0.86):] = True
+        equi[vazio] = 0                      # como o repintar entrega o furo
+        return equi, vazio
+
+    def _listras(self, tom=150, amp=30, periodo=8):
+        y = np.arange(self.H)
+        faixa = tom + amp * np.sin(2 * np.pi * y / periodo)
+        return np.repeat(faixa[:, None, None], self.W, axis=1).repeat(
+            3, axis=2).clip(0, 255).astype(np.uint8)
+
+    def test_a_calota_nao_escurece_contra_a_borda_do_furo(self):
+        """
+        Numa cena de cor uniforme (150), as linhas logo DENTRO do furo, rente à
+        borda, têm de ficar no tom do entorno. Com a mistura com o preto elas
+        saíam em torno de 70.
+        """
+        equi, vazio = self._cena()
+        saida = repintar.tapar_polos(equi, vazio).astype(np.float32)
+        h = self.H
+        embaixo = saida[int(h * 0.86):int(h * 0.86) + 10].mean()
+        em_cima = saida[int(h * 0.14) - 10:int(h * 0.14)].mean()
+        self.assertGreater(embaixo, 140.0,
+                           "rente à borda de baixo a calota tem %.0f, contra "
+                           "150 do entorno: voltou o anel escuro" % embaixo)
+        self.assertGreater(em_cima, 140.0,
+                           "rente à borda de cima a calota tem %.0f, contra "
+                           "150 do entorno" % em_cima)
+
+    def test_o_detalhe_do_original_da_desenho_a_calota_sem_mudar_o_tom(self):
+        """
+        Com o original listrado, a calota ganha as listras (antes: liso); o
+        tom médio continua o do anel; e longe do furo nada muda.
+        """
+        equi, vazio = self._cena()
+        original = self._listras()
+        sem = repintar.tapar_polos(equi, vazio).astype(np.float32)
+        com = repintar.tapar_polos(equi, vazio, detalhe=original).astype(np.float32)
+        h = self.H
+        # 24 linhas = 3 periodos exatos das listras (H = 256): numa faixa de
+        # periodo quebrado a media das listras nao se anula e o tom "muda"
+        miolo = slice(230, 254)
+
+        def desenho(x):
+            return float(np.abs(np.diff(x[miolo, :, 0], axis=0)).mean())
+
+        self.assertLess(desenho(sem), 1.5, "a calota sem detalhe já tem desenho")
+        self.assertGreater(desenho(com), 10.0,
+                           "o desenho do original não chegou à calota")
+        self.assertAlmostEqual(float(com[miolo].mean()), float(sem[miolo].mean()),
+                               delta=2.5,
+                               msg="o detalhe mudou o tom da calota")
+        longe = slice(int(h * 0.30), int(h * 0.70))
+        self.assertEqual(float(np.abs(com[longe] - sem[longe]).max()), 0.0,
+                         "o detalhe vazou para fora da calota")
+
+    def test_o_espelho_enche_o_furo_com_o_reflexo_da_borda(self):
+        """
+        Cada coluna reflete o que está do outro lado da borda do furo: a linha
+        f+k recebe a linha f-k. O que está fora do furo não muda, e a borda é
+        serrilhada de propósito (cada coluna tem a sua).
+        """
+        h, w = 64, 16
+        equi = np.zeros((h, w, 3), np.uint8)
+        for y in range(h):
+            equi[y, :, 0] = y * 4                   # a linha diz quem ela é
+        vazio = np.zeros((h, w), bool)
+        vazio[44:] = True                           # furo embaixo; borda em 43
+        vazio[44:48, 3] = False                     # coluna 3: o furo só começa na 48
+        saida = repintar.espelhar_calota(equi, vazio)
+        # coluna 0: a última linha coberta é a 43; a 44 reflete a 42, a 45 a 41
+        self.assertEqual(int(saida[44, 0, 0]), int(equi[42, 0, 0]))
+        self.assertEqual(int(saida[45, 0, 0]), int(equi[41, 0, 0]))
+        self.assertEqual(int(saida[46, 0, 0]), int(equi[40, 0, 0]))
+        # coluna 3: a borda é a 47, então a 48 reflete a 46
+        self.assertEqual(int(saida[48, 3, 0]), int(equi[46, 3, 0]))
+        # fora do furo nada muda
+        fora = ~vazio
+        self.assertTrue(np.array_equal(saida[fora], equi[fora]))
+
+    def test_o_espelho_nao_quebra_sem_borda_nem_sem_furo(self):
+        """Sem furo devolve igual; coluna inteira vazia fica como estava."""
+        h, w = 32, 8
+        equi = np.random.RandomState(1).randint(0, 255, (h, w, 3), np.uint8)
+        sem = repintar.espelhar_calota(equi, np.zeros((h, w), bool))
+        self.assertTrue(np.array_equal(sem, equi))
+        vazio = np.zeros((h, w), bool)
+        vazio[16:, :] = True
+        vazio[:, 2] = True                          # coluna 2 sem nenhum coberto
+        saida = repintar.espelhar_calota(equi, vazio)
+        self.assertTrue(np.array_equal(saida[:, 2], equi[:, 2]))
+
+    def test_detalhe_de_outro_tamanho_e_recusado(self):
+        equi, vazio = self._cena()
+        with self.assertRaises(ValueError):
+            repintar.tapar_polos(equi, vazio, detalhe=equi[:100])
+
+    def test_a_repintura_empresta_o_desenho_do_piso_repintado(self):
+        """
+        O repintar_cena passa o piso repintado, espelhado, como detalhe — e
+        não o render original, que pode ter outro material (porcelanato que
+        a repintura virou madeira, e a calota saiu quadriculada) —, e sabe ler
+        o original da repintura guardada sem regravá-lo.
+        """
+        with io.open("repintar_cena.py", encoding="utf-8") as f:
+            fonte = f.read()
+        self.assertIn("novo, vazio, detalhe=repintar.espelhar_calota(novo, vazio))", fonte,
+                      "a calota não recebe o desenho do piso repintado")
+        self.assertIn('p.add_argument("--original-da-repintura"', fonte)
+        self.assertIn('"%s_%d_antes.jpg" % (a.pasta, a.ponto))\n'
+                      '              if a.da_repintura', fonte,
+                      "a opção não lê o _antes da repintura")
+        self.assertIn("    if not a.da_repintura:\n"
+                      "        gravar_imagem(antes, equi)", fonte,
+                      "recompor regravaria (e recomprimiria) o _antes")
+
+
 class TestCoerenciaEntreCenas(unittest.TestCase):
     """
     Uma cena repintada, a casa inteira coerente.

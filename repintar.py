@@ -211,7 +211,49 @@ def direcoes_do_anel():
     return [(yaw, 0.0) for yaw in (0.0, 60.0, 120.0, 180.0, 240.0, 300.0)]
 
 
-def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05):
+def espelhar_calota(equi, vazio):
+    """
+    O panorama com o furo dos polos preenchido pelo REFLEXO do que esta do outro
+    lado da borda, coluna a coluna. Serve de `detalhe` para tapar_polos().
+
+    POR QUE O PROPRIO PISO REPINTADO, e nao o render original. A primeira
+    tentativa emprestava o desenho do original, e funcionou na sala (tabuas nos
+    dois). Na cozinha o render tem PORCELANATO e a repintura o transformou em
+    madeira: a calota saiu com uma grade de ladrilhos no meio de um piso de
+    tabua. O desenho tem de combinar com o entorno REPINTADO, e so o proprio
+    entorno sabe qual material ele virou.
+
+    O reflexo mantem o desenho continuo na borda e cada coluna continua sendo
+    uma direcao: o que era radial segue radial. No polo, onde todas as colunas
+    se encontram, sobra um vinco pequeno — e ali nao ha o que fazer, porque nao
+    ha informacao.
+    """
+    altura = equi.shape[0]
+    saida = equi.copy()
+    meio = altura // 2
+    for alto in (True, False):
+        furo = vazio[:meio] if alto else vazio[meio:]
+        if not furo.any():
+            continue
+        n = furo.shape[0]
+        ordem = np.arange(n)
+        if alto:
+            fonte = np.where(~furo, ordem[:, None], n * 2).min(axis=0)
+        else:
+            fonte = np.where(~furo, ordem[:, None], -1).max(axis=0)
+        linhas, colunas = np.nonzero(furo)
+        borda = fonte[colunas]
+        # coluna sem nenhum pixel coberto nao tem de onde espelhar
+        bom = (borda >= 0) & (borda < n)
+        linhas, colunas, borda = linhas[bom], colunas[bom], borda[bom]
+        origem = np.clip(2 * borda - linhas, 0, n - 1)
+        base = 0 if alto else meio
+        saida[base + linhas, colunas] = equi[base + origem, colunas]
+    return saida
+
+
+def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05, detalhe=None,
+                sigma_detalhe=0.01):
     """
     Preenche o que ficou sem cobertura no alto e embaixo, a partir do anel.
 
@@ -222,11 +264,26 @@ def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05):
     A juncao entra esfumada: tapar com cor chapada deixa uma linha horizontal
     atravessando o panorama, e no visor 360 essa linha vira um anel visivel
     girando com a cabeca.
+
+    `detalhe`, se vier, e uma imagem do tamanho do panorama da qual se tira so a
+    alta frequencia — as tabuas do piso, a emenda do forro — e que se soma a cor
+    da calota. A cor continua sendo a do anel repintado, que e a que combina com
+    o entorno; o detalhe empresta o DESENHO. O que serve de detalhe esta em
+    espelhar_calota(). Sem isso a calota de baixo era um borrao liso em estrela,
+    e na maquete o piso embaixo de cada foto saia como um hexagono escuro: o
+    contorno vem das seis vistas quadradas.
     """
     altura, largura = equi.shape[:2]
     saida = equi.astype(np.float32).copy()
     meio = altura // 2
     h = max(2, int(altura * faixa))
+    alta = None
+    if detalhe is not None:
+        if detalhe.shape[:2] != equi.shape[:2]:
+            raise ValueError("o detalhe tem de ter o tamanho do panorama")
+        base = detalhe.astype(np.float32)
+        alta = base - cv2.GaussianBlur(base, (0, 0),
+                                       max(1.0, altura * sigma_detalhe))
 
     # O ESFUMADO SEGUE A MASCARA, e nao a linha. A fronteira da cobertura nao
     # e horizontal: as vistas sao quadradas e as QUINAS delas alcancam mais
@@ -321,6 +378,19 @@ def tapar_polos(equi, vazio, faixa=0.06, esfumado=0.05):
         # ele que esconde o serrilhado —, mas remapeado ele comeca em zero na
         # fronteira e sobe ja dentro do buraco, em vez de meio para cada lado.
         peso = np.clip((peso - 0.25) / 0.55, 0.0, 1.0)
+        if alta is not None:
+            # o desenho do original entra na MESMA proporcao em que a calota
+            # substitui o panorama: onde o anel manda, nao ha o que somar
+            tapa = tapa + alta[faixa_alvo]
+        # DENTRO DO FURO A BASE DA MISTURA E A PROPRIA CALOTA, nao o preto.
+        #
+        # O repintar deixa o furo em ZERO, e a rampa de peso so chega a 1 a uns
+        # 14 graus do polo, enquanto o furo comeca a 20,7. Entre os dois a
+        # calota era misturada com PRETO: MEDIDO num panorama do acervo, a
+        # luminancia logo fora do furo e 117,6, logo dentro, rente a borda,
+        # 67,8 (42% mais escuro), e no fundo do furo volta a 116,5. Era isso o
+        # "hexagono" escuro no piso: um anel, com o miolo no tom certo.
+        pedaco = np.where(furo[:, :, None], tapa, pedaco)
         saida[faixa_alvo] = pedaco * (1.0 - peso) + tapa * peso
     return np.clip(saida, 0, 255).astype(np.uint8)
 
