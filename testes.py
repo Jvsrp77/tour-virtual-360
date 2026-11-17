@@ -10572,6 +10572,178 @@ console.log(JSON.stringify({
                       celular, "o celular não encolhe/sobe a mini-planta")
 
 
+class TestOclusaoDaFoto(unittest.TestCase):
+    """
+    A foto não mostra o móvel colado na parede e no chão.
+
+    POR QUE ISTO EXISTE. A foto é tirada com o móvel na frente da parede, e
+    projetada na parede leva o móvel junto: o sofá aparece pintado no piso e na
+    parede atrás dele, e o dono viu isso como "imagens retorcidas". Medido nas
+    plantas, de um sexto a um terço da casca levava a foto de um objeto que não
+    está ali. A planta conhece cada caixa em metros, então a pergunta "a foto vê
+    este pedaço ou vê algo na frente dele?" tem resposta exata.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _func(self, nome):
+        achou = re.search(r"\n  function " + nome + r"\(.*?\n  \}\n",
+                          self.html, re.S)
+        self.assertIsNotNone(achou, "a função %s sumiu da maquete" % nome)
+        return achou.group(0)
+
+    def _constante(self, nome):
+        achou = re.search(r"const " + nome + r" = ([^;]+);", self.html)
+        self.assertIsNotNone(achou, "a constante %s sumiu" % nome)
+        return achou.group(1)
+
+    def _node(self, nomes, corpo):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        consts = ("const MASCARA_ALTURA_MINIMA = %s;\n"
+                  "const NAO_TAPAM = %s;\n" % (
+                      self._constante("MASCARA_ALTURA_MINIMA"),
+                      self._constante("NAO_TAPAM")))
+        caminho = os.path.join(_TEMP, "oclusao.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(consts + "\n".join(self._func(n) for n in nomes)
+                    + "\n" + corpo + "\n")
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:800])
+        return json.loads(r.stdout.strip())
+
+    def test_o_raio_acha_o_primeiro_obstaculo_e_o_resto_e_nada(self):
+        """
+        Um sofá a 2 m, à frente: a direção que o atinge guarda a distância até
+        ele, codificada em 255 passos de 6 m; as outras direções, 255. Uma caixa
+        além do alcance nem entra na conta.
+        """
+        L, A, alcance = 256, 128, 6.0
+        d = self._node(["distanciaAteCaixa", "mascaraDeOclusao"], """
+const pos = {x: 0, y: 1.5, z: 0};
+const sofa = {x0: -0.5, x1: 0.5, y0: 0, y1: 1.0, z0: 2.0, z1: 3.0};
+const longe = {x0: -0.5, x1: 0.5, y0: 0, y1: 3.0, z0: 20.0, z1: 21.0};
+const m = mascaraDeOclusao(pos, [sofa, longe], %d, %d, %s);
+const so = mascaraDeOclusao(pos, [longe], %d, %d, %s);
+const nada = Array.from(so).every(b => b === 255);
+const dentro = {x0: -1, x1: 1, y0: 0, y1: 3, z0: -1, z1: 1};   // a origem esta nela
+const sd = mascaraDeOclusao(pos, [dentro], %d, %d, %s);
+const dentroNaoTapa = Array.from(sd).every(b => b === 255);
+console.log(JSON.stringify({
+  bateNoSofa: m[78 * %d + 128],        // lon ~ 0, 20 graus abaixo do horizonte
+  acimaDoSofa: m[10 * %d + 128],       // olhando para cima
+  paraTras: m[78 * %d + 0],            // de costas para o sofa
+  nada: nada,
+  dentroNaoTapa: dentroNaoTapa,
+  contaMuitas: Array.from(m).filter(b => b < 255).length,
+}));""" % (L, A, alcance, L, A, alcance, L, A, alcance, L, L, L))
+        lon = ((128 + 0.5) / L * 2 - 1) * math.pi
+        lat = (0.5 - (78 + 0.5) / A) * math.pi
+        dz = math.cos(lat) * math.cos(lon)
+        esperado = round((2.0 / dz) / alcance * 255)
+        self.assertEqual(d["bateNoSofa"], esperado,
+                         "a distância até o sofá saiu errada na máscara")
+        self.assertEqual(d["acimaDoSofa"], 255)
+        self.assertEqual(d["paraTras"], 255)
+        self.assertTrue(d["nada"], "uma caixa além do alcance tapou a vista")
+        self.assertTrue(d["dentroNaoTapa"],
+                        "uma caixa que contém a origem tapou a vista inteira")
+        self.assertGreater(d["contaMuitas"], 100,
+                           "o sofá não tapou direção nenhuma")
+
+    def test_so_tapa_a_vista_o_que_e_parede_ou_movel_de_verdade(self):
+        """
+        Tapete e laje não tapam; vidro, cortina e quadro não tapam; parede
+        sempre tapa, e um móvel de 55 cm também.
+        """
+        d = self._node(["tapaAVista"], """
+const c = (m, h) => ({m: m, p: [0, 0, 0, 1, h, 1]});
+console.log(JSON.stringify({
+  parede: tapaAVista(c('parede', 2.7)), sofa: tapaAVista(c('estofado', 0.74)),
+  louca: tapaAVista(c('louca', 0.55)),
+  tapete: tapaAVista(c('tapete', 0.01)), laje: tapaAVista(c('madeira', 0.13)),
+  vidro: tapaAVista(c('vidro', 1.85)), cortina: tapaAVista(c('cortina', 2.5)),
+  quadro: tapaAVista(c('quadro', 0.8)),
+}));""")
+        for nome in ("parede", "sofa", "louca"):
+            self.assertTrue(d[nome], "%s deveria tapar a vista" % nome)
+        for nome in ("tapete", "laje", "vidro", "cortina", "quadro"):
+            self.assertFalse(d[nome], "%s não deveria tapar a vista" % nome)
+
+    def test_cada_foto_tem_o_seu_ladrilho_no_atlas(self):
+        """A foto 17, com 16 colunas, mora na coluna 1 da linha 1."""
+        d = self._node(["ladrilhoDoIndice"], """
+console.log(JSON.stringify({
+  zero: ladrilhoDoIndice(0, 16, 256, 128, 4096, 1152),
+  dezessete: ladrilhoDoIndice(17, 16, 256, 128, 4096, 1152),
+}));""")
+        self.assertEqual(d["zero"], [0, 0])
+        self.assertAlmostEqual(d["dezessete"][0], 256 / 4096.0, places=9)
+        self.assertAlmostEqual(d["dezessete"][1], 128 / 1152.0, places=9)
+
+    def test_a_tolerancia_acompanha_a_resolucao_da_mascara(self):
+        """
+        O 0,0368 do sombreador é uma vez e meia o ângulo de um texel
+        (2 pi / L). Mudar L sem mudar a tolerância faz o sombreador acusar
+        oclusão onde não há, ou deixar passar onde há.
+        """
+        L = int(re.search(r"const MASCARA_L = (\d+)", self.html).group(1))
+        coef = float(re.search(r"float tol = 0\.10 \+ ([\d.]+) \* d", self.html)
+                     .group(1))
+        self.assertAlmostEqual(coef, 1.5 * 2 * math.pi / L, delta=0.03 * coef,
+                               msg="a tolerância não bate com a resolução")
+        alcance = float(self._constante("MASCARA_ALCANCE"))
+        raio = float(re.search(r"const RAIO_DA_MISTURA = ([\d.]+)",
+                               self.html).group(1))
+        self.assertGreaterEqual(alcance, raio + 0.5,
+                                "a máscara não alcança todo o raio da mistura")
+
+    def test_o_sombreador_consulta_a_mascara_e_cabe_nas_unidades_da_placa(self):
+        """
+        O peso de cada foto é multiplicado pela visibilidade; o atlas nasce em
+        255 ("nada tapa") com vizinho mais próximo; seis fotos mais o atlas
+        cabem nas oito unidades que qualquer placa garante.
+        """
+        self.assertIn('${_slots(i => "uniform vec2 mask" + i + ";")}', self.html)
+        self.assertIn("uniform sampler2D atlas;", self.html)
+        self.assertIn('"if (w" + i + " > 0.0) w" + i + " *= enxerga(origem" + i',
+                      self.html, "a visibilidade não multiplica o peso")
+        self.assertIn("texture2D(atlas, mk + uv * atlasEsc).r", self.html)
+        self.assertIn("return smoothstep(d - 2.0 * tol, d - tol, mapa);",
+                      self.html)
+        self.assertIn("if (mk.x < 0.0) return 1.0;", self.html,
+                      "foto sem ladrilho tem de valer como sempre valeu")
+        corpo = self._func("criarAtlas")
+        self.assertIn(".fill(255)", corpo, "o atlas não nasce em 'nada tapa'")
+        self.assertIn("tex.minFilter = tex.magFilter = THREE.NearestFilter;",
+                      corpo, "interpolar inventa obstáculos")
+        quantas = int(re.search(r"FOTOS_NA_MISTURA = (\d+)", self.html).group(1))
+        self.assertLessEqual(quantas + 1, 8)
+
+    def test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos(self):
+        """Ligação: ladrilho por foto nas duas pontas, atlas e cálculo no tick."""
+        self.assertIn('u["mask" + i] = {value: ladrilhoDa(f)};', self.html)
+        self.assertIn('u["mask" + i].value.copy(ladrilhoDa(f));', self.html,
+                      "a troca de fotos de uma malha esquece a máscara")
+        self.assertIn("atlas: {value: atlasTextura()},", self.html)
+        self.assertIn("atlas = fotos.length ? criarAtlas(fotos.length) : null;",
+                      self.html)
+        self.assertIn("      prepararMascaras(ordem);", self.html,
+                      "a pé, as máscaras não são calculadas")
+        self.assertIn("      prepararMascaras(null);", self.html,
+                      "de cima, as máscaras não são calculadas")
+        corpo = self._func("prepararMascaras")
+        # com o parêntese: "> 12" sozinho é substring de "> 1200"
+        self.assertIn("performance.now() - comeco > 12) break;", corpo,
+                      "sem teto de tempo, o quadro engasga")
+
+
 class TestMinimapaClicavel(unittest.TestCase):
     """
     Tocar no minimapa leva até o cômodo.

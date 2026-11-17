@@ -1179,6 +1179,44 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   const FOTOS_NA_MISTURA = 6;
   const RAIO_DA_MISTURA = 5.0;
 
+  // ----------------------------------------- A FOTO QUE MOSTRA O MOVEL
+  //
+  // A foto e tirada com o movel NA FRENTE da parede, e projetada na parede ela
+  // leva o movel junto: o sofa aparece pintado no piso e na parede atras dele,
+  // e o dono viu isso como imagem torta ("as imagens ficam retorcidas").
+  //
+  // MEDIDO nas plantas de demonstracao, para cada ponto de piso e de parede
+  // dentro de 5 m de uma foto, o segmento foto -> ponto cortado por um movel
+  // ou por outra parede:
+  //
+  //     planta                  foto mais proxima ve TAPADO   so cai na cor lisa
+  //                             piso      parede              piso     parede
+  //     apartamento compacto    32,8%     27,4%               17,9%     1,6%
+  //     sobrado                 19,2%     27,2%                8,8%     3,5%
+  //     casa pavilhao           14,3%     16,3%                8,9%     0,4%
+  //
+  // Ou seja, de um sexto a um terco da casca levava a foto de um objeto que
+  // nao esta ali. Quase todo o que cai na cor lisa e o chao DEBAIXO do movel,
+  // que o movel solido ja cobre.
+  //
+  // A maquete so existe para imovel gerado, e a planta conhece cada caixa em
+  // metros. Entao a pergunta "a foto ve este pedaco, ou ve algo na frente
+  // dele?" tem resposta EXATA, sem estimar profundidade: cada foto ganha uma
+  // mascara com a distancia ate o primeiro obstaculo em cada direcao (256 x
+  // 128, 1,4 grau), e o sombreador pergunta se o obstaculo esta mais perto do
+  // que o pedaco. So importa ate o raio da mistura; alem de MASCARA_ALCANCE o
+  // valor e "nada tapa". As mascaras vivem num atlas so, de um canal: uma
+  // textura a mais, nao seis, porque seis fotos mais uma cabem nas oito
+  // unidades que qualquer placa garante.
+  const MASCARA_L = 256, MASCARA_A = 128;
+  const MASCARA_ALCANCE = 6.0;
+  const MASCARA_COLUNAS = 16, MASCARA_LINHAS_MAX = 16;
+  // Tapete (1 cm), laje (13 cm) e tampo fino nao tapam a vista de ninguem; vidro
+  // e cortina a foto atravessa ou trata como parte da parede, e quadro e
+  // pintura da propria parede.
+  const MASCARA_ALTURA_MINIMA = 0.25;
+  const NAO_TAPAM = ["vidro", "cortina", "quadro", "tapete"];
+
   // Os espacos do sombreador saem da constante acima, e nao escritos a mao:
   // escritos a mao, trocar o numero exigiria lembrar de mexer em quatro
   // lugares, e o que sobrasse para tras sairia preto na tela.
@@ -1189,6 +1227,9 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     ${_slots(i => "uniform sampler2D foto" + i + ";")}
     ${_slots(i => "uniform vec3 origem" + i + ";")}
     uniform float ativo[${FOTOS_NA_MISTURA}];
+    ${_slots(i => "uniform vec2 mask" + i + ";")}
+    uniform sampler2D atlas;
+    uniform vec2 atlasEsc;
     uniform vec3 corBase;
     uniform float raio;
     varying vec3 vMundo;
@@ -1240,8 +1281,35 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
       return lig * frente * p3 * p3;
     }
 
+    // A FOTO ENXERGA ESTE PEDACO, OU ENXERGA O QUE ESTA NA FRENTE DELE? A
+    // mascara guarda, por direcao, a distancia ate o primeiro movel ou parede
+    // visto daquele ponto. Se esse obstaculo esta mais perto do que o pedaco, a
+    // foto mostra o obstaculo e nao a superficie, e ela nao opina. Sem mascara
+    // (o atlas nasce todo em 255, "nada tapa") a foto vale como sempre valeu.
+    //
+    // A TOLERANCIA NAO E UM NUMERO MAGICO. Um texel cobre 2 pi / 256 = 0,0245
+    // rad; numa parede vista de viés a distancia varia ao longo dele em
+    // d * 0,0245 / cos. O 0,0368 e uma vez e meia isso, e o 0,10 e o piso para
+    // o que se ve de frente e de perto. O teste confere o coeficiente contra a
+    // resolucao da mascara.
+    float enxerga(vec3 o, vec2 mk, float cosf){
+      if (mk.x < 0.0) return 1.0;
+      vec3 v = vMundo - o;
+      float d = max(length(v), 0.05);
+      vec3 u = v / d;
+      float lon = atan(u.x, u.z);
+      float lat = asin(clamp(u.y, -1.0, 1.0));
+      vec2 uv = clamp(vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI), 0.002, 0.998);
+      float mapa = texture2D(atlas, mk + uv * atlasEsc).r * ${MASCARA_ALCANCE.toFixed(1)};
+      float tol = 0.10 + 0.0368 * d / max(cosf, 0.35);
+      return smoothstep(d - 2.0 * tol, d - tol, mapa);
+    }
+
     void main(){
       ${_slots(i => "float w" + i + " = peso(origem" + i + ", ativo[" + i + "]);")}
+      ${_slots(i => "if (w" + i + " > 0.0) w" + i + " *= enxerga(origem" + i
+                    + ", mask" + i + ", dot(vNormalM, normalize(origem" + i
+                    + " - vMundo)));")}
       float s = ${Array.from({length: FOTOS_NA_MISTURA},
                              (_, i) => "w" + i).join(" + ")};
       // Superficie que NENHUMA foto enxerga — fundo de armario, face externa
@@ -1266,6 +1334,141 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
   let fotos = [];            // {pos: Vector3, tex: Texture}
   let vestidos = [];         // {malha, original}
+
+  let atlas = null;          // {dados, tex, larg, alt, capacidade, esc}
+  let oclusores = [];        // caixas que tapam a vista, no mundo
+
+  // Quem tapa a vista: paredes, e movel com 25 cm ou mais que a foto nao
+  // atravesse nem trate como parede.
+  function tapaAVista(c){
+    if (c.m === "parede") return true;
+    return (c.p[4] - c.p[1]) >= MASCARA_ALTURA_MINIMA
+           && NAO_TAPAM.indexOf(c.m) < 0;
+  }
+
+  // Distancia da origem ate a face da caixa que o raio atravessa primeiro, ou
+  // Infinity. Origem dentro da caixa nao conta: uma foto nunca esta dentro de
+  // um movel, e se estivesse tudo viraria "tapado".
+  function distanciaAteCaixa(ox, oy, oz, dx, dy, dz, b){
+    let t0 = 0, t1 = Infinity, a, c, x;
+    if (Math.abs(dx) < 1e-9){ if (ox < b.x0 || ox > b.x1) return Infinity; }
+    else { a = (b.x0 - ox) / dx; c = (b.x1 - ox) / dx;
+           if (a > c){ x = a; a = c; c = x; }
+           if (a > t0) t0 = a; if (c < t1) t1 = c; if (t0 > t1) return Infinity; }
+    if (Math.abs(dy) < 1e-9){ if (oy < b.y0 || oy > b.y1) return Infinity; }
+    else { a = (b.y0 - oy) / dy; c = (b.y1 - oy) / dy;
+           if (a > c){ x = a; a = c; c = x; }
+           if (a > t0) t0 = a; if (c < t1) t1 = c; if (t0 > t1) return Infinity; }
+    if (Math.abs(dz) < 1e-9){ if (oz < b.z0 || oz > b.z1) return Infinity; }
+    else { a = (b.z0 - oz) / dz; c = (b.z1 - oz) / dz;
+           if (a > c){ x = a; a = c; c = x; }
+           if (a > t0) t0 = a; if (c < t1) t1 = c; if (t0 > t1) return Infinity; }
+    return t0 > 0 ? t0 : Infinity;
+  }
+
+  // Um byte por direcao: a distancia ate o primeiro obstaculo, em passos de
+  // alcance/255; 255 e "nada tapa". A direcao de cada texel e a MESMA do
+  // sombreador e do tracador: lon = atan2(x, z), a linha 0 aponta para cima.
+  function mascaraDeOclusao(pos, caixas, L, A, alcance){
+    const saida = new Uint8Array(L * A).fill(255);
+    const perto = caixas.filter(b => {
+      const dx = Math.max(b.x0 - pos.x, 0, pos.x - b.x1);
+      const dy = Math.max(b.y0 - pos.y, 0, pos.y - b.y1);
+      const dz = Math.max(b.z0 - pos.z, 0, pos.z - b.z1);
+      return dx * dx + dy * dy + dz * dz < alcance * alcance;
+    });
+    if (!perto.length) return saida;
+    const sLon = new Float64Array(L), cLon = new Float64Array(L);
+    for (let i = 0; i < L; i++){
+      const lon = ((i + 0.5) / L * 2 - 1) * Math.PI;
+      sLon[i] = Math.sin(lon); cLon[i] = Math.cos(lon);
+    }
+    for (let j = 0; j < A; j++){
+      const lat = (0.5 - (j + 0.5) / A) * Math.PI;
+      const cl = Math.cos(lat), dy = Math.sin(lat);
+      for (let i = 0; i < L; i++){
+        const dx = cl * sLon[i], dz = cl * cLon[i];
+        let melhor = alcance;
+        for (const b of perto){
+          const t = distanciaAteCaixa(pos.x, pos.y, pos.z, dx, dy, dz, b);
+          if (t < melhor) melhor = t;
+        }
+        if (melhor < alcance)
+          saida[j * L + i] = Math.min(254, Math.round(melhor / alcance * 255));
+      }
+    }
+    return saida;
+  }
+
+  // Onde a mascara da foto de numero `indice` mora no atlas, em coordenadas de
+  // textura.
+  function ladrilhoDoIndice(indice, colunas, L, A, larg, alt){
+    const col = indice % colunas, lin = Math.floor(indice / colunas);
+    return [col * L / larg, lin * A / alt];
+  }
+
+  function criarAtlas(quantas){
+    const n = Math.min(quantas, MASCARA_COLUNAS * MASCARA_LINHAS_MAX);
+    const linhas = Math.max(1, Math.ceil(n / MASCARA_COLUNAS));
+    const larg = MASCARA_COLUNAS * MASCARA_L, alt = linhas * MASCARA_A;
+    // 255 = "nada tapa": o que ainda nao foi calculado vale como sempre valeu
+    const dados = new Uint8Array(larg * alt).fill(255);
+    const formato = (renderizador && renderizador.capabilities
+                     && renderizador.capabilities.isWebGL2)
+      ? THREE.RedFormat : THREE.LuminanceFormat;
+    const tex = new THREE.DataTexture(dados, larg, alt, formato,
+                                      THREE.UnsignedByteType);
+    // vizinho mais proximo: interpolar entre um movel a 2 m e uma parede a 5 m
+    // inventaria um obstaculo a 3,5 m que nao existe
+    tex.minFilter = tex.magFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.flipY = false;
+    tex.unpackAlignment = 1;
+    tex.needsUpdate = true;
+    return {dados: dados, tex: tex, larg: larg, alt: alt, capacidade: n,
+            esc: new THREE.Vector2(MASCARA_L / larg, MASCARA_A / alt)};
+  }
+
+  function atlasTextura(){ return atlas ? atlas.tex : texturaVazia(); }
+  function escalaDoAtlas(){ return atlas ? atlas.esc : new THREE.Vector2(1, 1); }
+
+  // Foto sem ladrilho (alem da capacidade do atlas) recebe -1: o sombreador a
+  // trata como sem mascara.
+  function ladrilhoDa(f){
+    if (!atlas || f.indice === undefined || f.indice >= atlas.capacidade)
+      return new THREE.Vector2(-1, -1);
+    const t = ladrilhoDoIndice(f.indice, MASCARA_COLUNAS, MASCARA_L, MASCARA_A,
+                               atlas.larg, atlas.alt);
+    return new THREE.Vector2(t[0], t[1]);
+  }
+
+  function guardarMascara(f){
+    const m = mascaraDeOclusao(f.pos, oclusores, MASCARA_L, MASCARA_A,
+                               MASCARA_ALCANCE);
+    const col = f.indice % MASCARA_COLUNAS;
+    const lin = Math.floor(f.indice / MASCARA_COLUNAS);
+    for (let j = 0; j < MASCARA_A; j++)
+      atlas.dados.set(m.subarray(j * MASCARA_L, (j + 1) * MASCARA_L),
+                      (lin * MASCARA_A + j) * atlas.larg + col * MASCARA_L);
+    f.mascara = true;
+  }
+
+  // Calcula as mascaras aos poucos, as das fotos mais importantes primeiro,
+  // sem passar de 12 ms por vez: uma so custa uns 30 ms, e o quadro nao pode
+  // engasgar por causa disto.
+  function prepararMascaras(prioritarias){
+    if (!atlas) return;
+    const lista = (prioritarias && prioritarias.length) ? prioritarias : fotos;
+    const comeco = performance.now();
+    let feitas = 0;
+    for (const f of lista){
+      if (f.mascara || f.indice >= atlas.capacidade) continue;
+      guardarMascara(f);
+      feitas++;
+      if (performance.now() - comeco > 12) break;
+    }
+    if (feitas) atlas.tex.needsUpdate = true;
+  }
 
   // ------------------------------------------- orcamento de textura na placa
   //
@@ -1337,6 +1540,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
   function carregarFotos(im){
     fotos.forEach(f => { if (f.tex) f.tex.dispose(); });
+    if (atlas) atlas.tex.dispose();
     fotos = [];
     const cx = -im.larg / 2, cz = -im.fundo / 2;
     (im.pontos || []).forEach(p => {
@@ -1346,6 +1550,13 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
                   pos: new THREE.Vector3(p.x + cx, (p.andar || 0) + OLHO,
                                          p.z + cz)});
     });
+    // As mascaras de oclusao saem das caixas da PLANTA, nao do que foi montado:
+    // assim nao dependem de a geometria ja ter sido desenhada.
+    fotos.forEach((f, i) => { f.indice = i; f.mascara = false; });
+    atlas = fotos.length ? criarAtlas(fotos.length) : null;
+    oclusores = (im.caixas || []).filter(tapaAVista).map(c => ({
+      x0: c.p[0] + cx, x1: c.p[3] + cx, y0: c.p[1], y1: c.p[4],
+      z0: c.p[2] + cz, z1: c.p[5] + cz}));
     // HAVENDO FOTO, ELA VEM LIGADA.
     //
     // Nasceu desligada, como toda chave nova, e isso estava errado: o dono
@@ -1541,11 +1752,13 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
                                    _olhando.z / tam);
       const lados = resolucoes(Math.min(ordem.length, TETO_DE_FOTOS_DE_CIMA),
                                MB_NITIDO, degrausDaTela());
+      prepararMascaras(ordem);
       ordem.forEach((f, k) => {
         if (k < lados.length) pedirFoto(f, lados[k]);
         else soltarFoto(f);
       });
     } else {
+      prepararMascaras(null);
       fotos.forEach((f, k) => {
         if (k < TETO_DE_FOTOS_DE_CIMA) pedirFoto(f, LADO_REDUZIDO);
         else soltarFoto(f);
@@ -1576,6 +1789,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
         const f = lista[Math.min(i, lista.length - 1)];
         u["foto" + i].value = f.tex || texturaVazia();
         u["origem" + i].value.copy(f.pos);
+        u["mask" + i].value.copy(ladrilhoDa(f));
         u.ativo.value[i] = (i < lista.length && f.tex) ? 1 : 0;
         if (i < lista.length) f.usuarios.push({uniforms: u, slot: i});
       }
@@ -1591,6 +1805,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     vivas: fotos.filter(f => f.tex).length,
     pedindo: fotos.filter(f => f.pedindo).length,
     malhasVestidas: vestidos.length,
+    mascaras: fotos.filter(f => f.mascara).length,
     erros: fotos.filter(f => f.erro).map(f => f.erro).slice(0, 3),
     cheias: fotos.filter(f => f.tex && !f.lado).length,
     medias: fotos.filter(f => f.tex && f.lado && f.lado !== LADO_REDUZIDO)
@@ -1599,6 +1814,22 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     mbNaPlaca: Math.round(fotos.reduce((s, f) => s + (f.tex
       ? (f.lado ? f.lado * f.lado / 2 : 4096 * 2048) * 4 * 1.333 : 0), 0) / 1e6),
   });
+
+  // Liga e desliga a oclusao para comparar na tela, antes e depois. Fica
+  // exposto de proposito, como o __fotos: o efeito e visual e nao ha outra
+  // forma de perguntar "isto e a mascara ou e a foto?".
+  window.__oclusao = (ligada) => {
+    if (!atlas) return false;
+    if (!ligada){
+      atlas.guardado = atlas.guardado || atlas.dados.slice();
+      atlas.dados.fill(255);
+    } else if (atlas.guardado){
+      atlas.dados.set(atlas.guardado);
+      atlas.guardado = null;
+    }
+    atlas.tex.needsUpdate = true;
+    return !!ligada;
+  };
 
   const _centro = new THREE.Vector3();
 
@@ -1642,6 +1873,8 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
       const perto = fotosPerto(_centro, FOTOS_NA_MISTURA);
       if (!perto.length) return;
       const u = {raio: {value: RAIO_DA_MISTURA},
+                 atlas: {value: atlasTextura()},
+                 atlasEsc: {value: escalaDoAtlas()},
                  corBase: {value: corDoMaterial(malha.material)},
                  ativo: {value: Array.from({length: FOTOS_NA_MISTURA},
                                            (_, i) => i < perto.length ? 1 : 0)}};
@@ -1654,6 +1887,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
         const f = perto[Math.min(i, perto.length - 1)];
         u["foto" + i] = {value: f.tex || texturaVazia()};
         u["origem" + i] = {value: f.pos.clone()};
+        u["mask" + i] = {value: ladrilhoDa(f)};
         // A foto pode ainda nao ter chegado — ou ter sido solta para caber no
         // orcamento. Enquanto nao estiver na placa, o espaco vale zero, e o
         // pedaco se vira com as outras.

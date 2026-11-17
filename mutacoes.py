@@ -1609,6 +1609,93 @@ MUT = [
      'return np.stack([c * np.cos(th), np.sin(ph), c * np.sin(th)],',
      'TestMiniPlantaDoTour.test_a_premissa_da_direcao_vale_no_gerador_e_na_caminhada'),
 
+    # ----------------------------- a foto nao mostra o movel colado
+
+    ('a laje e o tapete voltam a tapar a vista', 'static/maquete.html',
+     'const MASCARA_ALTURA_MINIMA = 0.25;',
+     'const MASCARA_ALTURA_MINIMA = 0.0;',
+     'TestOclusaoDaFoto.test_so_tapa_a_vista_o_que_e_parede_ou_movel_de_verdade'),
+
+    ('o vidro passa a tapar a vista', 'static/maquete.html',
+     'const NAO_TAPAM = ["vidro", "cortina", "quadro", "tapete"];',
+     'const NAO_TAPAM = ["cortina", "quadro", "tapete"];',
+     'TestOclusaoDaFoto.test_so_tapa_a_vista_o_que_e_parede_ou_movel_de_verdade'),
+
+    ('a parede deixa de tapar a vista', 'static/maquete.html',
+     '    if (c.m === "parede") return true;\n    return (c.p[4]',
+     '    if (c.m === "parede") return false;\n    return (c.p[4]',
+     'TestOclusaoDaFoto.test_so_tapa_a_vista_o_que_e_parede_ou_movel_de_verdade'),
+
+    ('o raio guarda o obstaculo mais longe', 'static/maquete.html',
+     '          if (t < melhor) melhor = t;',
+     '          if (t > melhor) melhor = t;',
+     'TestOclusaoDaFoto.test_o_raio_acha_o_primeiro_obstaculo_e_o_resto_e_nada'),
+
+    ('a distancia da mascara perde um passo', 'static/maquete.html',
+     'Math.round(melhor / alcance * 255)',
+     'Math.round(melhor / alcance * 254)',
+     'TestOclusaoDaFoto.test_o_raio_acha_o_primeiro_obstaculo_e_o_resto_e_nada'),
+
+    ('a origem dentro da caixa passa a tapar tudo', 'static/maquete.html',
+     '    return t0 > 0 ? t0 : Infinity;\n  }',
+     '    return t0 >= 0 ? t0 : Infinity;\n  }',
+     'TestOclusaoDaFoto.test_o_raio_acha_o_primeiro_obstaculo_e_o_resto_e_nada'),
+
+    ('as linhas do atlas se misturam', 'static/maquete.html',
+     'const col = indice % colunas, lin = Math.floor(indice / colunas);',
+     'const col = indice % colunas, lin = Math.floor(indice / 8);',
+     'TestOclusaoDaFoto.test_cada_foto_tem_o_seu_ladrilho_no_atlas'),
+
+    ('a tolerancia do sombreador perde o vies', 'static/maquete.html',
+     'float tol = 0.10 + 0.0368 * d / max(cosf, 0.35);',
+     'float tol = 0.10 + 0.0100 * d / max(cosf, 0.35);',
+     'TestOclusaoDaFoto.test_a_tolerancia_acompanha_a_resolucao_da_mascara'),
+
+    ('a mascara nao alcanca o raio da mistura', 'static/maquete.html',
+     'const MASCARA_ALCANCE = 6.0;',
+     'const MASCARA_ALCANCE = 4.0;',
+     'TestOclusaoDaFoto.test_a_tolerancia_acompanha_a_resolucao_da_mascara'),
+
+    ('a visibilidade deixa de multiplicar o peso', 'static/maquete.html',
+     '" > 0.0) w" + i + " *= enxerga(origem" + i',
+     '" > 0.0) w" + i + " += enxerga(origem" + i',
+     'TestOclusaoDaFoto.test_o_sombreador_consulta_a_mascara_e_cabe_nas_unidades_da_placa'),
+
+    ('a rampa da visibilidade sai invertida', 'static/maquete.html',
+     'return smoothstep(d - 2.0 * tol, d - tol, mapa);',
+     'return smoothstep(d - tol, d - 2.0 * tol, mapa);',
+     'TestOclusaoDaFoto.test_o_sombreador_consulta_a_mascara_e_cabe_nas_unidades_da_placa'),
+
+    ('o atlas nasce tapando tudo', 'static/maquete.html',
+     'const dados = new Uint8Array(larg * alt).fill(255);',
+     'const dados = new Uint8Array(larg * alt).fill(0);',
+     'TestOclusaoDaFoto.test_o_sombreador_consulta_a_mascara_e_cabe_nas_unidades_da_placa'),
+
+    ('o atlas interpola entre obstaculos', 'static/maquete.html',
+     'tex.minFilter = tex.magFilter = THREE.NearestFilter;\n    tex.generateMipmaps = false;\n    tex.flipY = false;\n    tex.unpackAlignment = 1;',
+     'tex.minFilter = tex.magFilter = THREE.LinearFilter;\n    tex.generateMipmaps = false;\n    tex.flipY = false;\n    tex.unpackAlignment = 1;',
+     'TestOclusaoDaFoto.test_o_sombreador_consulta_a_mascara_e_cabe_nas_unidades_da_placa'),
+
+    ('a malha nasce sem o ladrilho da foto', 'static/maquete.html',
+     '        u["mask" + i] = {value: ladrilhoDa(f)};\n',
+     '        u["mask" + i] = {value: new THREE.Vector2(-1, -1)};\n',
+     'TestOclusaoDaFoto.test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos'),
+
+    ('a troca de fotos esquece a mascara', 'static/maquete.html',
+     '        u["mask" + i].value.copy(ladrilhoDa(f));\n',
+     '',
+     'TestOclusaoDaFoto.test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos'),
+
+    ('a pe, as mascaras nunca sao calculadas', 'static/maquete.html',
+     '      prepararMascaras(ordem);\n',
+     '',
+     'TestOclusaoDaFoto.test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos'),
+
+    ('o calculo das mascaras nao tem teto de tempo', 'static/maquete.html',
+     'if (performance.now() - comeco > 12) break;',
+     'if (performance.now() - comeco > 1200) break;',
+     'TestOclusaoDaFoto.test_as_mascaras_chegam_a_cada_malha_e_sao_calculadas_aos_poucos'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem
