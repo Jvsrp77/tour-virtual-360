@@ -10349,6 +10349,229 @@ class TestCabecalhoNoCelular(unittest.TestCase):
                       "o deslocamento tem de valer só onde os botões existem")
 
 
+class TestMiniPlantaDoTour(unittest.TestCase):
+    """
+    A mini-planta do tour 360: onde estou e para onde olho.
+
+    POR QUE ISTO EXISTE. O tour só tinha a faixa de miniaturas: quem está na
+    cozinha não sabe onde ela fica na casa. A caminhada já tinha minimapa.
+
+    O PONTO FRÁGIL é a lateralidade. A coluna u do panorama olha para
+    (sin L, cos L) no plano (x, z), com L = yaw (medido em 144 de 144 cenas: a
+    profundidade correlaciona 0,88-0,97 com a parede que a planta prevê, contra
+    0,05-0,45 da hipótese espelhada). No Pannellum o yaw cresce para a direita,
+    então a planta sai com o z PARA CIMA, e a seta gira para a direita quando o
+    visitante vira para a direita. Errar isso não dá erro algum: dá um mapa que
+    gira ao contrário de quem o usa. Os testes cobram a premissa nos três
+    lugares em que ela mora: o gerador, a caminhada e este tour.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "viewer.html"),
+                     encoding="utf-8") as f:
+            cls.viewer = f.read()
+        with io.open(os.path.join("static", "andar.html"),
+                     encoding="utf-8") as f:
+            cls.andar = f.read()
+        with io.open("cena_apartamento.py", encoding="utf-8") as f:
+            cls.gerador = f.read()
+
+    @staticmethod
+    def _func(html, nome):
+        achou = re.search(r"\nfunction " + nome + r"\(.*?\n\}\n", html, re.S)
+        assert achou, "a função %s sumiu do viewer.html" % nome
+        return achou.group(0)
+
+    def _node(self, nomes, corpo):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        fontes = [self._func(self.viewer, n) for n in nomes]
+        caminho = os.path.join(_TEMP, "miniplanta.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(fontes) + "\n" + corpo + "\n")
+        # o Node escreve UTF-8; a leitura padrao do Windows entorta "Terreo"
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:800])
+        return json.loads(r.stdout.strip())
+
+    def test_a_seta_aponta_para_onde_o_visitante_olha(self):
+        """
+        yaw 0 aponta para cima, 90 para a direita, 180 para baixo, -90 para a
+        esquerda; e virar para a direita (yaw crescente) gira a seta no sentido
+        HORÁRIO. O giro da cena soma ao yaw.
+        """
+        d = self._node(["rumoNaPlanta", "anguloNoDesenho"], """
+const vet = (y, g) => { const a = anguloNoDesenho(rumoNaPlanta(y, g));
+  return [Math.cos(a), Math.sin(a)]; };
+console.log(JSON.stringify({
+  zero: vet(0, 0), direita: vet(90, 0), baixo: vet(180, 0), esquerda: vet(-90, 0),
+  giro: vet(0, 90),
+  a0: anguloNoDesenho(rumoNaPlanta(0, 0)),
+  a10: anguloNoDesenho(rumoNaPlanta(10, 0)),
+}));""")
+        for nome, esperado in (("zero", (0, -1)), ("direita", (1, 0)),
+                               ("baixo", (0, 1)), ("esquerda", (-1, 0)),
+                               ("giro", (1, 0))):
+            self.assertAlmostEqual(d[nome][0], esperado[0], places=6,
+                                   msg="%s: x da seta" % nome)
+            self.assertAlmostEqual(d[nome][1], esperado[1], places=6,
+                                   msg="%s: y da seta" % nome)
+        self.assertGreater(d["a10"], d["a0"],
+                           "virar para a direita gira a seta no sentido "
+                           "anti-horário")
+
+    def test_a_planta_tem_o_z_para_cima_e_cabe_no_quadro(self):
+        """
+        Z maior fica MAIS ACIMA no desenho, x maior mais à direita, e a planta
+        inteira cabe dentro das margens, centrada na menor dimensão.
+        """
+        d = self._node(["escalaDaPlanta", "paraDesenho"], """
+const esc = escalaDaPlanta({x0: 0, x1: 10, z0: 0, z1: 5}, 176, 12);
+const c = [[0, 0], [10, 0], [0, 5], [10, 5]].map(p => paraDesenho(esc, p[0], p[1]));
+console.log(JSON.stringify({esc, c}));""")
+        (x00, y00), (x10, y10), (x05, y05), (x15, y15) = d["c"]
+        self.assertLess(y05, y00, "z maior tem de ficar mais acima")
+        self.assertGreater(x10, x00, "x maior tem de ficar mais à direita")
+        for x, y in d["c"]:
+            self.assertGreaterEqual(x, 12 - 1e-6)
+            self.assertLessEqual(x, 176 - 12 + 1e-6)
+            self.assertGreaterEqual(y, 12 - 1e-6)
+            self.assertLessEqual(y, 176 - 12 + 1e-6)
+        # 10 x 5 m: ocupa a largura toda e metade da altura, centrada
+        self.assertAlmostEqual((y00 + y05) / 2, 88.0, places=4)
+
+    def test_so_aparece_o_andar_em_que_o_visitante_esta(self):
+        """
+        Sobrado: a laje entre os andares não é parede de nenhum dos dois, e as
+        zonas do andar de cima não se empilham sobre as do térreo.
+        """
+        d = self._node(["zonasDoAndar", "paredesDoAndar", "pontosDoAndar",
+                        "rotuloDoAndar"], """
+const zonas = [{nome: 'sala', andar: 0}, {nome: 'hall'}, {nome: 'quarto', andar: 2.95}];
+const caixas = [
+  {m: 'parede', p: [0, 0, 0, 1, 2.7, 1]},
+  {m: 'parede', p: [0, 2.95, 0, 1, 5.65, 1]},
+  {m: 'parede', p: [0, 2.7, 0, 1, 2.95, 1]},
+  {m: 'piso',   p: [0, 0, 0, 1, 0.1, 1]},
+];
+const cenas = [
+  {id: 'a', nome: 'Sala', andar: 0, posicao: {x: 1, y: 2}},
+  {id: 'b', nome: 'Quarto', andar: 2.95, posicao: {x: 1, y: 2}},
+  {id: 'c', nome: 'Sem posicao', andar: 0},
+];
+console.log(JSON.stringify({
+  zonasTerreo: zonasDoAndar(zonas, 0).map(z => z.nome),
+  zonasCima: zonasDoAndar(zonas, 2.95).map(z => z.nome),
+  paredesTerreo: paredesDoAndar(caixas, 0).length,
+  paredesCima: paredesDoAndar(caixas, 2.95).length,
+  pontosTerreo: pontosDoAndar(cenas, 0).map(p => p.id),
+  pontosCima: pontosDoAndar(cenas, 2.95).map(p => p.id),
+  rotuloTerreo: rotuloDoAndar(cenas, 0), rotuloCima: rotuloDoAndar(cenas, 2.95),
+  rotuloUnico: rotuloDoAndar([cenas[0]], 0),
+}));""")
+        self.assertEqual(d["zonasTerreo"], ["sala", "hall"])
+        self.assertEqual(d["zonasCima"], ["quarto"])
+        self.assertEqual(d["paredesTerreo"], 1)
+        self.assertEqual(d["paredesCima"], 1,
+                         "a laje ou o piso entrou como parede do andar")
+        self.assertEqual(d["pontosTerreo"], ["a"])
+        self.assertEqual(d["pontosCima"], ["b"],
+                         "ponto de outro andar, ou sem posição, entrou no mapa")
+        self.assertEqual(d["rotuloTerreo"], "Térreo")
+        self.assertEqual(d["rotuloCima"], "1º andar")
+        self.assertEqual(d["rotuloUnico"], "",
+                         "com um andar só não há o que rotular")
+
+    def test_clicar_leva_ao_ponto_mais_proximo_e_so_perto_dele(self):
+        """
+        O clique chega em pixels de TELA e o mapa encolhe no celular: a
+        conversão tem de devolver unidades do desenho. Fora do raio, nada.
+        """
+        d = self._node(["escalaDaPlanta", "paraDesenho",
+                        "pontoMaisPertoNoMapa", "pontoNoMapa"], """
+const esc = escalaDaPlanta({x0: 0, x1: 10, z0: 0, z1: 5}, 176, 12);
+const pontos = [{id: 'a', x: 1, z: 1}, {id: 'b', x: 9, z: 4}];
+const [ax, ay] = paraDesenho(esc, 1, 1);
+const id = p => p ? p.id : null;
+const r = {left: 10, top: 20, width: 128, height: 128};
+const ev = (x, y) => ({clientX: x, clientY: y});
+console.log(JSON.stringify({
+  perto: id(pontoMaisPertoNoMapa(pontos, esc, ax + 3, ay + 3, 18)),
+  longe: id(pontoMaisPertoNoMapa(pontos, esc, ax + 60, ay + 60, 18)),
+  centro: pontoNoMapa(ev(10 + 64, 20 + 64), r, 176),
+  canto: pontoNoMapa(ev(10, 20), r, 176),
+  semEscala: pontoNoMapa(ev(60, 90), {left: 10, top: 20, width: 176, height: 176}, 176),
+}));""")
+        self.assertEqual(d["perto"], "a")
+        self.assertIsNone(d["longe"], "um clique longe de tudo levou a algum ponto")
+        self.assertAlmostEqual(d["centro"]["x"], 88.0, places=4)
+        self.assertAlmostEqual(d["centro"]["y"], 88.0, places=4)
+        self.assertAlmostEqual(d["canto"]["x"], 0.0, places=4)
+        self.assertAlmostEqual(d["semEscala"]["x"], 50.0, places=4)
+        self.assertAlmostEqual(d["semEscala"]["y"], 70.0, places=4)
+
+    def test_um_mapa_de_um_ponto_so_nao_aparece(self):
+        """Sem posição na cena atual, ou com menos de duas cenas posicionadas."""
+        d = self._node(["miniVisivel"], """
+const cenas = [{id: 'a', posicao: {x: 1, y: 1}}, {id: 'b', posicao: {x: 2, y: 2}},
+               {id: 'c'}];
+console.log(JSON.stringify({
+  a: miniVisivel(cenas, 'a'), c: miniVisivel(cenas, 'c'),
+  desconhecida: miniVisivel(cenas, 'x'),
+  unico: miniVisivel([cenas[0], cenas[2]], 'a'),
+}));""")
+        self.assertTrue(d["a"])
+        self.assertFalse(d["c"])
+        self.assertFalse(d["desconhecida"])
+        self.assertFalse(d["unico"], "um mapa com um ponto só não diz nada")
+
+    def test_a_premissa_da_direcao_vale_no_gerador_e_na_caminhada(self):
+        """
+        Os três lugares que concordam em (sin L, cos L) no plano (x, z). Se um
+        deles mudar, a seta da mini-planta passa a apontar para onde ninguém
+        está olhando, sem nenhum erro na tela.
+        """
+        self.assertIn("np.stack([c * np.sin(th), np.sin(ph), c * np.cos(th)]",
+                      self.gerador, "o gerador mudou a direção da coluna u")
+        self.assertTrue(re.search(
+            r"direcoes\[k\*3\]\s*=\s*Math\.cos\(lat\) \* Math\.sin\(lon\)",
+            self.andar), "a caminhada mudou o x da direção da coluna u")
+        self.assertTrue(re.search(
+            r"direcoes\[k\*3\+2\]\s*=\s*Math\.cos\(lat\) \* Math\.cos\(lon\)",
+            self.andar), "a caminhada mudou o z da direção da coluna u")
+        corpo = self._func(self.viewer, "rumoNaPlanta")
+        self.assertIn("x: Math.sin(L), z: Math.cos(L)", corpo)
+
+    def test_a_mini_planta_acompanha_o_tour(self):
+        """
+        Ligada na partida, redesenhada a cada troca de cena e quando a planta
+        chega; o clique leva ao ponto; nasce escondida e o celular a encolhe.
+        """
+        self.assertIn('id="miniPlanta"', self.viewer)
+        self.assertIn("  iniciarMiniPlanta();", self.viewer)
+        # a linha de cima entra de propósito: "    miniAtualizar(true);" sozinha
+        # também é substring das chamadas de verSeTemMaquete e da partida
+        self.assertIn("atualizarBotaoAndar();\n    miniAtualizar(true);",
+                      self.viewer, "o mapa não acompanha a troca de cena")
+        self.assertIn("geometria = d.maquete;", self.viewer,
+                      "a planta nunca chega ao mapa")
+        self.assertIn("cv.addEventListener('click', cliqueNaMiniPlanta);",
+                      self.viewer)
+        clique = self._func(self.viewer, "cliqueNaMiniPlanta")
+        self.assertIn("if (alvo) irPara(alvo.id);", clique)
+        base = re.search(r"#miniPlanta\{([^}]*)\}", self.viewer).group(1)
+        self.assertIn("display:none", base.replace(" ", ""),
+                      "a mini-planta nasce visível")
+        self.assertGreaterEqual(int(re.search(r"bottom:(\d+)px", base).group(1)),
+                                104, "a mini-planta cai sobre a tira de ambientes")
+        celular = self.viewer[self.viewer.index("@media (max-width: 620px)"):]
+        self.assertIn("#miniPlanta{width:128px;height:128px;right:10px;bottom:116px}",
+                      celular, "o celular não encolhe/sobe a mini-planta")
+
+
 class TestMinimapaClicavel(unittest.TestCase):
     """
     Tocar no minimapa leva até o cômodo.

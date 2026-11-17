@@ -114,6 +114,13 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
     font:700 12px/19px system-ui,-apple-system,Segoe UI,sans-serif;
     box-shadow:0 1px 6px rgba(0,0,0,.6)}
 
+  /* A mini-planta mora acima da tira de ambientes (104px e a folga que o aviso
+     de "carregando" e a trena ja usam) e abaixo do botao de contato. */
+  #miniPlanta{position:absolute;right:18px;bottom:108px;z-index:10;display:none;
+    width:176px;height:176px;border-radius:12px;cursor:pointer;
+    background:rgba(14,16,20,.86);backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.14)}
+
   @media (max-width: 620px){
     /* no celular a fileira de botoes ja ocupa a largura toda — o cartao desce
        para baixo dela em vez de ficar escondido atras */
@@ -125,6 +132,7 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
     .bt{padding:8px 10px;font-size:12.5px}
     .amb{width:92px}
     .amb img{height:50px}
+    #miniPlanta{width:128px;height:128px;right:10px;bottom:116px}
   }
 </style>
 </head>
@@ -165,11 +173,13 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
 </div>
 
 <div class="menu" id="menu"></div>
+<canvas id="miniPlanta" width="176" height="176" role="img"
+        aria-label="Planta do imóvel com a sua posição"></canvas>
 
 </div>
 
 <script>
-let tour = null, visor = null, atual = null;
+let tour = null, visor = null, atual = null, geometria = null;
 const $ = id => document.getElementById(id);
 
 async function iniciar(){
@@ -207,6 +217,7 @@ async function iniciar(){
   montarCenas();
   desenharMenu();
   atualizarBotaoAndar();
+  iniciarMiniPlanta();
 
   // O convite de contato mora no lead.js, com a maquete e a caminhada. Ele
   // morava aqui, escrito a mao, e as outras duas telas nao tinham nenhum —
@@ -280,6 +291,7 @@ function montarCenas(){
     // reaparecem quando o visitante volta a esse comodo
     limparMarcasDaTrena(atual);
     contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar();
+    miniAtualizar(true);
     // a profundidade e de CADA cena: medir com a do ambiente anterior daria
     // numero com cara de certo e errado por metros
     medidas = []; raiosDaCena = null; cenaDosRaios = null;
@@ -575,7 +587,14 @@ function escapar(texto){
 async function verSeTemMaquete(){
   try{
     const r = await fetch(API + '/maquete');
-    if (r.ok) document.getElementById('btMaquete').style.display = 'block';
+    if (!r.ok) return;
+    document.getElementById('btMaquete').style.display = 'block';
+    // a mesma resposta traz a planta que a mini-planta desenha
+    const d = await r.json();
+    if (d && d.ok && d.maquete && d.maquete.larg){
+      geometria = d.maquete;
+      miniAtualizar(true);
+    }
   }catch(e){ /* sem servidor, no pacote exportado: fica escondido */ }
 }
 verSeTemMaquete();
@@ -650,6 +669,232 @@ function giroscopio(){
   const ligado = visor.isOrientationActive();
   if (ligado){ visor.stopOrientation(); $('btGiro').style.borderColor = 'rgba(255,255,255,.14)'; }
   else { visor.startOrientation(); $('btGiro').style.borderColor = 'var(--acento)'; }
+}
+
+
+// ------------------------------------------------------------ mini-planta
+//
+// POR QUE EXISTE. O tour 360 so tinha a faixa de miniaturas: quem esta na
+// cozinha nao sabe onde a cozinha fica na casa, e nao ha como "ir ao quarto"
+// sem adivinhar qual miniatura e o quarto. A caminhada ja tinha minimapa; o
+// tour, onde quase todo mundo chega pelo WhatsApp, nao.
+//
+// A planta sai da mesma geometria que a maquete e a caminhada usam, e a
+// posicao de cada cena e a que o tour ja guarda (posicao.x e posicao.y; o y e
+// o z da planta). Sem geometria (imovel fotografado, pacote exportado) o mapa
+// mostra so os pontos.
+//
+// PARA QUE LADO A SETA GIRA, e por que a planta sai com o z PARA CIMA. Medido
+// em 144 de 144 cenas de quatro imoveis de demonstracao: a coluna u do
+// panorama olha para (sin L, cos L) no plano (x, z), com L = yaw. O gerador
+// traca assim, e a profundidade de cada panorama correlaciona 0,88 a 0,97 com a
+// distancia ate a parede que a planta preve; a hipotese espelhada, 0,05 a 0,45.
+// No Pannellum o yaw cresce para a DIREITA, entao quem olha para +z tem o +x a
+// sua direita. Um mapa fiel ao que o visitante ve tem o z para cima e o x para
+// a direita: a seta gira para a direita quando ele vira para a direita.
+//
+// A planta da caminhada e da maquete desenha o z para baixo, e la a imagem sai
+// ESPELHADA em relacao a este tour (medido num apartamento de demonstracao: a
+// porta com maçaneta troca de lado, correlacao 0,41 espelhada contra 0,16
+// normal). Por isso as duas plantas parecem invertidas de cima para baixo.
+
+const MINI = 176;                 // lado do desenho, em unidades logicas
+const MINI_MARGEM = 12;
+
+// Direcao em que o visitante olha, no plano (x, z). giro e o da CENA (graus).
+function rumoNaPlanta(yawGraus, giroGraus){
+  const L = (yawGraus + (giroGraus || 0)) * Math.PI / 180;
+  return {x: Math.sin(L), z: Math.cos(L)};
+}
+
+// Angulo desse rumo no desenho (canvas: x para a direita, y para baixo, e o z
+// da planta para CIMA). Cresce no sentido horario.
+function anguloNoDesenho(rumo){
+  return Math.atan2(-rumo.z, rumo.x);
+}
+
+function limitesDaPlanta(geo, posicoes){
+  if (geo && geo.larg && geo.fundo) return {x0: 0, x1: geo.larg, z0: 0, z1: geo.fundo};
+  const xs = posicoes.map(p => p.x), zs = posicoes.map(p => p.z);
+  return {x0: Math.min(...xs) - 1, x1: Math.max(...xs) + 1,
+          z0: Math.min(...zs) - 1, z1: Math.max(...zs) + 1};
+}
+
+function escalaDaPlanta(lim, lado, margem){
+  const larg = lim.x1 - lim.x0, alt = lim.z1 - lim.z0;
+  const k = (lado - 2 * margem) / Math.max(larg, alt, 1);
+  return {k: k,
+          ox: (lado - larg * k) / 2 - lim.x0 * k,
+          oy: (lado - alt * k) / 2 + lim.z1 * k};
+}
+
+function paraDesenho(esc, x, z){
+  return [esc.ox + x * esc.k, esc.oy - z * esc.k];
+}
+
+// So o andar em que o visitante esta: num sobrado, as duas plantas empilhadas
+// viram uma mancha. A parede vale se atravessa a altura dos olhos do andar; a
+// laje entre os andares nao.
+function zonasDoAndar(zonas, andar){
+  return (zonas || []).filter(z => Math.abs((z.andar || 0) - andar) < 1.2);
+}
+
+function paredesDoAndar(caixas, andar){
+  return (caixas || []).filter(c => c.m === 'parede'
+    && c.p[1] <= andar + 1.2 && c.p[4] >= andar + 1.2);
+}
+
+function pontosDoAndar(cenas, andar){
+  return (cenas || [])
+    .filter(c => c.posicao && Math.abs((c.andar || 0) - andar) < 1.2)
+    .map(c => ({id: c.id, nome: c.nome, x: c.posicao.x, z: c.posicao.y}));
+}
+
+// Um mapa de um ponto so nao diz nada.
+function miniVisivel(cenas, id){
+  const c = (cenas || []).find(x => x.id === id);
+  return !!(c && c.posicao) && cenas.filter(x => x.posicao).length >= 2;
+}
+
+function rotuloDoAndar(cenas, andar){
+  const andares = [...new Set((cenas || []).filter(c => c.posicao)
+                                           .map(c => c.andar || 0))].sort((a, b) => a - b);
+  if (andares.length < 2) return '';
+  let idx = 0;
+  andares.forEach((a, i) => { if (Math.abs(a - andar) < 1.2) idx = i; });
+  return idx === 0 ? 'Térreo' : idx + 'º andar';
+}
+
+function pontoMaisPertoNoMapa(pontos, esc, mx, my, raio){
+  let melhor = null, d = raio;
+  for (const p of pontos){
+    const [x, y] = paraDesenho(esc, p.x, p.z);
+    const q = Math.hypot(mx - x, my - y);
+    if (q < d){ d = q; melhor = p; }
+  }
+  return melhor;
+}
+
+// O desenho tem MINI unidades, mas no celular aparece menor (128px de CSS): o
+// clique chega em pixels de TELA e tem de voltar para as unidades do desenho.
+function pontoNoMapa(ev, r, lado){
+  return {x: (ev.clientX - r.left) * lado / r.width,
+          y: (ev.clientY - r.top) * lado / r.height};
+}
+
+function miniEscala(){
+  const posicoes = tour.cenas.filter(c => c.posicao)
+                             .map(c => ({x: c.posicao.x, z: c.posicao.y}));
+  return escalaDaPlanta(limitesDaPlanta(geometria, posicoes), MINI, MINI_MARGEM);
+}
+
+function miniPontos(){
+  const c = tour.cenas.find(x => x.id === atual);
+  return pontosDoAndar(tour.cenas, c ? (c.andar || 0) : 0);
+}
+
+function cliqueNaMiniPlanta(ev){
+  const cv = $('miniPlanta');
+  const m = pontoNoMapa(ev, cv.getBoundingClientRect(), MINI);
+  const alvo = pontoMaisPertoNoMapa(miniPontos(), miniEscala(), m.x, m.y, 18);
+  if (alvo) irPara(alvo.id);
+}
+
+function desenharMiniPlanta(){
+  const cv = $('miniPlanta');
+  if (!cv || !tour) return;
+  if (!miniVisivel(tour.cenas, atual)){ cv.style.display = 'none'; return; }
+  cv.style.display = 'block';
+  const cena = tour.cenas.find(c => c.id === atual);
+  const andar = cena.andar || 0;
+  const esc = miniEscala();
+  const ctx = cv.getContext('2d');
+  const dpr = cv.width / MINI;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, MINI, MINI);
+  const acento = getComputedStyle(document.documentElement)
+                   .getPropertyValue('--acento').trim() || '#e07b39';
+
+  if (geometria){
+    for (const z of zonasDoAndar(geometria.zonas, andar)){
+      const [x1, y1] = paraDesenho(esc, z.x0, z.z1), [x2, y2] = paraDesenho(esc, z.x1, z.z0);
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = z.piso || '#555';
+      ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(14,16,20,.95)';
+    for (const c of paredesDoAndar(geometria.caixas, andar)){
+      const [x1, y1] = paraDesenho(esc, c.p[0], c.p[5]), [x2, y2] = paraDesenho(esc, c.p[3], c.p[2]);
+      ctx.fillRect(x1, y1, Math.max(1.2, x2 - x1), Math.max(1.2, y2 - y1));
+    }
+    const [bx, by] = paraDesenho(esc, 0, geometria.fundo), [ex, ey] = paraDesenho(esc, geometria.larg, 0);
+    ctx.strokeStyle = 'rgba(14,16,20,.95)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx, by, ex - bx, ey - by);
+  }
+
+  const pontos = miniPontos();
+  for (const p of pontos){
+    if (p.id === atual) continue;
+    const [x, y] = paraDesenho(esc, p.x, p.z);
+    ctx.beginPath();
+    ctx.arc(x, y, geometria ? 2.6 : 4, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgba(255,255,255,.72)';
+    ctx.fill();
+  }
+
+  const eu = pontos.find(p => p.id === atual);
+  if (eu){
+    const [x, y] = paraDesenho(esc, eu.x, eu.z);
+    const rumo = anguloNoDesenho(rumoNaPlanta(visor.getYaw(), cena.giro));
+    const meio = (visor.getHfov() * Math.PI / 180) / 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, 30, rumo - meio, rumo + meio);
+    ctx.closePath();
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = acento;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, 5.5, 0, 2 * Math.PI);
+    ctx.fillStyle = acento;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+  }
+
+  const rotulo = rotuloDoAndar(tour.cenas, andar);
+  if (rotulo){
+    ctx.fillStyle = 'rgba(255,255,255,.82)';
+    ctx.font = '600 11px system-ui, sans-serif';
+    ctx.fillText(rotulo, 9, 17);
+  }
+  cv.title = (cena.nome ? 'Você está em: ' + cena.nome + '. ' : '')
+           + 'Clique em um ponto para ir até ele.';
+}
+
+// Redesenha so quando algo mudou: a direcao em meio grau, o campo de visao, a
+// cena ou a chegada da planta.
+let _miniChave = '';
+function miniAtualizar(forcar){
+  if (!tour || !visor) return;
+  const chave = [atual, Math.round(visor.getYaw() * 2),
+                 Math.round(visor.getHfov()), geometria ? 1 : 0].join('|');
+  if (!forcar && chave === _miniChave) return;
+  _miniChave = chave;
+  desenharMiniPlanta();
+}
+
+function iniciarMiniPlanta(){
+  const cv = $('miniPlanta');
+  if (!cv) return;
+  cv.width = cv.height = Math.round(MINI * Math.min(2, window.devicePixelRatio || 1));
+  cv.addEventListener('click', cliqueNaMiniPlanta);
+  miniAtualizar(true);
+  (function quadro(){ miniAtualizar(false); requestAnimationFrame(quadro); })();
 }
 
 

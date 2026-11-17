@@ -1524,6 +1524,91 @@ MUT = [
      "setProperty('--leadSobe', '0px')",
      'TestCabecalhoNoCelular.test_o_botao_de_contato_sobe_acima_dos_botoes_de_andar'),
 
+    # ----------------------------- a mini-planta do tour
+
+    # a seta gira ao contrario de quem a usa, sem nenhum erro na tela
+    ('a seta espelha o yaw', 'static/viewer.html',
+     'return {x: Math.sin(L), z: Math.cos(L)};',
+     'return {x: -Math.sin(L), z: Math.cos(L)};',
+     'TestMiniPlantaDoTour.test_a_seta_aponta_para_onde_o_visitante_olha'),
+
+    ('o giro da cena e esquecido', 'static/viewer.html',
+     'const L = (yawGraus + (giroGraus || 0)) * Math.PI / 180;',
+     'const L = (yawGraus + 0) * Math.PI / 180;',
+     'TestMiniPlantaDoTour.test_a_seta_aponta_para_onde_o_visitante_olha'),
+
+    ('a planta volta a ter o z para baixo', 'static/viewer.html',
+     'return [esc.ox + x * esc.k, esc.oy - z * esc.k];',
+     'return [esc.ox + x * esc.k, esc.oy + z * esc.k];',
+     'TestMiniPlantaDoTour.test_a_planta_tem_o_z_para_cima_e_cabe_no_quadro'),
+
+    ('a planta passa da margem do quadro', 'static/viewer.html',
+     'const k = (lado - 2 * margem) / Math.max(larg, alt, 1);',
+     'const k = (lado - margem) / Math.max(larg, alt, 1);',
+     'TestMiniPlantaDoTour.test_a_planta_tem_o_z_para_cima_e_cabe_no_quadro'),
+
+    ('as zonas dos dois andares se empilham', 'static/viewer.html',
+     'return (zonas || []).filter(z => Math.abs((z.andar || 0) - andar) < 1.2);',
+     'return (zonas || []);',
+     'TestMiniPlantaDoTour.test_so_aparece_o_andar_em_que_o_visitante_esta'),
+
+    ('a laje entra como parede do andar', 'static/viewer.html',
+     "return (caixas || []).filter(c => c.m === 'parede'\n"
+     "    && c.p[1] <= andar + 1.2 && c.p[4] >= andar + 1.2);",
+     "return (caixas || []).filter(c => c.m === 'parede');",
+     'TestMiniPlantaDoTour.test_so_aparece_o_andar_em_que_o_visitante_esta'),
+
+    ('pontos de outro andar entram no mapa', 'static/viewer.html',
+     '.filter(c => c.posicao && Math.abs((c.andar || 0) - andar) < 1.2)',
+     '.filter(c => c.posicao)',
+     'TestMiniPlantaDoTour.test_so_aparece_o_andar_em_que_o_visitante_esta'),
+
+    ('o clique ignora o raio do ponto', 'static/viewer.html',
+     'let melhor = null, d = raio;',
+     'let melhor = null, d = Infinity;',
+     'TestMiniPlantaDoTour.test_clicar_leva_ao_ponto_mais_proximo_e_so_perto_dele'),
+
+    ('o clique esquece que o mapa aparece menor', 'static/viewer.html',
+     'return {x: (ev.clientX - r.left) * lado / r.width,',
+     'return {x: (ev.clientX - r.left),',
+     'TestMiniPlantaDoTour.test_clicar_leva_ao_ponto_mais_proximo_e_so_perto_dele'),
+
+    ('o mapa aparece com um ponto so', 'static/viewer.html',
+     'return !!(c && c.posicao) && cenas.filter(x => x.posicao).length >= 2;',
+     'return !!(c && c.posicao) && cenas.filter(x => x.posicao).length >= 1;',
+     'TestMiniPlantaDoTour.test_um_mapa_de_um_ponto_so_nao_aparece'),
+
+    ('o clique nao leva a lugar nenhum', 'static/viewer.html',
+     'if (alvo) irPara(alvo.id);',
+     'if (alvo) return;',
+     'TestMiniPlantaDoTour.test_a_mini_planta_acompanha_o_tour'),
+
+    ('o mapa nao acompanha a troca de cena', 'static/viewer.html',
+     '    contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar();\n'
+     '    miniAtualizar(true);',
+     '    contabilizar(); atual = id; desenharMenu(); atualizarBotaoAndar();',
+     'TestMiniPlantaDoTour.test_a_mini_planta_acompanha_o_tour'),
+
+    ('a planta nunca chega ao mapa', 'static/viewer.html',
+     '      geometria = d.maquete;\n',
+     '      void d.maquete;\n',
+     'TestMiniPlantaDoTour.test_a_mini_planta_acompanha_o_tour'),
+
+    ('a mini-planta nasce visivel', 'static/viewer.html',
+     'position:absolute;right:18px;bottom:108px;z-index:10;display:none;',
+     'position:absolute;right:18px;bottom:108px;z-index:10;display:block;',
+     'TestMiniPlantaDoTour.test_a_mini_planta_acompanha_o_tour'),
+
+    ('a mini-planta cai sobre a tira de ambientes', 'static/viewer.html',
+     'position:absolute;right:18px;bottom:108px;z-index:10;display:none;',
+     'position:absolute;right:18px;bottom:60px;z-index:10;display:none;',
+     'TestMiniPlantaDoTour.test_a_mini_planta_acompanha_o_tour'),
+
+    ('o gerador muda a direcao da coluna u', 'cena_apartamento.py',
+     'return np.stack([c * np.sin(th), np.sin(ph), c * np.cos(th)],',
+     'return np.stack([c * np.cos(th), np.sin(ph), c * np.sin(th)],',
+     'TestMiniPlantaDoTour.test_a_premissa_da_direcao_vale_no_gerador_e_na_caminhada'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem
