@@ -10160,6 +10160,195 @@ class TestVerEmCaminhada(unittest.TestCase):
         self.assertIn("window.__ANDAR__ || ('/andar/' + IMOVEL)", self.html)
 
 
+class TestCabecalhoNoCelular(unittest.TestCase):
+    """
+    O cabeçalho das páginas de visita em tela de 375 px.
+
+    POR QUE ISTO EXISTE. Aberta no celular, a maquete tinha a barra de botões
+    ("Imagem", tela cheia, "Ver o tour 360") por cima do título, porque a barra
+    é fixa no canto e o título corre pela mesma faixa. Na caminhada, os mesmos
+    botões cobriam o título do painel ("Sala integrada") e o botão flutuante
+    "Falar com um corretor" caía em cima das setas de andar. O link chega pelo
+    WhatsApp, ou seja, quase sempre no celular.
+
+    Estes testes leem as regras de CSS, porque não há motor de layout na suíte;
+    o que eles garantem é que cada correção continua ali. A conferência de
+    geometria foi feita à mão, em 375 px, medindo os retângulos.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.maquete = f.read()
+        with io.open(os.path.join("static", "andar.html"),
+                     encoding="utf-8") as f:
+            cls.andar = f.read()
+        with io.open(os.path.join("static", "lead.js"),
+                     encoding="utf-8") as f:
+            cls.lead = f.read()
+        cls.node = shutil.which("node")
+
+    @staticmethod
+    def _bloco_media(html, consulta):
+        """O miolo do @media (consulta){ ... }, com as chaves casadas."""
+        ini = html.index("@media (" + consulta + "){")
+        i = html.index("{", ini) + 1
+        nivel, j = 1, i
+        while nivel:
+            nivel += (html[j] == "{") - (html[j] == "}")
+            j += 1
+        return html[i:j - 1]
+
+    @staticmethod
+    def _regras(css):
+        """{seletor: {propriedade: valor}} de um trecho sem chaves aninhadas."""
+        regras = {}
+        for sel, corpo in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+            decl = {}
+            for par in corpo.split(";"):
+                if ":" in par:
+                    k, v = par.split(":", 1)
+                    decl[k.strip()] = v.strip()
+            regras[" ".join(sel.split())] = decl
+        return regras
+
+    def _estreita(self, html):
+        return self._regras(self._bloco_media(html, "max-width: 640px"))
+
+    def test_na_maquete_a_barra_de_botoes_sai_de_cima_do_titulo(self):
+        """Fixa no canto ela cobre o título e ainda segue a rolagem."""
+        r = self._estreita(self.maquete)
+        self.assertEqual(r[".topo-dir"].get("position"), "static",
+                         "a barra de botões voltou a ficar fixa no celular")
+        self.assertEqual(r[".topo-dir"].get("flex-wrap"), "wrap",
+                         "sem quebra de linha, quatro botões estouram a tela")
+
+    def test_na_maquete_o_selo_corre_como_texto(self):
+        """
+        Em flex, "nome · pé-direito 2,70 m" virava três colunas estreitas, com
+        "pé-direito" quebrado ao meio. Como bloco, corre como uma frase.
+        """
+        r = self._estreita(self.maquete)
+        self.assertEqual(r[".selo"].get("display"), "block")
+        self.assertTrue(r[".selo"].get("max-width", "").startswith("calc(100%"),
+                        "o selo pode passar da largura do palco")
+
+    def test_na_maquete_o_nome_do_comodo_nao_cai_sobre_o_selo(self):
+        """
+        O nome do cômodo (andando) ficava à direita, na mesma linha do selo.
+        No celular o selo ocupa duas linhas, então ele desce para baixo.
+        """
+        r = self._estreita(self.maquete)["#ondeEstou"]
+        self.assertEqual(r.get("left"), "13px")
+        self.assertEqual(r.get("right"), "auto")
+        # o selo tem 12px de margem e duas linhas de ~16px
+        self.assertGreaterEqual(int(r["top"][:-2]), 44,
+                                "o nome do cômodo volta a cair sobre o selo")
+        # a posição de tela larga mora no CSS, não em estilo na tag: um
+        # style="" na tag venceria a regra do celular sem avisar
+        self.assertFalse('id="ondeEstou" hidden\n           style=' in self.maquete
+                         or 'id="ondeEstou" hidden style=' in self.maquete,
+                         "estilo na tag vence a regra do celular")
+        base = self._regras(self.maquete[self.maquete.index(
+            "#ondeEstou{left:auto"):][:60])
+        self.assertEqual(base["#ondeEstou"].get("right"), "13px")
+
+    def test_na_caminhada_o_painel_desce_para_baixo_dos_botoes(self):
+        """
+        O painel (esquerda, 280 px) e a barra (direita) disputavam a faixa e
+        os botões cobriam o título. A barra ocupa 16 px de margem + ~42 px de
+        botão: o painel começa abaixo disso e usa a largura toda.
+        """
+        r = self._estreita(self.andar)
+        self.assertGreaterEqual(int(r[".painel"]["top"][:-2]), 58,
+                                "o painel volta a ficar sob os botões")
+        self.assertEqual(r[".painel"].get("width"), "auto")
+        self.assertEqual(r[".teclas"].get("display"), "none",
+                         "a ajuda de teclado ocupa a tela de quem não tem "
+                         "teclado")
+
+    def test_na_caminhada_o_mapa_cabe_ao_lado_das_setas_de_andar(self):
+        """
+        Medido a 375 px: o mapa (192 px, à esquerda) avançava 13 px sobre a seta
+        ◀ (162 px, à direita) e o botão de contato avançava 9 px sobre o mapa.
+        Soma das larguras e das margens, lida do próprio CSS.
+        """
+        largura = int(self._estreita(self.andar)["#mapa"]["width"][:-2])
+        mapa = re.search(r"#mapa\{([^}]*)\}", self.andar).group(1)
+        esquerda = int(re.search(r"left:(\d+)px", mapa).group(1))
+        dpad = re.search(r"\.dpad\{([^}]*)\}", self.andar).group(1)
+        direita = int(re.search(r"right:(\d+)px", dpad).group(1))
+        coluna = int(re.search(r"grid-template-columns:repeat\(3,(\d+)px\)",
+                               dpad).group(1))
+        vao = int(re.search(r"gap:(\d+)px", dpad).group(1))
+        tela = 375
+        self.assertLessEqual(esquerda + largura,
+                             tela - direita - (3 * coluna + 2 * vao),
+                             "o mapa cobre a seta de andar à esquerda")
+
+    def test_o_clique_no_mapa_volta_para_pixels_do_bitmap(self):
+        """
+        Encolher o mapa por CSS sem corrigir o clique faria o toque cair em
+        outro ponto: os pontos desenhados estão em pixels do bitmap (190), o
+        clique chega em pixels de tela (168).
+        """
+        if not self.node:
+            self.skipTest("node não encontrado")
+        achou = re.search(r"\nfunction pontoNoMapa\(.*?\n\}\n", self.andar, re.S)
+        self.assertIsNotNone(achou, "a conversão do clique no mapa sumiu")
+        caminho = os.path.join(_TEMP, "ponto_no_mapa.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write(achou.group(0) + "\n"
+                    "const cv = {width: 190, height: 190};\n"
+                    "const r = {left: 10, top: 20, width: 168, height: 168};\n"
+                    "const ev = (x, y) => ({clientX: x, clientY: y});\n"
+                    "console.log(JSON.stringify({\n"
+                    "  centro: pontoNoMapa(ev(10 + 84, 20 + 84), r, cv),\n"
+                    "  canto: pontoNoMapa(ev(10, 20), r, cv),\n"
+                    "  fim: pontoNoMapa(ev(10 + 168, 20 + 168), r, cv),\n"
+                    "  semEscala: pontoNoMapa(ev(60, 90),\n"
+                    "    {left: 10, top: 20, width: 190, height: 190}, cv),\n"
+                    "}));\n")
+        r = subprocess.run([self.node, caminho], capture_output=True,
+                           text=True, errors="ignore")
+        self.assertEqual(r.returncode, 0, r.stderr[:600])
+        d = json.loads(r.stdout.strip())
+        self.assertAlmostEqual(d["centro"]["x"], 95.0, places=3)
+        self.assertAlmostEqual(d["centro"]["y"], 95.0, places=3)
+        self.assertAlmostEqual(d["canto"]["x"], 0.0, places=3)
+        self.assertAlmostEqual(d["fim"]["x"], 190.0, places=3)
+        self.assertAlmostEqual(d["fim"]["y"], 190.0, places=3)
+        self.assertAlmostEqual(d["semEscala"]["x"], 50.0, places=3)
+        self.assertAlmostEqual(d["semEscala"]["y"], 70.0, places=3)
+
+    def test_o_botao_de_contato_sobe_acima_dos_botoes_de_andar(self):
+        """
+        Os DOIS lados. O botão flutuante lê --leadSobe e a caminhada define
+        esse valor quando mostra os botões de andar (só em aparelho de toque).
+        O valor é conferido contra o tamanho REAL dos botões no CSS: mudar o
+        tamanho dos botões sem subir o contato volta a cobrir as setas.
+        """
+        self.assertIn("bottom:calc(14px + var(--leadSobe,0px))", self.lead)
+        self.assertIn("bottom:calc(10px + var(--leadSobe,0px))", self.lead,
+                      "a regra do celular perdeu o deslocamento")
+        corpo = re.search(r"\.dpad\{([^}]*)\}", self.andar).group(1)
+        base = int(re.search(r"bottom:(\d+)px", corpo).group(1))
+        linha = int(re.search(r"grid-template-rows:repeat\(2,(\d+)px\)",
+                              corpo).group(1))
+        vao = int(re.search(r"gap:(\d+)px", corpo).group(1))
+        altura = base + 2 * linha + vao
+        m = re.search(r"if \('ontouchstart' in window\)\{(.*?)\n  \}",
+                      self.andar, re.S)
+        self.assertIsNotNone(m, "o bloco de toque da caminhada sumiu")
+        v = re.search(r"setProperty\('--leadSobe', '(\d+)px'\)", m.group(1))
+        self.assertIsNotNone(v, "a caminhada não sobe o botão de contato")
+        self.assertGreaterEqual(int(v.group(1)), altura,
+                                "o botão de contato cobre as setas de andar")
+        self.assertIn("$('dpad').style.display = 'grid'", m.group(1),
+                      "o deslocamento tem de valer só onde os botões existem")
+
+
 class TestMinimapaClicavel(unittest.TestCase):
     """
     Tocar no minimapa leva até o cômodo.

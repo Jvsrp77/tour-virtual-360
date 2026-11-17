@@ -49,14 +49,14 @@
     /* O botao fixo. Ele e o que faz diferenca de verdade: a janela aparece
        uma vez e quem fechou nao a ve mais, mas a vontade de falar com alguem
        costuma vir DEPOIS de andar pela casa, nao antes. */
-    + '.leadChamar{position:fixed;right:14px;bottom:14px;z-index:3900;'
+    + '.leadChamar{position:fixed;right:14px;bottom:calc(14px + var(--leadSobe,0px));z-index:3900;'
     +   'background:var(--leadCor,#e07b39);color:#1a1207;border:none;'
     +   'border-radius:999px;padding:12px 18px;font-size:14px;font-weight:700;'
     +   'cursor:pointer;display:none;align-items:center;gap:8px;'
     +   'box-shadow:0 6px 20px rgba(0,0,0,.3);'
     +   'font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}'
     + '.leadChamar.aberto{display:inline-flex}'
-    + '@media (max-width:520px){.leadChamar{right:10px;bottom:10px;'
+    + '@media (max-width:520px){.leadChamar{right:10px;bottom:calc(10px + var(--leadSobe,0px));'
     +   'padding:11px 15px;font-size:13px}}';
 
   var MARCACAO = ''

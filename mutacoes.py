@@ -1467,6 +1467,63 @@ MUT = [
      'TestVerEmCaminhada'
      '.test_o_botao_so_aparece_com_foto_e_nunca_em_modelo_importado'),
 
+    # ----------------------------- o cabecalho no celular
+
+    ('a barra de botoes volta a ficar fixa no celular', 'static/maquete.html',
+     '.topo-dir{position:static;flex-wrap:wrap;',
+     '.topo-dir{position:fixed;flex-wrap:wrap;',
+     'TestCabecalhoNoCelular.test_na_maquete_a_barra_de_botoes_sai_de_cima_do_titulo'),
+
+    ('a barra de botoes perde a quebra de linha', 'static/maquete.html',
+     '.topo-dir{position:static;flex-wrap:wrap;',
+     '.topo-dir{position:static;flex-wrap:nowrap;',
+     'TestCabecalhoNoCelular.test_na_maquete_a_barra_de_botoes_sai_de_cima_do_titulo'),
+
+    ('o selo volta a virar tres colunas', 'static/maquete.html',
+     '.selo{display:block;max-width:calc(100% - 26px);',
+     '.selo{display:flex;max-width:calc(100% - 26px);',
+     'TestCabecalhoNoCelular.test_na_maquete_o_selo_corre_como_texto'),
+
+    ('o nome do comodo volta a cair sobre o selo', 'static/maquete.html',
+     '#ondeEstou{left:13px;right:auto;top:50px}',
+     '#ondeEstou{left:13px;right:auto;top:12px}',
+     'TestCabecalhoNoCelular.test_na_maquete_o_nome_do_comodo_nao_cai_sobre_o_selo'),
+
+    ('o painel da caminhada volta para baixo dos botoes', 'static/andar.html',
+     '.painel{top:68px;left:16px;right:16px;width:auto}',
+     '.painel{top:16px;left:16px;right:16px;width:auto}',
+     'TestCabecalhoNoCelular.test_na_caminhada_o_painel_desce_para_baixo_dos_botoes'),
+
+    ('a ajuda de teclado volta a ocupar o celular', 'static/andar.html',
+     '.teclas{display:none}',
+     '.teclas{display:block}',
+     'TestCabecalhoNoCelular.test_na_caminhada_o_painel_desce_para_baixo_dos_botoes'),
+
+    ('o mapa da caminhada volta a cobrir a seta de andar', 'static/andar.html',
+     '#mapa{width:168px;height:168px}',
+     '#mapa{width:190px;height:190px}',
+     'TestCabecalhoNoCelular.test_na_caminhada_o_mapa_cabe_ao_lado_das_setas_de_andar'),
+
+    ('o clique no mapa esquece que ele aparece menor', 'static/andar.html',
+     'x: (ev.clientX - r.left) * cv.width / r.width,',
+     'x: (ev.clientX - r.left),',
+     'TestCabecalhoNoCelular.test_o_clique_no_mapa_volta_para_pixels_do_bitmap'),
+
+    ('o clique no mapa esquece a escala vertical', 'static/andar.html',
+     'y: (ev.clientY - r.top) * cv.height / r.height};',
+     'y: (ev.clientY - r.top)};',
+     'TestCabecalhoNoCelular.test_o_clique_no_mapa_volta_para_pixels_do_bitmap'),
+
+    ('o botao de contato esquece o deslocamento', 'static/lead.js',
+     'bottom:calc(14px + var(--leadSobe,0px))',
+     'bottom:14px',
+     'TestCabecalhoNoCelular.test_o_botao_de_contato_sobe_acima_dos_botoes_de_andar'),
+
+    ('a caminhada nao sobe o botao de contato', 'static/andar.html',
+     "setProperty('--leadSobe', '124px')",
+     "setProperty('--leadSobe', '0px')",
+     'TestCabecalhoNoCelular.test_o_botao_de_contato_sobe_acima_dos_botoes_de_andar'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem

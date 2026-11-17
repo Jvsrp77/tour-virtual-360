@@ -96,6 +96,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   .selo{position:absolute;left:13px;top:12px;display:flex;gap:6px;align-items:center;
     font-family:var(--mono);font-size:11px;color:var(--muted);pointer-events:none}
   .selo b{color:var(--ink);font-weight:500}
+  #ondeEstou{left:auto;right:13px;top:12px}
 
   .lado{display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;
     padding-right:2px}
@@ -164,6 +165,21 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     border-radius:9px;padding:8px 13px;cursor:pointer;font:inherit;font-size:13px;
     box-shadow:var(--sombra);transition:.14s;text-decoration:none;display:inline-block}
   .bt:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* TELA ESTREITA. Fixa no canto, a barra de botoes cobria o titulo
+     ("Maquete eletro...") e seguia a rolagem por cima da maquete. Aqui ela
+     entra no fluxo, acima do cabecalho, e quebra de linha se faltar espaco.
+     O selo do palco deixa de ser tres colunas de flex (nome, "pe-direito",
+     valor) e passa a correr como texto; o nome do comodo, que ficava a direita
+     no mesmo lugar, desce para baixo dele. Vem DEPOIS das regras acima: com a
+     mesma forca, a ultima escrita vence. */
+  @media (max-width: 640px){
+    .topo-dir{position:static;flex-wrap:wrap;justify-content:flex-end;padding:12px 16px 0}
+    .app{min-height:0}
+    header{padding-block:10px 2px}
+    .selo{display:block;max-width:calc(100% - 26px);line-height:1.45}
+    #ondeEstou{left:13px;right:auto;top:50px}
+  }
 </style>
 </head>
 <body>
@@ -188,8 +204,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
       <div class="selo canto"><b id="seloNome">—</b> · pé-direito <b>2,70 m</b></div>
       <div class="escala canto"><span class="regua" id="regua"></span><span id="reguaTxt">2 m</span></div>
       <div class="dica canto">arraste para girar · role para aproximar</div>
-      <div class="selo canto" id="ondeEstou" hidden
-           style="left:auto;right:13px;top:12px"></div>
+      <div class="selo canto" id="ondeEstou" hidden></div>
       <div id="manche" hidden aria-hidden="true"
            style="position:absolute;left:16px;bottom:16px;width:104px;height:104px;
                   border-radius:50%;border:1px solid var(--line);

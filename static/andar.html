@@ -84,6 +84,16 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .dpad button{background:rgba(14,16,20,.86);border:1px solid rgba(255,255,255,.16);
     color:#fff;border-radius:9px;font-size:17px;cursor:pointer}
   .dpad button:active{background:var(--acento);color:#1a1207}
+
+  /* TELA ESTREITA. O painel (a esquerda, 280px) e a barra de botoes (a
+     direita) disputavam a mesma faixa, e os botoes cobriam o titulo. O painel
+     desce para baixo da barra e usa a largura toda. A ajuda de teclado so
+     serve a quem tem teclado. */
+  @media (max-width: 640px){
+    .painel{top:68px;left:16px;right:16px;width:auto}
+    .teclas{display:none}
+    #mapa{width:168px;height:168px}
+  }
 </style>
 </head>
 <body>
@@ -330,7 +340,11 @@ async function iniciar(){
   atualizarPainel();
   $('carregando').style.display = 'none';
   $('painel').style.display = 'block';
-  if ('ontouchstart' in window) $('dpad').style.display = 'grid';
+  if ('ontouchstart' in window){
+    $('dpad').style.display = 'grid';
+    // o botao de contato sobe acima dos botoes de andar (18px + 2 x 50px + 6px)
+    document.documentElement.style.setProperty('--leadSobe', '124px');
+  }
   if (!temPlanta && pontos.length > 1)
     avisar('Defina a planta no painel para caminhar entre os ambientes');
 
@@ -1056,9 +1070,17 @@ function desenharMapa(){
   ctx.restore();
 }
 
+// O mapa tem 190 px de bitmap, mas no celular aparece menor (168 px de CSS,
+// para nao cobrir as setas de andar): o clique chega em pixels de TELA e tem
+// de voltar para pixels do bitmap, que e onde ficam os pontos desenhados.
+function pontoNoMapa(ev, r, cv){
+  return {x: (ev.clientX - r.left) * cv.width / r.width,
+          y: (ev.clientY - r.top) * cv.height / r.height};
+}
+
 function irPeloMapa(ev){
   const cv = $('mapa'), r = cv.getBoundingClientRect();
-  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const {x: mx, y: my} = pontoNoMapa(ev, r, cv);
   const e = escalaMapa();
   let alvo = null, melhor = 18;
   pontos.forEach(p => {
