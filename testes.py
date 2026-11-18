@@ -6786,7 +6786,7 @@ const pontos = [{mundo:{x:1.83,z:3.18}},{mundo:{x:4.0,z:5.0}}];
 let geometria = GEO;
 ESCALA
 const e = escalaMapa();
-const canto = e.tela(0, 0), oposto = e.tela(26, 20);
+const canto = e.tela(0, -20), oposto = e.tela(26, 0);
 console.log(JSON.stringify({k: e.k, canto: canto, oposto: oposto}));
 """.replace("GEO", geo).replace("ESCALA", self._func_raiz("escalaMapa"))
         return self._rodar(prog, "mapa_%s.js" % com_planta)
@@ -7625,6 +7625,11 @@ class TestPanoramaParcial(unittest.TestCase):
     O QUE PODE DAR ERRADO SEM AVISO: tratar a calota como esfera nao quebra
     nada. A foto se espalha por 360 graus, o comodo fica gigante, e o visitante
     anda "1 metro" que no imovel sao 30 cm. Numero errado com cara de certo.
+
+    NOTA SOBRE O SINAL DO Z. O mundo da caminhada tem o z do plano com o sinal
+    trocado (ver TestMundoDaCaminhada: sem isso a foto saia espelhada). Aqui,
+    a direcao de um rumo r e (sin r, y, -cos r), e o rumo de uma direcao e
+    atan2(x, -z). Nenhuma afirmacao destes testes mudou, so a convencao.
     """
 
     ABERTURA = re.compile(r"(function aberturaDa\(cena\)\{.*?^\})", re.S | re.M)
@@ -7633,6 +7638,10 @@ class TestPanoramaParcial(unittest.TestCase):
                          re.S | re.M)
     RAIO = re.compile(r"(function raioNaDirecao\(pt, dir\)\{.*?^\})", re.S | re.M)
     TETO = re.compile(r"(const ESCORRIDO_OTIMO.*?^\})", re.S | re.M)
+    # a malha chama direcaoDoRumo (a convencao do mundo mora la): o teste que
+    # a roda sozinha tem de levar a funcao junto
+    DIRECAO = re.compile(r"(function direcaoDoRumo\(rumo, lat\)\{.*?^\})",
+                         re.S | re.M)
 
     @classmethod
     def setUpClass(cls):
@@ -7679,7 +7688,7 @@ const dirs = [[0,0,1],[1,0,0],[-1,0,0],[0,0,-1],[0,-1,0],[0,1,0],
 const ab = aberturaDa(cheio);
 const antigo = d => {
   const lat = Math.asin(Math.max(-1, Math.min(1, -d[1])));
-  const lon = Math.atan2(d[0], d[2]);
+  const lon = Math.atan2(d[0], -d[2]);
   const i = Math.round((lon / (2*Math.PI) + 0.5) * GRADE_L);
   const j = Math.round((lat / Math.PI + 0.5) * GRADE_A);
   return pt.raios[Math.min(GRADE_A, Math.max(0, j)) * (GRADE_L + 1)
@@ -7708,7 +7717,7 @@ for (let j = 0; j <= GRADE_A; j++)
   for (let i = 0; i <= GRADE_L; i++) pt.raios[j*(GRADE_L+1)+i] = i;
 const emLon = g => {
   const r = g * Math.PI / 180;
-  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: -Math.cos(r)});
 };
 console.log(JSON.stringify([emLon(0), emLon(-50), emLon(50), emLon(25)]));
 """)
@@ -7731,11 +7740,11 @@ const pt = {cena: {haov: 100, vaov: 80}, raios: new Float32Array(321*161)};
 pt.raios.fill(5);
 const emLon = g => {
   const r = g * Math.PI / 180;
-  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: -Math.cos(r)});
 };
 const emLat = g => {
   const r = g * Math.PI / 180;
-  return raioNaDirecao(pt, {x: 0, y: -Math.sin(r), z: Math.cos(r)});
+  return raioNaDirecao(pt, {x: 0, y: -Math.sin(r), z: -Math.cos(r)});
 };
 console.log(JSON.stringify([emLon(49), emLon(51), emLon(180),
                             emLat(39), emLat(41)]));
@@ -7764,7 +7773,7 @@ console.log(JSON.stringify([emLon(49), emLon(51), emLon(180),
         """
         achado = self.MALHA.search(self.html)
         self.assertTrue(achado, "nao achei a malha em andar.html")
-        fonte = self._fonte(self.ABERTURA) + """
+        fonte = self._fonte(self.ABERTURA, self.DIRECAO) + """
 const raio = d => 1 / (1.542 * d + 0.125);
 const nv = (GRADE_L + 1) * (GRADE_A + 1);
 const posicoes = new Float32Array(nv * 3);
@@ -7779,7 +7788,7 @@ const grau = (a, b, c) => {
   const k = (b * (GRADE_L + 1) + a) * 3;
   return [direcoes[k], direcoes[k+1], direcoes[k+2]];
 };
-const ang = d => Math.atan2(d[0], d[2]) * 180 / Math.PI;
+const ang = d => Math.atan2(d[0], -d[2]) * 180 / Math.PI;
 const alt = d => Math.asin(Math.max(-1, Math.min(1, -d[1]))) * 180 / Math.PI;
 const meioJ = GRADE_A / 2;
 console.log(JSON.stringify([
@@ -7808,7 +7817,7 @@ console.log(JSON.stringify([
         """
         achado = self.MALHA.search(self.html)
         self.assertTrue(achado, "nao achei a malha em andar.html")
-        fonte = self._fonte(self.ABERTURA) + """
+        fonte = self._fonte(self.ABERTURA, self.DIRECAO) + """
 const raio = d => 1 / (1.542 * d + 0.125);
 const nv = (GRADE_L + 1) * (GRADE_A + 1);
 const posicoes = new Float32Array(nv * 3);
@@ -7821,7 +7830,7 @@ const p = {cena: {haov: 68, vaov: 100, giro: 90}};
         saida = self._rodar(fonte, achado.group(1) + """
 const meio = ((GRADE_A/2) * (GRADE_L + 1) + GRADE_L/2) * 3;
 const d = [direcoes[meio], direcoes[meio+1], direcoes[meio+2]];
-console.log(JSON.stringify([Math.atan2(d[0], d[2]) * 180 / Math.PI,
+console.log(JSON.stringify([Math.atan2(d[0], -d[2]) * 180 / Math.PI,
                             +d[1].toFixed(6)]));
 """)
         centro, altura = saida
@@ -7846,7 +7855,7 @@ for (let j = 0; j <= GRADE_A; j++)
   for (let i = 0; i <= GRADE_L; i++) pt.raios[j*(GRADE_L+1)+i] = i;
 const emLon = g => {
   const r = g * Math.PI / 180;
-  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: -Math.cos(r)});
 };
 console.log(JSON.stringify([emLon(90), emLon(0), emLon(124), emLon(56)]));
 """)
@@ -7871,7 +7880,7 @@ const pt = {cena: {haov: 68, vaov: 100, giro: 170}, raios: new Float32Array(321*
 pt.raios.fill(4);
 const emLon = g => {
   const r = g * Math.PI / 180;
-  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: Math.cos(r)});
+  return raioNaDirecao(pt, {x: Math.sin(r), y: 0, z: -Math.cos(r)});
 };
 console.log(JSON.stringify([emLon(170), emLon(-175), emLon(-160), emLon(0)]));
 """)
@@ -10678,12 +10687,15 @@ console.log(JSON.stringify({
         """
         self.assertIn("np.stack([c * np.sin(th), np.sin(ph), c * np.cos(th)]",
                       self.gerador, "o gerador mudou a direção da coluna u")
-        self.assertTrue(re.search(
-            r"direcoes\[k\*3\]\s*=\s*Math\.cos\(lat\) \* Math\.sin\(lon\)",
-            self.andar), "a caminhada mudou o x da direção da coluna u")
-        self.assertTrue(re.search(
-            r"direcoes\[k\*3\+2\]\s*=\s*Math\.cos\(lat\) \* Math\.cos\(lon\)",
-            self.andar), "a caminhada mudou o z da direção da coluna u")
+        # Na caminhada o z do MUNDO é o z do plano com o sinal trocado (ver
+        # TestMundoDaCaminhada): a direção da coluna u no plano, (sin L, cos L),
+        # vira (sin L, -cos L) no mundo, e a posição passa pelo mesmo sinal.
+        self.assertIn("x: Math.cos(lat) * Math.sin(rumo),", self.andar,
+                      "a caminhada mudou o x da direção da coluna u")
+        self.assertIn("z: -Math.cos(lat) * Math.cos(rumo)};", self.andar,
+                      "a caminhada mudou o z da direção da coluna u")
+        self.assertIn("return {x: x, z: -z};", self.andar,
+                      "a posição da caminhada deixou de trocar o sinal do z")
         corpo = self._func(self.viewer, "rumoNaPlanta")
         self.assertIn("x: Math.sin(L), z: Math.cos(L)", corpo)
 
@@ -10884,6 +10896,144 @@ console.log(JSON.stringify({
         # com o parêntese: "> 12" sozinho é substring de "> 1200"
         self.assertIn("performance.now() - comeco > 12) break;", corpo,
                       "sem teto de tempo, o quadro engasga")
+
+
+class TestMundoDaCaminhada(unittest.TestCase):
+    """
+    A caminhada não pode mostrar a foto espelhada.
+
+    POR QUE ISTO EXISTE. Medido com uma foto de verdade (o quarto de celular do
+    imóvel "foto única"), a mesma cena no mesmo rumo, no tour e na caminhada: o
+    notebook trocava de lado, a janela trocava de lado, e o logotipo do mousepad e
+    o texto do monitor saíam ao contrário. Nos renders, a correlação entre as duas
+    capturas era 0,41 espelhada contra 0,16 normal.
+
+    A causa é a lateralidade: a coluna u da foto ia para (sin, cos) no plano
+    (x, z), e a câmera do three.js é de mão direita; olhando para +z, a direita
+    da tela é -x, mas a coluna à direita do centro da foto ficava em +x. A
+    correção é trocar o sinal do z do mundo em tudo o que depende dele.
+
+    O ponto frágil: a posição dos pontos, a direção da coluna, o olhar, o
+    movimento e o mapa têm de trocar o sinal JUNTOS. Trocar só a direção da
+    coluna deixaria a foto certa e as setas, que saem das posições, do lado
+    errado. Por isso as funções puras, e por isso os testes em Node.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "andar.html"),
+                     encoding="utf-8") as f:
+            cls.andar = f.read()
+
+    def _func(self, nome):
+        achou = re.search(r"\nfunction " + nome + r"\(.*?\n\}\n", self.andar, re.S)
+        self.assertIsNotNone(achou, "a função %s sumiu da caminhada" % nome)
+        return achou.group(0)
+
+    def _node(self, nomes, corpo):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        caminho = os.path.join(_TEMP, "mundo_caminhada.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(self._func(n) for n in nomes) + "\n" + corpo + "\n")
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:800])
+        return json.loads(r.stdout.strip())
+
+    def test_a_direita_do_centro_da_foto_fica_a_direita_da_camera(self):
+        """
+        O defeito inteiro numa conta: a câmera olha para o centro da foto (rumo
+        = giro); a coluna com rumo MAIOR (à direita na foto) tem de cair do lado
+        DIREITO da câmera, e a de rumo menor, do esquerdo. Vale para qualquer
+        giro, inclusive o de uma cena virada para trás.
+        """
+        d = self._node(["direcaoDoRumo", "vetoresDoOlhar"], """
+const saida = [];
+for (const giro of [0, -0.277, 1.1, 3.0, -2.2]){
+  const o = vetoresDoOlhar(giro);
+  const dot = (rumo) => { const c = direcaoDoRumo(rumo, 0);
+    return c.x * o.lado.x + c.z * o.lado.z; };
+  saida.push({giro: giro, direita: dot(giro + 0.17), esquerda: dot(giro - 0.17),
+              centro: dot(giro)});
+}
+console.log(JSON.stringify(saida));""")
+        for caso in d:
+            self.assertGreater(caso["direita"], 0.05,
+                               "giro %s: a direita da foto cai à ESQUERDA da "
+                               "câmera: a imagem sai espelhada" % caso["giro"])
+            self.assertLess(caso["esquerda"], -0.05,
+                            "giro %s: a esquerda da foto cai à direita da câmera"
+                            % caso["giro"])
+            self.assertAlmostEqual(caso["centro"], 0.0, places=6)
+
+    def test_a_direita_e_frente_vezes_cima_como_na_camera_do_three(self):
+        """
+        O three.js é de mão direita: a direita da câmera é frente x cima. Com
+        cima = (0, 1, 0), isso dá (-frente.z, 0, frente.x). Também confere que o
+        rumo 0 olha para o norte do plano (z do plano para cima = -z no mundo).
+        """
+        d = self._node(["vetoresDoOlhar"], """
+const r = [0, 0.5, 1.57, 3.14, -1.0].map(g => { const o = vetoresDoOlhar(g);
+  return {cruzado: [-o.frente.z, o.frente.x], lado: [o.lado.x, o.lado.z],
+          modulo: Math.hypot(o.frente.x, o.frente.z)}; });
+console.log(JSON.stringify({r: r, norte: vetoresDoOlhar(0).frente, leste: vetoresDoOlhar(Math.PI / 2).frente}));""")
+        for caso in d["r"]:
+            self.assertAlmostEqual(caso["lado"][0], caso["cruzado"][0], places=9)
+            self.assertAlmostEqual(caso["lado"][1], caso["cruzado"][1], places=9)
+            self.assertAlmostEqual(caso["modulo"], 1.0, places=9)
+        self.assertAlmostEqual(d["norte"]["x"], 0.0, places=9)
+        self.assertAlmostEqual(d["norte"]["z"], -1.0, places=9,
+                               msg="o rumo 0 não olha para o norte do plano")
+        self.assertAlmostEqual(d["leste"]["x"], 1.0, places=9)
+
+    def test_o_mundo_concorda_com_o_gerador_dos_panoramas(self):
+        """
+        O gerador traça a coluna u para (sin th, cos th) no plano (x, z). No
+        mundo da caminhada essa direção é a mesma passada por mundoDoPlano, e é
+        igual à direção que a malha dá a coluna. Se um dos dois lados trocar o
+        sinal sem o outro, a foto fica certa e as setas, que saem das posições,
+        apontam para o lado errado.
+        """
+        d = self._node(["mundoDoPlano", "direcaoDoRumo"], """
+const saida = [0, 0.7, 1.57, 2.4, -0.9, 3.1].map(th => {
+  const plano = {x: Math.sin(th), z: Math.cos(th)};          // o tracador
+  const mundo = mundoDoPlano(plano.x, plano.z);
+  const coluna = direcaoDoRumo(th, 0);                       // a malha
+  return {dx: mundo.x - coluna.x, dz: mundo.z - coluna.z};
+});
+console.log(JSON.stringify(saida));""")
+        for caso in d:
+            self.assertAlmostEqual(caso["dx"], 0.0, places=9)
+            self.assertAlmostEqual(caso["dz"], 0.0, places=9,
+                                   msg="a malha e a posição não trocam o sinal "
+                                       "do z juntas")
+
+    def test_tudo_o_que_depende_do_z_troca_o_sinal_junto(self):
+        """
+        Os pontos de uso, um a um: posição, volta da direção para o rumo da foto
+        (raio na direção), olhar, movimento (W para a frente, D para a direita),
+        seta do mapa e o mapa com o norte para cima.
+        """
+        a = self.andar
+        self.assertIn("c.posicao ? mundoDoPlano(c.posicao.x, c.posicao.y).z : 0),", a)
+        self.assertIn("const bruto = Math.atan2(dir.x, -dir.z) - giroDa(pt.cena);", a)
+        self.assertIn("const olhar = vetoresDoOlhar(yaw);", a)
+        self.assertIn("posicao.z + olhar.frente.z * Math.cos(pitch));", a,
+                      "a câmera não olha para onde o movimento vai")
+        self.assertIn("if (teclas['w'] || teclas['arrowup'])    "
+                      "tentativa.addScaledVector(frente, passo);", a,
+                      "o W anda para trás")
+        self.assertIn("if (teclas['d'] || teclas['arrowright']) "
+                      "tentativa.addScaledVector(lado, passo);", a,
+                      "o D anda para a esquerda")
+        self.assertIn("ctx.rotate(yaw);", a, "a seta do mapa gira ao contrário")
+        self.assertIn("minZ = -geometria.fundo; maxZ = 0;", a)
+        self.assertIn("e.tela(z.x0, -z.z1), [x2,y2] = e.tela(z.x1, -z.z0);", a,
+                      "as zonas do mapa saem de cabeça para baixo")
+        self.assertIn("e.tela(c.p[0], -c.p[5]), [x2,y2] = e.tela(c.p[3], -c.p[2]);",
+                      a, "as paredes do mapa saem de cabeça para baixo")
 
 
 class TestMinimapaClicavel(unittest.TestCase):

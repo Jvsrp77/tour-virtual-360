@@ -693,10 +693,12 @@ function giroscopio(){
 // sua direita. Um mapa fiel ao que o visitante ve tem o z para cima e o x para
 // a direita: a seta gira para a direita quando ele vira para a direita.
 //
-// A planta da caminhada e da maquete desenha o z para baixo, e la a imagem sai
-// ESPELHADA em relacao a este tour (medido num apartamento de demonstracao: a
-// porta com maçaneta troca de lado, correlacao 0,41 espelhada contra 0,16
-// normal). Por isso as duas plantas parecem invertidas de cima para baixo.
+// A caminhada tinha o problema inverso, e foi corrigida: ela mostrava a foto
+// ESPELHADA em relacao a este tour (medido com uma foto de verdade: correlacao
+// de 0,93 espelhada contra 0,30 normal), e hoje desenha o z para cima como
+// este mapa (ver mundoDoPlano em andar.html). A maquete segue com o z para
+// baixo, e so existe para imovel gerado; por isso a planta dela parece
+// invertida de cima para baixo em relacao a esta.
 
 const MINI = 176;                 // lado do desenho, em unidades logicas
 const MINI_MARGEM = 12;

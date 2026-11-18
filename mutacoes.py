@@ -1739,6 +1739,73 @@ MUT = [
      '        saida[:, :1] = 0',
      'TestCalotaComTextura.test_o_espelho_enche_o_furo_com_o_reflexo_da_borda'),
 
+    # ----------------------------- a caminhada nao mostra a foto espelhada
+
+    ('a posicao do plano nao troca o sinal do z', 'static/andar.html',
+     'return {x: x, z: -z};',
+     'return {x: x, z: z};',
+     'TestMundoDaCaminhada.test_o_mundo_concorda_com_o_gerador_dos_panoramas'),
+
+    ('a coluna da malha volta a ir para +z', 'static/andar.html',
+     'z: -Math.cos(lat) * Math.cos(rumo)};',
+     'z: Math.cos(lat) * Math.cos(rumo)};',
+     'TestMundoDaCaminhada.test_a_direita_do_centro_da_foto_fica_a_direita_da_camera'),
+
+    ('a coluna da malha espelha o x', 'static/andar.html',
+     'return {x: Math.cos(lat) * Math.sin(rumo),',
+     'return {x: -Math.cos(lat) * Math.sin(rumo),',
+     'TestMundoDaCaminhada.test_o_mundo_concorda_com_o_gerador_dos_panoramas'),
+
+    ('a direita da camera sai trocada', 'static/andar.html',
+     'lado: {x: Math.cos(rumo), z: Math.sin(rumo)}};',
+     'lado: {x: Math.cos(rumo), z: -Math.sin(rumo)}};',
+     'TestMundoDaCaminhada.test_a_direita_e_frente_vezes_cima_como_na_camera_do_three'),
+
+    ('a frente da camera sai trocada', 'static/andar.html',
+     'return {frente: {x: Math.sin(rumo), z: -Math.cos(rumo)},',
+     'return {frente: {x: Math.sin(rumo), z: Math.cos(rumo)},',
+     'TestMundoDaCaminhada.test_a_direita_e_frente_vezes_cima_como_na_camera_do_three'),
+
+    ('o W volta a andar para tras', 'static/andar.html',
+     "if (teclas['w'] || teclas['arrowup'])    tentativa.addScaledVector(frente, passo);",
+     "if (teclas['w'] || teclas['arrowup'])    tentativa.addScaledVector(frente, -passo);",
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('o D volta a andar para a esquerda', 'static/andar.html',
+     "if (teclas['d'] || teclas['arrowright']) tentativa.addScaledVector(lado, passo);",
+     "if (teclas['d'] || teclas['arrowright']) tentativa.addScaledVector(lado, -passo);",
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('a camera olha para o lado oposto ao do movimento', 'static/andar.html',
+     'posicao.z + olhar.frente.z * Math.cos(pitch));',
+     'posicao.z - olhar.frente.z * Math.cos(pitch));',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('a seta do mapa gira ao contrario', 'static/andar.html',
+     'ctx.rotate(yaw);',
+     'ctx.rotate(-yaw);',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('o raio na direcao volta a usar +z', 'static/andar.html',
+     'const bruto = Math.atan2(dir.x, -dir.z) - giroDa(pt.cena);',
+     'const bruto = Math.atan2(dir.x, dir.z) - giroDa(pt.cena);',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('a posicao dos pontos nao troca o sinal', 'static/andar.html',
+     'c.posicao ? mundoDoPlano(c.posicao.x, c.posicao.y).z : 0),',
+     'c.posicao ? c.posicao.y : 0),',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('o mapa volta com o norte para baixo', 'static/andar.html',
+     'minZ = -geometria.fundo; maxZ = 0;',
+     'minZ = 0; maxZ = geometria.fundo;',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
+    ('as zonas do mapa saem de cabeca para baixo', 'static/andar.html',
+     'e.tela(z.x0, -z.z1), [x2,y2] = e.tela(z.x1, -z.z0);',
+     'e.tela(z.x0, z.z1), [x2,y2] = e.tela(z.x1, z.z0);',
+     'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem
