@@ -1806,6 +1806,11 @@ MUT = [
      'e.tela(z.x0, z.z1), [x2,y2] = e.tela(z.x1, z.z0);',
      'TestMundoDaCaminhada.test_tudo_o_que_depende_do_z_troca_o_sinal_junto'),
 
+    ('a tira perde o vao do botao de contato', 'static/viewer.html',
+     '.menu::after{content:"";flex:0 0 200px}',
+     '.menu::after{content:"";flex:0 0 0px}',
+     'TestTiraDeAmbientesLivreDoContato.test_o_fim_da_tira_deixa_o_vao_do_botao'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem

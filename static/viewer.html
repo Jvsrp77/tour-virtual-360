@@ -52,6 +52,12 @@ const URL_VOLTAR = window.__VOLTAR__ || ('/tour/' + IMOVEL);
   .menu{position:absolute;bottom:0;left:0;right:0;z-index:10;display:flex;gap:9px;
     padding:14px 16px;overflow-x:auto;
     background:linear-gradient(transparent,rgba(0,0,0,.78) 55%)}
+  /* O botao de contato e fixo no canto e cobria a ULTIMA miniatura: medido a 1024
+     px, o botao tem 182 px mais 14 de margem, e a ultima miniatura ocupava
+     896-1008, por baixo dele. Um espacador no fim da tira (filho flex, porque o
+     padding final de um contenedor com rolagem nao e respeitado por todo
+     navegador) deixa a ultima miniatura chegar a um lugar livre. */
+  .menu::after{content:"";flex:0 0 200px}
   .amb{flex-shrink:0;width:112px;cursor:pointer;border-radius:9px;overflow:hidden;
     border:2px solid transparent;background:rgba(14,16,20,.8);transition:.15s}
   .amb:hover{border-color:rgba(255,255,255,.4)}

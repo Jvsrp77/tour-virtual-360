@@ -11036,6 +11036,27 @@ console.log(JSON.stringify(saida));""")
                       a, "as paredes do mapa saem de cabeça para baixo")
 
 
+class TestTiraDeAmbientesLivreDoContato(unittest.TestCase):
+    """
+    O botão "Falar com um corretor" não pode cobrir a última miniatura do tour.
+
+    Medido a 1024 px: o botão tem 182 px de largura mais 14 de margem à
+    direita, e a última miniatura da tira ocupava 896-1008, por baixo dele. A
+    tira rola na horizontal, então o conserto é um vão no FIM dela: quem rola até
+    o fim encontra a última miniatura num lugar livre.
+    """
+
+    def test_o_fim_da_tira_deixa_o_vao_do_botao(self):
+        with io.open(os.path.join("static", "viewer.html"),
+                     encoding="utf-8") as f:
+            html = f.read()
+        achou = re.search(r'\.menu::after\{content:"";flex:0 0 (\d+)px\}', html)
+        self.assertIsNotNone(achou, "a tira perdeu o espaçador do fim")
+        self.assertGreaterEqual(int(achou.group(1)), 196,
+                                "o vão é menor que o botão de contato (182 px "
+                                "mais 14 de margem)")
+
+
 class TestMinimapaClicavel(unittest.TestCase):
     """
     Tocar no minimapa leva até o cômodo.
