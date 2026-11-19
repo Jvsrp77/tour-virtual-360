@@ -8805,7 +8805,7 @@ class TestMisturaDeFotos(unittest.TestCase):
                       "o peso perdeu o termo de orientacao")
         self.assertIn("dot(vNormalM, normalize(v))", corpo,
                       "o peso não olha mais para que lado a superfície aponta")
-        self.assertIn("vNormalM = normalize(mat3(modelMatrix) * normal);",
+        self.assertIn("vNormalM = normalize(sinal * (mat3(modelMatrix) * normal));",
                       self.html, "a normal do mundo não chega ao sombreador")
 
     def test_superficie_que_nenhuma_foto_enxerga_fica_chapada(self):
@@ -11055,6 +11055,143 @@ class TestTiraDeAmbientesLivreDoContato(unittest.TestCase):
         self.assertGreaterEqual(int(achou.group(1)), 196,
                                 "o vão é menor que o botão de contato (182 px "
                                 "mais 14 de margem)")
+
+
+class TestMaqueteSemEspelho(unittest.TestCase):
+    """
+    A maquete gerada não pode ser o espelho do tour.
+
+    POR QUE ISTO EXISTE. No mesmo cômodo e no mesmo rumo, a foto projetada nas
+    paredes da maquete trocava de lado em relação ao tour (a maçaneta e o painel
+    de tomadas, no apartamento de demonstração), como a caminhada fazia. A planta
+    e o gerador partem de (x = leste, z = norte), de mão esquerda, e o three.js é
+    de mão direita.
+
+    Um grupo-raiz espelha o DESENHO (escala z = -1); o mundo da planta (colisão,
+    minimapa, máscaras, fotos) fica como era. Só a câmera, o mouse, o passo
+    lateral e o minimapa sabem do espelho — e é aí que um erro de sinal vira "a
+    tela anda ao contrário" sem nenhum erro no console. Os testes cobram as
+    identidades entre o mundo da planta e a tela, com o sinal -1 e com o +1 (o
+    imóvel importado, que não é espelhado, não pode mudar em nada).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.node = shutil.which("node")
+        with io.open(os.path.join("static", "maquete.html"),
+                     encoding="utf-8") as f:
+            cls.html = f.read()
+
+    def _func(self, nome):
+        # as auxiliares do espelho são de UMA linha: sem este caso, o padrão de
+        # várias linhas levaria as funções seguintes junto
+        uma = re.search(r"\n  function " + nome + r"\([^\n]*\}\n", self.html)
+        if uma:
+            return uma.group(0)
+        achou = re.search(r"\n  function " + nome + r"\(.*?\n  \}\n",
+                          self.html, re.S)
+        self.assertIsNotNone(achou, "a função %s sumiu da maquete" % nome)
+        return achou.group(0)
+
+    def _node(self, nomes, corpo):
+        if not self.node:
+            self.skipTest("node não encontrado")
+        caminho = os.path.join(_TEMP, "maquete_espelho.mjs")
+        with io.open(caminho, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(self._func(n) for n in nomes) + "\n" + corpo + "\n")
+        r = subprocess.run([self.node, caminho], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+        self.assertEqual(r.returncode, 0, r.stderr[:800])
+        return json.loads(r.stdout.strip())
+
+    def test_a_camera_ve_o_espelho_da_planta_e_o_passo_segue_a_tela(self):
+        """
+        Para os dois sinais e vários giros: a frente da câmera é a frente da
+        planta (espelhada em z); a direita DA TELA é o passo lateral que o
+        jogador pede; virar o mouse para a direita gira a câmera para a
+        direita, e a posição da câmera é a espelhada.
+        """
+        d = self._node(["posicaoDaCamera", "giroDaCamera", "passoDoGiro",
+                        "ladoNaTela", "direcao"], """
+const fwd = g => ({x: -Math.sin(g), z: -Math.cos(g)});   // rotateY(g) em (0,0,-1)
+const rgt = g => ({x: Math.cos(g), z: -Math.sin(g)});
+const M = (v, s) => ({x: v.x, z: s * v.z});
+const saida = [];
+for (const s of [-1, 1]) for (const g of [0, 0.7, 1.9, -1.2, 3.0]){
+  const gc = giroDaCamera(g, s);
+  const planta = direcao(g, 1, 0);                       // a frente na planta
+  const frente = fwd(gc), esperadaF = M(planta, s);
+  const passoD = direcao(g, 0, ladoNaTela(1, s));        // D na planta
+  const direitaTela = rgt(gc), esperadaD = M(passoD, s);
+  const k = 0.01, depois = giroDaCamera(g + passoDoGiro(5, k, s), s);
+  saida.push({s: s, g: g,
+    df: Math.hypot(frente.x - esperadaF.x, frente.z - esperadaF.z),
+    dd: Math.hypot(direitaTela.x - esperadaD.x, direitaTela.z - esperadaD.z),
+    viraDireita: depois < gc,
+    pos: posicaoDaCamera({x: 1, y: 2, z: 3}, s)});
+}
+console.log(JSON.stringify(saida));""")
+        for c in d:
+            self.assertAlmostEqual(c["df"], 0.0, places=9,
+                                   msg="s=%s giro=%s: a câmera olha para o lado "
+                                       "errado" % (c["s"], c["g"]))
+            self.assertAlmostEqual(c["dd"], 0.0, places=9,
+                                   msg="s=%s giro=%s: o D não anda para a "
+                                       "direita da tela" % (c["s"], c["g"]))
+            self.assertTrue(c["viraDireita"],
+                            "s=%s giro=%s: o mouse para a direita gira a vista "
+                            "para a esquerda" % (c["s"], c["g"]))
+            self.assertEqual(c["pos"]["z"], 3 * c["s"])
+            self.assertEqual((c["pos"]["x"], c["pos"]["y"]), (1, 2))
+
+    def test_o_minimapa_tem_o_norte_para_cima_e_o_clique_e_o_inverso(self):
+        """
+        zNaTela inverte o z da planta só quando o desenho é espelhado, e o clique
+        (doMinimapa) devolve exatamente o que o desenho usou.
+        """
+        d = self._node(["zNaTela"], """
+console.log(JSON.stringify({
+  espelhado: [0, 5, 20].map(z => zNaTela(z, 20, -1)),
+  normal: [0, 5, 20].map(z => zNaTela(z, 20, 1))}));""")
+        self.assertEqual(d["espelhado"], [20, 15, 0])
+        self.assertEqual(d["normal"], [0, 5, 20])
+        clique = self._func("doMinimapa")
+        self.assertIn("z: im.espelhado ? im.fundo - zLinha : zLinha", clique,
+                      "o clique no minimapa não desfaz a inversão do desenho")
+
+    def test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado(self):
+        """
+        O grupo-raiz, a luz, o sinal de cada tipo de imóvel e o sombreador, que
+        desfaz o espelho para as contas da foto continuarem no mundo da planta.
+        """
+        h = self.html
+        self.assertIn("const SINAL_DO_GERADO = -1;", h)
+        self.assertIn("    espelho = new THREE.Group();\n    cena.add(espelho);", h)
+        self.assertIn("    espelho.add(luzDoSol);", h,
+                      "a luz do sol não acompanha o espelho")
+        self.assertIn("    espelho.add(contraluz);", h)
+        self.assertIn("    definirEspelho(imovel, SINAL_DO_GERADO);", h)
+        self.assertIn("    definirEspelho(imovel, 1);", h,
+                      "o escaneamento real seria espelhado")
+        self.assertIn("    espelho.add(grupoObra, grupoMoveis, grupoPontos, "
+                      "grupoRotulos);\n    orbita.raio", h)
+        self.assertIn("vMundo = sinal * (modelMatrix * vec4(position, 1.0)).xyz;", h)
+        self.assertIn("vNormalM = normalize(sinal * (mat3(modelMatrix) * normal));",
+                      h, "a normal do sombreador continua espelhada")
+        self.assertIn("vec3 sinal = vec3(1.0, 1.0, ${SINAL_DO_GERADO.toFixed(1)});",
+                      h)
+
+    def test_a_visita_usa_o_espelho_na_camera_no_mouse_e_no_passo(self):
+        h = self.html
+        self.assertIn("const cp = posicaoDaCamera(pessoa.pos, sinalDoMundo());", h)
+        self.assertIn("camera.rotateY(giroDaCamera(pessoa.giro, sinalDoMundo()));", h)
+        self.assertIn("pessoa.giro += passoDoGiro(e.movementX, 0.0022, "
+                      "sinalDoMundo());", h)
+        self.assertIn("pessoa.giro += passoDoGiro(t.clientX - ux, 0.005, "
+                      "sinalDoMundo());", h)
+        self.assertIn("    lado = ladoNaTela(lado, sinalDoMundo());", h)
+        self.assertIn("const ang = Math.atan2(sm * v.z, v.x);", h,
+                      "a seta do minimapa gira ao contrário")
 
 
 class TestMinimapaClicavel(unittest.TestCase):

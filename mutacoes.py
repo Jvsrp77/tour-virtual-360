@@ -1811,6 +1811,73 @@ MUT = [
      '.menu::after{content:"";flex:0 0 0px}',
      'TestTiraDeAmbientesLivreDoContato.test_o_fim_da_tira_deixa_o_vao_do_botao'),
 
+    # ----------------------------- a maquete nao e o espelho do tour
+
+    ('o gerado deixa de ser espelhado', 'static/maquete.html',
+     'const SINAL_DO_GERADO = -1;',
+     'const SINAL_DO_GERADO = 1;',
+     'TestMaqueteSemEspelho.test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado'),
+
+    ('a camera nao vira o rumo espelhado', 'static/maquete.html',
+     'function giroDaCamera(giro, s){ return s < 0 ? Math.PI - giro : giro; }',
+     'function giroDaCamera(giro, s){ return giro; }',
+     'TestMaqueteSemEspelho.test_a_camera_ve_o_espelho_da_planta_e_o_passo_segue_a_tela'),
+
+    ('a camera nao vai para a posicao espelhada', 'static/maquete.html',
+     'function posicaoDaCamera(pos, s){ return {x: pos.x, y: pos.y, z: s * pos.z}; }',
+     'function posicaoDaCamera(pos, s){ return {x: pos.x, y: pos.y, z: pos.z}; }',
+     'TestMaqueteSemEspelho.test_a_camera_ve_o_espelho_da_planta_e_o_passo_segue_a_tela'),
+
+    ('o mouse gira a vista para o lado errado', 'static/maquete.html',
+     'function passoDoGiro(dx, k, s){ return -s * dx * k; }',
+     'function passoDoGiro(dx, k, s){ return s * dx * k; }',
+     'TestMaqueteSemEspelho.test_a_camera_ve_o_espelho_da_planta_e_o_passo_segue_a_tela'),
+
+    ('o passo lateral anda para o lado errado', 'static/maquete.html',
+     'function ladoNaTela(lado, s){ return lado * s; }',
+     'function ladoNaTela(lado, s){ return lado; }',
+     'TestMaqueteSemEspelho.test_a_camera_ve_o_espelho_da_planta_e_o_passo_segue_a_tela'),
+
+    ('o minimapa volta com o norte para baixo', 'static/maquete.html',
+     'function zNaTela(z, fundo, s){ return s < 0 ? fundo - z : z; }',
+     'function zNaTela(z, fundo, s){ return z; }',
+     'TestMaqueteSemEspelho.test_o_minimapa_tem_o_norte_para_cima_e_o_clique_e_o_inverso'),
+
+    ('o clique no minimapa nao desfaz a inversao', 'static/maquete.html',
+     'z: im.espelhado ? im.fundo - zLinha : zLinha};',
+     'z: zLinha};',
+     'TestMaqueteSemEspelho.test_o_minimapa_tem_o_norte_para_cima_e_o_clique_e_o_inverso'),
+
+    ('a seta do minimapa gira ao contrario', 'static/maquete.html',
+     'const ang = Math.atan2(sm * v.z, v.x);',
+     'const ang = Math.atan2(v.z, v.x);',
+     'TestMaqueteSemEspelho.test_a_visita_usa_o_espelho_na_camera_no_mouse_e_no_passo'),
+
+    ('o sombreador nao desfaz o espelho da posicao', 'static/maquete.html',
+     'vMundo = sinal * (modelMatrix * vec4(position, 1.0)).xyz;',
+     'vMundo = (modelMatrix * vec4(position, 1.0)).xyz;',
+     'TestMaqueteSemEspelho.test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado'),
+
+    ('o sombreador nao desfaz o espelho da normal', 'static/maquete.html',
+     'vNormalM = normalize(sinal * (mat3(modelMatrix) * normal));',
+     'vNormalM = normalize(mat3(modelMatrix) * normal);',
+     'TestMaqueteSemEspelho.test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado'),
+
+    ('a luz do sol fica de fora do espelho', 'static/maquete.html',
+     '    espelho.add(luzDoSol);',
+     '    cena.add(luzDoSol);',
+     'TestMaqueteSemEspelho.test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado'),
+
+    ('o escaneamento real passa a ser espelhado', 'static/maquete.html',
+     '    definirEspelho(imovel, 1);',
+     '    definirEspelho(imovel, SINAL_DO_GERADO);',
+     'TestMaqueteSemEspelho.test_o_espelho_vale_para_o_gerado_e_nao_para_o_importado'),
+
+    ('a visita ignora o giro espelhado da camera', 'static/maquete.html',
+     'camera.rotateY(giroDaCamera(pessoa.giro, sinalDoMundo()));',
+     'camera.rotateY(pessoa.giro);',
+     'TestMaqueteSemEspelho.test_a_visita_usa_o_espelho_na_camera_no_mouse_e_no_passo'),
+
     # ------------------------------------- o minimapa leva ate o comodo
 
     # o canvas pode ser desenhado em tamanho diferente dos seus pixels; sem

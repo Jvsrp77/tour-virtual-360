@@ -331,6 +331,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
   const tela = $("tela");
   let cena, camera, renderizador, grupoObra, grupoMoveis, grupoPontos, grupoRotulos;
+  let espelho = null;          // grupo-raiz: espelha o desenho (ver SINAL_DO_GERADO)
   let imoveis = [], atual = 0, selecionado = null, paredes = [], pisos = [];
   let pinos = [], medindo = false, medidas = [], grupoTrena = null;
   let cameraOrto = null, emPlanta = false, malhaImportada = null;
@@ -385,16 +386,18 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     }
     renderizador.setPixelRatio(Math.min(devicePixelRatio, 2));
     cena = new THREE.Scene();
+    espelho = new THREE.Group();
+    cena.add(espelho);
     camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
 
     cena.add(new THREE.AmbientLight(0xffffff, 0.72));
     // a luz principal deixa de ser fixa: ela segue a hora escolhida
     luzDoSol = new THREE.DirectionalLight(0xffffff, 0.62);
     luzDoSol.position.set(9, 16, 7);
-    cena.add(luzDoSol);
+    espelho.add(luzDoSol);
     const contraluz = new THREE.DirectionalLight(0xffffff, 0.22);
     contraluz.position.set(-8, 7, -9);
-    cena.add(contraluz);
+    espelho.add(contraluz);
 
     redimensionar();
     addEventListener("resize", redimensionar);
@@ -875,8 +878,9 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   // recolhem — prometer metragem por comodo num escaneamento seria inventar.
   async function montarImportado(imovel){
     [grupoObra, grupoMoveis, grupoPontos, grupoRotulos].forEach(g => {
-      if (g) cena.remove(g);
+      if (g) espelho.remove(g);
     });
+    definirEspelho(imovel, 1);
     grupoObra = new THREE.Group(); grupoMoveis = new THREE.Group();
     grupoPontos = new THREE.Group(); grupoRotulos = new THREE.Group();
     paredes = []; pisos = []; pinos = []; solidos = []; selecionado = null;
@@ -898,7 +902,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     lido.conjunto.position.set(-meio.x, -caixa.min.y, -meio.z);
     malhaImportada = lido.conjunto;
     grupoObra.add(lido.conjunto);
-    cena.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
+    espelho.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
 
     const tam = caixa.getSize(new THREE.Vector3());
     orbita.raio = Math.max(tam.x, tam.z, 3) * 1.4;
@@ -909,8 +913,9 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
   function montar(imovel){
     [grupoObra, grupoMoveis, grupoPontos, grupoRotulos].forEach(g => {
-      if (g) cena.remove(g);
+      if (g) espelho.remove(g);
     });
+    definirEspelho(imovel, SINAL_DO_GERADO);
     grupoObra = new THREE.Group();
     grupoMoveis = new THREE.Group();
     grupoPontos = new THREE.Group();
@@ -1047,7 +1052,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
       grupoPontos.add(haste, bola);
     });
 
-    cena.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
+    espelho.add(grupoObra, grupoMoveis, grupoPontos, grupoRotulos);
     orbita.raio = Math.max(L, F) * 1.35;
     orbita.alvo.set(0, 0.9, 0);
     // as fotos do proprio imovel, para a chave de acabamento ter o que vestir
@@ -1138,12 +1143,31 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   // video para que a troca entre elas fosse instantanea. O que muda e que o
   // sombreador le quatro em vez de uma.
 
+  // ------------------------------------- A LATERALIDADE DA MAQUETE
+  //
+  // A maquete gerada era o ESPELHO do tour: no mesmo comodo e no mesmo rumo, a
+  // foto projetada nas paredes trocava de lado (medido no apartamento de
+  // demonstracao: a maçaneta da porta e o painel de tomadas). A planta e o gerador
+  // partem de (x = leste, z = norte), que e de mao esquerda, e o three.js e de
+  // mao direita; o Pannellum nao sofre disso porque so le a imagem.
+  //
+  // Em vez de inverter as coordenadas de janela, escada e movel um a um (e o
+  // sentido dos lados "norte", "costas do sofa"), um grupo-raiz espelha o
+  // DESENHO: escala z = -1 em tudo o que e geometria e luz. O mundo da planta
+  // (colisao, minimapa, mascaras de oclusao, posicao das fotos) fica como era, e so
+  // a camera, o mouse, o passo lateral e o minimapa sabem do espelho. O imovel
+  // importado, um escaneamento real que ja e natural, fica em +1.
+  const SINAL_DO_GERADO = -1;
+
   const VERTICE_FOTO = `
     varying vec3 vMundo;
     varying vec3 vNormalM;
     void main(){
-      vMundo = (modelMatrix * vec4(position, 1.0)).xyz;
-      vNormalM = normalize(mat3(modelMatrix) * normal);
+      // o desenho esta espelhado em z; a foto e as contas do sombreador moram no
+      // mundo da PLANTA, entao o espelho e desfeito aqui
+      vec3 sinal = vec3(1.0, 1.0, ${SINAL_DO_GERADO.toFixed(1)});
+      vMundo = sinal * (modelMatrix * vec4(position, 1.0)).xyz;
+      vNormalM = normalize(sinal * (mat3(modelMatrix) * normal));
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }`;
 
@@ -1800,6 +1824,17 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   // invisivel na tela — quando ele falha, o que se ve e uma casa chapada, que
   // e identica a "ainda nao vestiu" e a "nao ha foto". Sem uma forma de
   // perguntar, cada investigacao dessas comeca do zero.
+  // Para comparar a visao a pe com o tour no mesmo rumo (o rumo do tour e
+  // giro + 180 graus) sem depender do mouse, que o painel embutido nao tem.
+  window.__pessoa = (giro, x, z) => {
+    if (typeof giro === "number") pessoa.giro = giro;
+    if (typeof x === "number" && typeof z === "number"){
+      pessoa.pos.x = x; pessoa.pos.z = z;
+    }
+    return {giro: pessoa.giro, x: pessoa.pos.x, z: pessoa.pos.z,
+            sinal: sinalDoMundo()};
+  };
+
   window.__fotos = () => ({
     conhecidas: fotos.length,
     vivas: fotos.filter(f => f.tex).length,
@@ -1996,7 +2031,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
     document.addEventListener("mousemove", e => {
       if (document.pointerLockElement !== tela || !emPessoa) return;
-      pessoa.giro -= e.movementX * 0.0022;
+      pessoa.giro += passoDoGiro(e.movementX, 0.0022, sinalDoMundo());
       pessoa.inclinacao = Math.max(-1.2, Math.min(1.2,
         pessoa.inclinacao - e.movementY * 0.0022));
     });
@@ -2030,7 +2065,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
       if (emPessoa){
         // de dentro o arraste vira a cabeca; a inclinacao para antes do teto e
         // do chao, senao a vista capota
-        pessoa.giro -= (t.clientX - ux) * 0.005;
+        pessoa.giro += passoDoGiro(t.clientX - ux, 0.005, sinalDoMundo());
         pessoa.inclinacao = Math.max(-1.2, Math.min(1.2,
           pessoa.inclinacao - (t.clientY - uy) * 0.004));
       } else {
@@ -2206,9 +2241,10 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
 
     if (emPessoa){
       andar(dt);
-      camera.position.copy(pessoa.pos);
+      const cp = posicaoDaCamera(pessoa.pos, sinalDoMundo());
+      camera.position.set(cp.x, cp.y, cp.z);
       camera.rotation.set(0, 0, 0);
-      camera.rotateY(pessoa.giro);
+      camera.rotateY(giroDaCamera(pessoa.giro, sinalDoMundo()));
       camera.rotateX(pessoa.inclinacao);
       atualizarRegua();
       renderizador.render(cena, camera);
@@ -2612,6 +2648,28 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
   // versao usava (+sen, +cos) e o W andava exatamente para TRAS — produto
   // escalar -1 com a direcao do olhar, em todos os angulos. O lado estava
   // certo: a direita e (cos, -sen).
+  // O estado do espelho, no grupo-raiz E no imovel (o minimapa le do imovel).
+  function definirEspelho(imovel, s){
+    espelho.scale.z = s;
+    imovel.espelhado = s < 0;
+  }
+
+  function sinalDoMundo(){ return espelho ? espelho.scale.z : 1; }
+
+  // Camera de quem anda. Com o desenho espelhado em z, a camera vai para a
+  // posicao ESPELHADA e vira o rumo espelhado: o que sai e a imagem natural.
+  function posicaoDaCamera(pos, s){ return {x: pos.x, y: pos.y, z: s * pos.z}; }
+  function giroDaCamera(giro, s){ return s < 0 ? Math.PI - giro : giro; }
+
+  // O mouse e o passo lateral sao da TELA: com o desenho espelhado, "para a
+  // direita" e o outro lado do mundo da planta.
+  function passoDoGiro(dx, k, s){ return -s * dx * k; }
+  function ladoNaTela(lado, s){ return lado * s; }
+
+  // Linha do minimapa para um z da planta: com o desenho espelhado o norte fica
+  // para cima, como no mini-mapa do tour e na caminhada.
+  function zNaTela(z, fundo, s){ return s < 0 ? fundo - z : z; }
+
   function direcao(giro, frente, lado){
     const sen = Math.sin(giro), cos = Math.cos(giro);
     return {x: -sen * frente + cos * lado,
@@ -2642,6 +2700,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     // o manche entra ANALOGICO: polegar pela metade anda pela metade
     frente += manche.frente;
     lado += manche.lado;
+    lado = ladoNaTela(lado, sinalDoMundo());
     if (!frente && !lado){ acomodarOlho(dt); return; }
 
     // Shift corre. Quem esta vendo um imovel anda devagar para olhar, mas
@@ -2892,7 +2951,8 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     const L = tela2.width, A = tela2.height, margem = 6;
     const esc = Math.min((L - margem * 2) / im.larg, (A - margem * 2) / im.fundo);
     const ox = (L - im.larg * esc) / 2, oz = (A - im.fundo * esc) / 2;
-    const px = v => ox + v * esc, pz = v => oz + v * esc;
+    const sm = im.espelhado ? -1 : 1;
+    const px = v => ox + v * esc, pz = v => oz + zNaTela(v, im.fundo, sm) * esc;
 
     const estilo = getComputedStyle(document.documentElement);
     const tinta = estilo.getPropertyValue("--ink").trim() || "#171a20";
@@ -2909,11 +2969,12 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     ctx.fillStyle = linha;
     im.zonas.forEach(z => {
       ctx.globalAlpha = 0.35;
-      ctx.fillRect(px(z.x0), pz(z.z0), (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
+      const topo = Math.min(pz(z.z0), pz(z.z1));
+      ctx.fillRect(px(z.x0), topo, (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
       ctx.globalAlpha = 1;
       ctx.strokeStyle = linha;
       ctx.lineWidth = 1;
-      ctx.strokeRect(px(z.x0), pz(z.z0), (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
+      ctx.strokeRect(px(z.x0), topo, (z.x1 - z.x0) * esc, (z.z1 - z.z0) * esc);
     });
 
     // as paredes, em tinta cheia
@@ -2921,7 +2982,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     ctx.globalAlpha = 0.55;
     im.caixas.forEach(c => {
       if (c.m !== "parede") return;
-      ctx.fillRect(px(c.p[0]), pz(c.p[2]),
+      ctx.fillRect(px(c.p[0]), Math.min(pz(c.p[2]), pz(c.p[5])),
                    Math.max(1, (c.p[3] - c.p[0]) * esc),
                    Math.max(1, (c.p[5] - c.p[2]) * esc));
     });
@@ -2941,7 +3002,7 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     // quem anda: um triangulo apontando para onde se olha
     const x = px(pessoa.pos.x + im.larg / 2), z = pz(pessoa.pos.z + im.fundo / 2);
     const v = direcao(pessoa.giro, 1, 0);
-    const ang = Math.atan2(v.z, v.x);
+    const ang = Math.atan2(sm * v.z, v.x);
     ctx.fillStyle = acento;
     ctx.beginPath();
     ctx.moveTo(x + Math.cos(ang) * 7, z + Math.sin(ang) * 7);
@@ -2979,7 +3040,8 @@ const URL_ANDAR_PG = window.__ANDAR__ || ('/andar/' + IMOVEL);
     // o canvas pode estar desenhado maior ou menor que seus pixels
     const cx2 = (ev.clientX - r.left) * (L / r.width);
     const cz2 = (ev.clientY - r.top) * (A / r.height);
-    return {x: (cx2 - ox) / esc, z: (cz2 - oz) / esc};
+    const zLinha = (cz2 - oz) / esc;
+    return {x: (cx2 - ox) / esc, z: im.espelhado ? im.fundo - zLinha : zLinha};
   }
 
   function zonaNoPonto(im, x, z){
